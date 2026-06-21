@@ -1,0 +1,44 @@
+# Dual backend configuration for single-GPU failover testing
+# Uses Ollama directly (fast) + delay proxy (slow tier) on the same GPU
+#
+# Start Ollama:
+#   ollama pull qwen2.5:0.5b
+#   ollama serve  (or launch from Start Menu)
+#
+# Start delay proxy:
+#   UPSTREAM_URL=http://localhost:11434 uvicorn delay_proxy:app --host 0.0.0.0 --port 9002
+#
+# Start Tensormux:
+#   MERIDIAN_CONFIG=configs/dual_backend.yaml uvicorn meridian.api.main:app --host 0.0.0.0 --port 8080
+
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+  strategy: "least_inflight"
+
+health:
+  interval_s: 5
+  timeout_s: 2
+  fail_threshold: 2
+  success_threshold: 1
+
+logging:
+  level: "INFO"
+  jsonl_path: "./meridian_requests.jsonl"
+
+backends:
+  - name: "ollama-fast"
+    url: "http://localhost:11434"
+    engine: "ollama"
+    model: "qwen2.5:0.5b"
+    weight: 1
+    tags: ["fast"]
+    health_endpoint: "/v1/models"
+
+  - name: "ollama-slow-tier"
+    url: "http://localhost:9002"
+    engine: "ollama"
+    model: "qwen2.5:0.5b"
+    weight: 1
+    tags: ["cheap"]
+    health_endpoint: "/v1/models"
