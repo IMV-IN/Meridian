@@ -8,7 +8,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncIterator, Dict, Optional, Set
+from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, Set
 
 import httpx
 from fastapi import FastAPI, Request
@@ -137,7 +137,7 @@ async def shutdown_app() -> None:
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_app()
     yield
     await shutdown_app()
