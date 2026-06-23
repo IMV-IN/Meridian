@@ -267,8 +267,6 @@ Client → Meridian Gateway (FastAPI)
          → Backend N
 ```
 
-See `diagrams/` for detailed architecture and flow diagrams.
-
 ## License
 
 MIT — see [LICENSE](LICENSE) for details.
