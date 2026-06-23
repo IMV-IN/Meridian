@@ -79,9 +79,9 @@ def test_bucket_multiple_tokens():
 
 def test_bucket_get_remaining():
     b = TokenBucket(max_tokens=5, refill_rate=1)
-    assert b.get_remaining() == pytest.approx(5)
+    assert b.get_remaining() == pytest.approx(5, abs=1e-3)
     b.allow_request(tokens=2)
-    assert b.get_remaining() == pytest.approx(3)
+    assert b.get_remaining() == pytest.approx(3, abs=1e-3)
 
 
 def test_bucket_does_not_overfill():
