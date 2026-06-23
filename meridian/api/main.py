@@ -1,5 +1,4 @@
 """FastAPI application — Meridian inference gateway."""
-
 from __future__ import annotations
 
 import logging
@@ -30,6 +29,7 @@ from meridian.router.strategies import RequestContext, RoutingStrategy, create_s
 from meridian.router.token_estimator import estimate_prompt_tokens, extract_max_tokens
 from meridian.telemetry import JsonTelemetryAdapter, TelemetryAdapter, TelemetryPoller
 from meridian.util.helpers import generate_request_id, now_ms
+from meridian.api.ratelimitter import TokenBucket
 
 logger = logging.getLogger("meridian")
 
@@ -40,6 +40,9 @@ _health_checker: Optional[HealthChecker] = None
 _telemetry_poller: Optional[TelemetryPoller] = None
 _request_logger: Optional[RequestLogger] = None
 _config: Optional[MeridianConfig] = None
+
+# rate limiting
+_rate_limit: Dict[str, TokenBucket] = {}
 
 # In-memory ring buffer for recent requests (serves the UI dashboard)
 _recent_requests: deque[Dict[str, Any]] = deque(maxlen=100)
@@ -183,6 +186,30 @@ def _select_backend(
 async def chat_completions(request: Request) -> Response:
     assert _registry is not None and _health_checker is not None
     assert _request_logger is not None
+
+    # Using x-forwarded-for or x-real-ip headers first (best practise when behind a proxy)
+    ip_address = request.headers.get("x-forwarded-for")
+    if ip_address:
+        ip_address = ip_address.split(",")[0].strip()
+    else:
+        ip_address = request.headers.get("x-real-ip")
+
+    if not ip_address:
+        ip_address = request.client.host if request.client else "127.0.0.1"
+
+    # check for ip in the bucket
+    if _config is not None and _config.rate_limit.enabled:
+        cfg = _config.rate_limit
+        bucket = _rate_limit.get(ip_address)
+
+        if bucket is None:
+            bucket = TokenBucket(max_tokens=cfg.token_capacity, refill_rate=cfg.token_refill_rate)
+            _rate_limit[ip_address] = bucket
+
+        if not bucket.allow_request():
+            resp = _error_json("Rate Limit Exceeded", f"Retry after {1 / bucket.refill_rate} seconds", 429)
+            resp.headers["Retry-After"] = str(1 / bucket.refill_rate)
+            return resp
 
     request_id = generate_request_id()
     start = now_ms()

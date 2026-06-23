@@ -1,9 +1,5 @@
 # Meridian
 
-**OpenAI-compatible inference gateway** with routing, health-based failover, and observability.
-
-## What This Is
-
 Meridian is an **L7 inference gateway** that sits between your applications and multiple inference backends (vLLM, SGLang, TensorRT-LLM, or any OpenAI-compatible server). It provides:
 
 - A single API endpoint that routes to the best available backend
@@ -22,6 +18,18 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **Prometheus metrics** — request counters, latency histograms, backend health gauges
 - **JSONL request logs** — every request logged with backend, latency, status
 - **Live dashboard** — real-time UI showing backend health, stats, and recent requests
+- **Rate limiting** — basic token bucket for now, will be upgraded to support org, team
+
+### Coming soon
+
+- **Multi-provider routing** — OpenAI, Anthropic, Google + self-hosted backends through one endpoint
+- **Provider-specific cost tracking** — per-provider token pricing, per-team attribution
+- **Semantic caching** — cache similar prompts at the gateway level
+- **PII detection & redaction** — jurisdiction-specific entity packs
+- **RBAC** — org → team → user hierarchy with budget caps
+- **Tamper-evident audit logs** — Merkle hash chain, configurable retention
+- **Batch inference** — async endpoint for bulk processing
+- **On-prem deployment** — OCI containers + Helm charts, air-gapped mode
 
 ## 10-Minute Quickstart
 
@@ -242,7 +250,7 @@ Pre-built configs are available in the `configs/` directory:
 ### Response Headers
 
 Every proxied response includes:
-- `x-request-id` — unique request ID (`tmux-...`)
+- `x-request-id` — unique request ID (`mrdn-...`)
 - `x-meridian-backend` — name of the backend that served the request
 
 ## Architecture
