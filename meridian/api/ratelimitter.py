@@ -1,19 +1,20 @@
-import time
 import threading
+import time
+
 
 class TokenBucket:
     '''
     TokenBucket Rate Limiter
 
-    Each bucket starts full at 'max_tokens' and refils at the 'refill_rate' tokens every 
+    Each bucket starts full at 'max_tokens' and refils at the 'refill_rate' tokens every
     second.
     '''
 
     def __init__(self, max_tokens:float, refill_rate: float):
-        
+
         assert max_tokens>0, "max_tokens must be positive"
         assert refill_rate>0, "refill_rate must be positive"
-    
+
         self.max_tokens = max_tokens
         self.refill_rate = refill_rate
 
@@ -26,7 +27,7 @@ class TokenBucket:
         elapsed = now - self.refilled_rate
         if(elapsed>0):
             self.tokens = min(
-                self.max_tokens, 
+                self.max_tokens,
                 self.tokens + elapsed * self.refill_rate
             )
 
@@ -49,8 +50,8 @@ class TokenBucket:
         with self.lock:
             self._refill()
             return self.refilled_rate
-        
-                
 
 
-        
+
+
+

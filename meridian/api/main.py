@@ -14,6 +14,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from prometheus_client import generate_latest
 
+from meridian.api.ratelimitter import TokenBucket
 from meridian.config.models import MeridianConfig
 from meridian.health.checker import HealthChecker
 from meridian.metrics.collectors import (
@@ -29,7 +30,6 @@ from meridian.router.strategies import RequestContext, RoutingStrategy, create_s
 from meridian.router.token_estimator import estimate_prompt_tokens, extract_max_tokens
 from meridian.telemetry import JsonTelemetryAdapter, TelemetryAdapter, TelemetryPoller
 from meridian.util.helpers import generate_request_id, now_ms
-from meridian.api.ratelimitter import TokenBucket
 
 logger = logging.getLogger("meridian")
 
@@ -207,9 +207,9 @@ async def chat_completions(request: Request) -> Response:
             _rate_limit[ip_address] = bucket
 
         if not bucket.allow_request():
-            resp = _error_json("Rate Limit Exceeded", f"Retry after {1 / bucket.refill_rate} seconds", 429)
-            resp.headers["Retry-After"] = str(1 / bucket.refill_rate)
-            return resp
+            error_resp = _error_json("Rate Limit Exceeded", f"Retry after {1 / bucket.refill_rate} seconds", 429)
+            error_resp.headers["Retry-After"] = str(1 / bucket.refill_rate)
+            return error_resp
 
     request_id = generate_request_id()
     start = now_ms()
