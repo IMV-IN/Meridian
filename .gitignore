@@ -9,6 +9,7 @@ build/
 
 # Tool caches
 .mypy_cache/
+.understand-anything/
 .pytest_cache/
 .ruff_cache/
 
@@ -19,11 +20,14 @@ build/
 # Claude Code
 .claude/
 
-# Tensormux runtime
-tensormux_requests.jsonl
+# Meridian runtime
+meridian_requests.jsonl
 *.jsonl
 
 # OS
 .DS_Store
 Thumbs.db
 nul
+
+# Under dev
+UNDERSTANDING.md

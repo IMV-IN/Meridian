@@ -1,4 +1,4 @@
-# Mock demo configuration for Tensormux
+# Mock demo configuration for Meridian
 # Uses the mock backends from docker-compose.yml (no GPU required)
 # Usage: docker compose up --build
 

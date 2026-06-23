@@ -1,4 +1,4 @@
-"""Integration tests for the Tensormux API — M1 through M5 validation.
+"""Integration tests for the Meridian API — end-to-end validation.
 
 Uses httpx ASGITransport to test the full proxy path through a real mock backend.
 """

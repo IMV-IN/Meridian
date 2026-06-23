@@ -8,7 +8,7 @@
 # Start delay proxy:
 #   UPSTREAM_URL=http://localhost:11434 uvicorn delay_proxy:app --host 0.0.0.0 --port 9002
 #
-# Start Tensormux:
+# Start Meridian:
 #   MERIDIAN_CONFIG=configs/dual_backend.yaml uvicorn meridian.api.main:app --host 0.0.0.0 --port 8080
 
 gateway:

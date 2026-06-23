@@ -1,4 +1,4 @@
-"""Mock OpenAI-compatible backend for testing Tensormux.
+"""Mock OpenAI-compatible backend for testing Meridian.
 
 Supports non-streaming and streaming responses with configurable latency.
 """

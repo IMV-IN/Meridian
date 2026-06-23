@@ -9,7 +9,7 @@ Polls a backend URL and expects a JSON body shaped like::
     }
 
 Backends exposing different shapes can be wrapped in a tiny adapter
-subclass; the contract is intentionally fixed for v0.2.1.
+subclass; the contract is intentionally fixed for v0.1.0.
 """
 
 from __future__ import annotations

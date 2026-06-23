@@ -21,7 +21,7 @@ class RequestContext:
 
     prompt_tokens: int
     max_tokens: int
-    cost: float
+    cost: float # (prompt_tokens * prefill_weight) + (max_tokens * decode_weight)
 
 
 class RoutingStrategy(ABC):

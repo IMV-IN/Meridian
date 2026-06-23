@@ -1,11 +1,11 @@
-# Single GPU backend configuration for Tensormux
+# Single GPU backend configuration for Meridian
 # Requires Ollama running on localhost:11434 with qwen2.5:0.5b
 #
 # Start Ollama:
 #   ollama pull qwen2.5:0.5b
 #   ollama serve  (or launch from Start Menu)
 #
-# Start Tensormux:
+# Start Meridian:
 #   MERIDIAN_CONFIG=configs/local_gpu.yaml uvicorn meridian.api.main:app --host 0.0.0.0 --port 8080
 
 gateway:
