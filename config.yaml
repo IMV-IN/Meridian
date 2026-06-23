@@ -13,6 +13,11 @@ logging:
   level: "INFO"
   jsonl_path: "./meridian_requests.jsonl"
 
+rate_limit:
+  enabled : true
+  token_capacity : 1
+  token_refill_rate : 1
+
 backends:
   - name: "fast"
     url: "http://backend-fast:9001"

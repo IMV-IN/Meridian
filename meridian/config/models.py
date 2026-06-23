@@ -1,4 +1,4 @@
-"""Pydantic configuration models for Tensormux."""
+"""Pydantic configuration models for Meridian."""
 
 from __future__ import annotations
 
@@ -62,12 +62,17 @@ class BackendConfig(BaseModel):
     health_endpoint: str = "/v1/models"
     telemetry: Optional[BackendTelemetryConfig] = None
 
+class RateLimitConfig(BaseModel):
+    enabled : bool = Field(default=False)
+    token_capacity : float = Field(default=1,gt=0)
+    token_refill_rate : float = Field(default=1,gt=0)
 
 class MeridianConfig(BaseModel):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     backends: List[BackendConfig] = Field(default_factory=list)
+    rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:
