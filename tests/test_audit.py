@@ -23,7 +23,6 @@ from meridian.audit.signer import (
 )
 from meridian.config.models import AuditBusConfig
 
-
 # ---------------------------------------------------------------------------
 # Hash Chain
 # ---------------------------------------------------------------------------
