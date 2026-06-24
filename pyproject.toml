@@ -17,6 +17,9 @@ dependencies = [
     "pydantic-settings",
     "pyyaml",
     "prometheus-client",
+    "aiokafka",
+    "cryptography",
+    "boto3",
 ]
 
 [project.optional-dependencies]

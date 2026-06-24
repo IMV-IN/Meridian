@@ -28,3 +28,25 @@ def test_backend_defaults():
     assert bc.weight == 1
     assert bc.health_endpoint == "/v1/models"
     assert bc.tags == []
+
+
+def test_audit_bus_defaults():
+    cfg = MeridianConfig()
+    assert cfg.audit_bus.enabled is False
+    assert cfg.audit_bus.bootstrap_servers == "localhost:9092"
+    assert cfg.audit_bus.topic == "meridian-audit-logs"
+
+
+def test_audit_bus_from_dict():
+    cfg = MeridianConfig.from_dict({
+        "audit_bus": {
+            "enabled": True,
+            "bootstrap_servers": "redpanda:9092",
+            "topic": "custom-topic",
+            "client_id": "my-gateway",
+        },
+    })
+    assert cfg.audit_bus.enabled is True
+    assert cfg.audit_bus.bootstrap_servers == "redpanda:9092"
+    assert cfg.audit_bus.topic == "custom-topic"
+    assert cfg.audit_bus.client_id == "my-gateway"
