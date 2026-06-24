@@ -42,22 +42,22 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 
 ```bash
 # Pull the latest published image
-docker pull krishom70/meridian:latest
+docker pull lothnic0801/meridian:latest
 
 # Run with your own config (replace ./config.yaml with your file)
 docker run --rm -p 8080:8080 \
   -v "$(pwd)/config.yaml:/app/config.yaml:ro" \
   -e meridian_CONFIG=/app/config.yaml \
-  krishom70/meridian:latest
+  lothnic0801/meridian:latest
 ```
 
 Images are published for `linux/amd64` and `linux/arm64`. Tags: `latest` and per-release `vX.Y.Z`.
-Mirror on GHCR: `ghcr.io/krxgu/meridian:latest`.
+Mirror on GHCR: `ghcr.io/imv-in/meridian:latest`.
 
 ### Option B — Compose demo (gateway + 2 mock backends)
 
 ```bash
-git clone https://github.com/KrxGu/Meridian.git && cd Meridian
+git clone https://github.com/IMV-IN/Meridian.git && cd Meridian
 docker compose up --build
 ```
 
