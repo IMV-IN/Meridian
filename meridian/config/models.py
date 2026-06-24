@@ -63,9 +63,18 @@ class BackendConfig(BaseModel):
     telemetry: Optional[BackendTelemetryConfig] = None
 
 class RateLimitConfig(BaseModel):
-    enabled : bool = Field(default=False)
-    token_capacity : float = Field(default=1,gt=0)
-    token_refill_rate : float = Field(default=1,gt=0)
+    enabled: bool = Field(default=False)
+    token_capacity: float = Field(default=1, gt=0)
+    token_refill_rate: float = Field(default=1, gt=0)
+
+
+class AuditBusConfig(BaseModel):
+    """Configuration for the async audit event bus (Kafka/Redpanda)."""
+
+    enabled: bool = Field(default=False)
+    bootstrap_servers: str = "localhost:9092"
+    topic: str = "meridian-audit-logs"
+    client_id: str = "meridian-gateway"
 
 class MeridianConfig(BaseModel):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
@@ -73,6 +82,7 @@ class MeridianConfig(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
     backends: List[BackendConfig] = Field(default_factory=list)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
+    audit_bus: AuditBusConfig = Field(default_factory=AuditBusConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:

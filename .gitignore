@@ -24,11 +24,14 @@ build/
 meridian_requests.jsonl
 *.jsonl
 
+# Audit signing keys — NEVER commit the private key
+audit_keys/
+
 # OS
 .DS_Store
 Thumbs.db
 nul
 
 # Under dev
-UNDERSTANDING.md
+docs/
 diagrams/

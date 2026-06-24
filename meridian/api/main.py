@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from prometheus_client import generate_latest
 
 from meridian.api.ratelimitter import TokenBucket
+from meridian.audit.publisher import AuditEvent, AuditEventPublisher
 from meridian.config.models import MeridianConfig
 from meridian.health.checker import HealthChecker
 from meridian.metrics.collectors import (
@@ -39,6 +40,7 @@ _strategy: Optional[RoutingStrategy] = None
 _health_checker: Optional[HealthChecker] = None
 _telemetry_poller: Optional[TelemetryPoller] = None
 _request_logger: Optional[RequestLogger] = None
+_audit_publisher: Optional[AuditEventPublisher] = None
 _config: Optional[MeridianConfig] = None
 
 # rate limiting
@@ -73,7 +75,7 @@ def _load_config() -> MeridianConfig:
 
 async def init_app(config: Optional[MeridianConfig] = None, start_health: bool = True) -> None:
     """Initialize app state. Called by lifespan or directly in tests."""
-    global _registry, _strategy, _health_checker, _telemetry_poller, _request_logger, _config
+    global _registry, _strategy, _health_checker, _telemetry_poller, _request_logger, _audit_publisher, _config
 
     _config = config or _load_config()
 
@@ -127,6 +129,10 @@ async def init_app(config: Optional[MeridianConfig] = None, start_health: bool =
 
     _request_logger = RequestLogger(_config.logging.jsonl_path)
 
+    # Audit event publisher (fire-and-forget to Redpanda/Kafka).
+    _audit_publisher = AuditEventPublisher(_config.audit_bus)
+    await _audit_publisher.start()
+
 
 async def shutdown_app() -> None:
     """Clean up app state."""
@@ -134,6 +140,8 @@ async def shutdown_app() -> None:
         await _health_checker.stop()
     if _telemetry_poller:
         await _telemetry_poller.stop()
+    if _audit_publisher:
+        await _audit_publisher.stop()
     if _request_logger:
         _request_logger.close()
     await close_client()
@@ -279,6 +287,12 @@ async def chat_completions(request: Request) -> Response:
                         error_type=error_type,
                     )
                     _record_request(request_id, model, True, backend.name, status_code, latency, error_type)
+                    if _audit_publisher:
+                        await _audit_publisher.publish(AuditEvent(
+                            request_id=request_id, model=model, stream=True,
+                            backend=backend.name, status_code=status_code,
+                            latency_ms=latency, error_type=error_type,
+                        ))
 
             resp.body_iterator = tracked_stream()
             resp.headers["x-request-id"] = request_id
@@ -325,6 +339,12 @@ async def chat_completions(request: Request) -> Response:
                 error_type=error_type,
             )
             _record_request(request_id, model, False, backend.name, status_code, latency, error_type)
+            if _audit_publisher:
+                await _audit_publisher.publish(AuditEvent(
+                    request_id=request_id, model=model, stream=False,
+                    backend=backend.name, status_code=status_code,
+                    latency_ms=latency, error_type=error_type,
+                ))
 
 
 @app.get("/v1/models")

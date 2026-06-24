@@ -1,0 +1,103 @@
+# Production-like audit pipeline stack: Redpanda + MinIO (S3 Object Lock) +
+# the signing/archiving audit consumer.
+#
+# The gateway runs on the HOST (uvicorn, see configs/local_gpu_audit.yaml) so it
+# can reach your local Ollama qwen2.5:0.5b; it publishes audit events to
+# Redpanda's external listener on localhost:19092. This compose file provides
+# only the downstream infra. See AUDIT_E2E.md for the full runbook.
+#
+#   python scripts/gen_audit_keys.py          # first, generate audit_keys/
+#   docker compose -f docker-compose.audit.yaml up -d --build
+#
+# Tear down (also wipes the locked MinIO bucket volume):
+#   docker compose -f docker-compose.audit.yaml down -v
+
+services:
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.1
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --set auto_create_topics_enabled=true
+    ports:
+      - "19092:19092"   # external Kafka API (host gateway publishes here)
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      - MINIO_ROOT_USER=minioadmin
+      - MINIO_ROOT_PASSWORD=minioadmin
+    ports:
+      - "9000:9000"   # S3 API (host verifier connects here)
+      - "9001:9001"   # web console
+    volumes:
+      - minio-data:/data
+
+  # One-shot: wait for MinIO, then create the audit bucket WITH Object Lock.
+  # Object Lock can only be enabled at bucket-creation time and implies
+  # versioning. Per-object COMPLIANCE retention is set by the archiver itself.
+  createbuckets:
+    image: minio/mc:latest
+    depends_on:
+      - minio
+    entrypoint: >
+      /bin/sh -c "
+      until mc alias set local http://minio:9000 minioadmin minioadmin; do
+        echo 'waiting for minio...'; sleep 1;
+      done;
+      mc mb --with-lock --ignore-existing local/meridian-audit;
+      echo 'bucket meridian-audit ready (object lock enabled)';
+      "
+
+  # One-shot: ensure the audit topic exists with a SINGLE partition so the
+  # constant-key events form one deterministically-ordered stream.
+  createtopic:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.1
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      rpk topic create meridian-audit-logs -p 1 --brokers redpanda:9092 || true;
+      echo 'topic meridian-audit-logs ready (1 partition)';
+      "
+
+  audit-consumer:
+    build: .
+    command: >
+      python -m meridian.audit.consumer
+        --brokers redpanda:9092
+        --topic meridian-audit-logs
+        --signing-key /keys/audit_private.pem
+        --s3-bucket meridian-audit
+        --s3-endpoint http://minio:9000
+        --s3-region us-east-1
+        --batch-size 8
+        --flush-interval 10
+    environment:
+      # boto3 default credential chain → MinIO root creds.
+      - AWS_ACCESS_KEY_ID=minioadmin
+      - AWS_SECRET_ACCESS_KEY=minioadmin
+    volumes:
+      - ./audit_keys/audit_private.pem:/keys/audit_private.pem:ro
+    depends_on:
+      redpanda:
+        condition: service_healthy
+      createbuckets:
+        condition: service_completed_successfully
+      createtopic:
+        condition: service_completed_successfully
+    restart: unless-stopped
+
+volumes:
+  minio-data:

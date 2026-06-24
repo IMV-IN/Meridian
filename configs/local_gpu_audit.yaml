@@ -1,0 +1,47 @@
+# Single-GPU backend + tamper-evident audit bus enabled.
+#
+# Same as configs/local_gpu.yaml (Ollama qwen2.5:0.5b) but with the audit event
+# bus turned on so every request emits a metadata-only AuditEvent to Redpanda.
+# Pair this with docker-compose.audit.yaml (Redpanda + MinIO + audit consumer).
+#
+# Prereqs:
+#   ollama pull qwen2.5:0.5b && ollama serve
+#   docker compose -f docker-compose.audit.yaml up -d --build
+#
+# Start the gateway on the host:
+#   MERIDIAN_CONFIG=configs/local_gpu_audit.yaml \
+#     uvicorn meridian.api.main:app --host 0.0.0.0 --port 8080
+
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+  strategy: "least_inflight"
+
+health:
+  interval_s: 5
+  timeout_s: 2
+  fail_threshold: 2
+  success_threshold: 1
+
+logging:
+  level: "INFO"
+  jsonl_path: "./meridian_requests.jsonl"
+
+backends:
+  - name: "ollama-4070"
+    url: "http://localhost:11434"
+    engine: "ollama"
+    model: "qwen2.5:0.5b"
+    weight: 1
+    tags: ["gpu", "ollama"]
+    health_endpoint: "/v1/models"
+
+# Tamper-evident audit pipeline. Events are metadata-only (request_id, model,
+# backend, status, latency) — prompts are NEVER published. All events use a
+# constant partition key, so the downstream hash chain has a deterministic
+# global order; provision the topic with a single partition.
+audit_bus:
+  enabled: true
+  bootstrap_servers: "localhost:19092"   # Redpanda external listener
+  topic: "meridian-audit-logs"
+  client_id: "meridian-gateway"
