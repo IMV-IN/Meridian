@@ -28,5 +28,39 @@ services:
     depends_on:
       - backend-fast
       - backend-slow
+      - redpanda
     volumes:
       - ./config.yaml:/app/config.yaml:ro
+
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.3.1
+    command:
+      - redpanda start
+      - --smp 1
+      - --memory 512M
+      - --overprovisioned
+      - --kafka-addr internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr internal://redpanda:9092,external://localhost:19092
+      - --set auto_create_topics_enabled=true
+    ports:
+      - "19092:19092"   # external Kafka API
+      - "18081:8081"    # Schema Registry
+      - "18082:8082"    # Redpanda HTTP Proxy
+    healthcheck:
+      test: ["CMD", "rpk", "cluster", "health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  audit-consumer:
+    build: .
+    command: >
+      python -m meridian.audit.consumer
+        --brokers redpanda:9092
+        --topic meridian-audit-logs
+        --batch-size 64
+        --flush-interval 60
+    depends_on:
+      redpanda:
+        condition: service_healthy
+    restart: unless-stopped
