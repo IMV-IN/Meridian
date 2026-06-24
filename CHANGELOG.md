@@ -46,7 +46,7 @@ Validated:
 
 ### Added
 
-- **Docker image publishing** — multi-arch (`linux/amd64`, `linux/arm64`) build-and-push workflow at `.github/workflows/release.yml`. Triggers on `v*` tags and manual `workflow_dispatch`. Publishes to Docker Hub (`krishom70/meridian:<version>` + `:latest`) and GHCR mirror (`ghcr.io/<owner>/meridian`).
+- **Docker image publishing** — multi-arch (`linux/amd64`, `linux/arm64`) build-and-push workflow at `.github/workflows/release.yml`. Triggers on `v*` tags and manual `workflow_dispatch`. Publishes to Docker Hub (`lothnic0801/meridian:<version>` + `:latest`) and GHCR mirror (`ghcr.io/<owner>/meridian`).
 - **Smoke test script** — `scripts/smoke_test.py` exercises `/v1/models`, non-streaming chat, and streaming chat against a running gateway; asserts `x-request-id` and `x-meridian-backend` headers and `[DONE]` terminator on streams.
 - **`.dockerignore`** — trims build context (excludes `.venv`, caches, tests, JSONL logs) so published images stay small and reproducible.
 - **Quickstart docs** — README now documents `docker pull` + `docker run` alongside the existing Compose demo.
