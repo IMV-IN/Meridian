@@ -11,6 +11,10 @@
 # Run:
 #   MERIDIAN_CONFIG=configs/tiering_demo.yaml \
 #     uvicorn meridian.api.main:app --host 0.0.0.0 --port 8080
+#
+# NOTE: for a single-machine demo the "prefill" and "general" pools point at the
+# same backend URL (backend-fast). In a real deployment each pool would be a
+# distinct set of backends.
 gateway:
   host: "0.0.0.0"
   port: 8080
