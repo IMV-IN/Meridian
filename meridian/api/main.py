@@ -7,7 +7,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, Set
+from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, Set, Tuple
 
 import httpx
 from fastapi import FastAPI, Request
@@ -28,6 +28,7 @@ from meridian.metrics.logger import RequestLogger
 from meridian.proxy.forward import close_client, forward_get, forward_non_stream, forward_stream
 from meridian.registry.backend import Backend, BackendRegistry
 from meridian.router.strategies import RequestContext, RoutingStrategy, create_strategy
+from meridian.router.tiering import derive_tier
 from meridian.router.token_estimator import estimate_prompt_tokens, extract_max_tokens
 from meridian.telemetry import JsonTelemetryAdapter, TelemetryAdapter, TelemetryPoller
 from meridian.util.helpers import generate_request_id, now_ms
@@ -188,6 +189,27 @@ def _select_backend(
     assert _registry is not None and _strategy is not None
     eligible = _registry.eligible(model, tags)
     return _strategy.select(eligible, request_ctx)
+
+
+def _select_with_tier(
+    model: str,
+    request_ctx: RequestContext,
+) -> Tuple[Optional[Backend], Optional[str]]:
+    """Select a backend, applying workload tiering when enabled.
+
+    Returns (backend, tier_name). tier_name is None when tiering is disabled.
+    When the matched tier's pool is empty, falls back to all healthy backends
+    (reliability over isolation) and still returns the tier name for visibility.
+    """
+    assert _registry is not None and _strategy is not None and _config is not None
+    if not _config.tiering.enabled:
+        return _select_backend(model, request_ctx=request_ctx), None
+
+    tier_name, tags = derive_tier(request_ctx, _config.tiering)
+    eligible = _registry.eligible(model, tags)
+    if not eligible:
+        eligible = _registry.eligible(model, None)
+    return _strategy.select(eligible, request_ctx), tier_name
 
 
 @app.post("/v1/chat/completions")
