@@ -50,3 +50,29 @@ def test_audit_bus_from_dict():
     assert cfg.audit_bus.bootstrap_servers == "redpanda:9092"
     assert cfg.audit_bus.topic == "custom-topic"
     assert cfg.audit_bus.client_id == "my-gateway"
+
+
+def test_tiering_config_defaults_disabled():
+    cfg = MeridianConfig.from_dict({})
+    assert cfg.tiering.enabled is False
+    # Default tier->tags map has the three required buckets.
+    assert set(cfg.tiering.tiers.keys()) == {"long_prompt", "long_decode", "default"}
+
+
+def test_tiering_config_parses_thresholds_and_tags():
+    cfg = MeridianConfig.from_dict({
+        "tiering": {
+            "enabled": True,
+            "long_prompt_tokens": 4000,
+            "long_decode_tokens": 1000,
+            "tiers": {
+                "long_prompt": ["prefill-pool"],
+                "long_decode": ["decode-pool"],
+                "default": ["general"],
+            },
+        }
+    })
+    assert cfg.tiering.enabled is True
+    assert cfg.tiering.long_prompt_tokens == 4000
+    assert cfg.tiering.long_decode_tokens == 1000
+    assert cfg.tiering.tiers["long_prompt"] == ["prefill-pool"]

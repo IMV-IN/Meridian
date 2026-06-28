@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class GatewayConfig(BaseModel):
@@ -76,6 +76,37 @@ class AuditBusConfig(BaseModel):
     topic: str = "meridian-audit-logs"
     client_id: str = "meridian-gateway"
 
+class TieringConfig(BaseModel):
+    """Workload tiering: route requests to backend pools by request shape.
+
+    Disabled by default. When enabled, a request whose estimated prompt size is
+    >= ``long_prompt_tokens`` maps to the ``long_prompt`` tier; else if its
+    ``max_tokens`` is >= ``long_decode_tokens`` it maps to ``long_decode``; else
+    ``default``. ``long_prompt`` is checked first (fixed precedence). Each tier
+    name maps to a list of backend tags used for eligibility filtering.
+    """
+
+    enabled: bool = Field(default=False)
+    long_prompt_tokens: int = Field(default=4000, ge=1)
+    long_decode_tokens: int = Field(default=1000, ge=1)
+    tiers: Dict[str, List[str]] = Field(
+        default_factory=lambda: {
+            "long_prompt": ["prefill-pool"],
+            "long_decode": ["decode-pool"],
+            "default": ["general"],
+        }
+    )
+
+    @field_validator("tiers")
+    @classmethod
+    def _require_three_buckets(cls, v: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        required = {"long_prompt", "long_decode", "default"}
+        missing = required - set(v.keys())
+        if missing:
+            raise ValueError(f"tiering.tiers must define {sorted(required)}; missing {sorted(missing)}")
+        return v
+
+
 class MeridianConfig(BaseModel):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
@@ -83,6 +114,7 @@ class MeridianConfig(BaseModel):
     backends: List[BackendConfig] = Field(default_factory=list)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     audit_bus: AuditBusConfig = Field(default_factory=AuditBusConfig)
+    tiering: TieringConfig = Field(default_factory=TieringConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:
