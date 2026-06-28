@@ -17,6 +17,7 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **Health checking & failover** — active pings + passive failure detection
 - **Prometheus metrics** — request counters, latency histograms, backend health gauges
 - **JSONL request logs** — every request logged with backend, latency, status
+- **Tamper-evident audit pipeline** — optional async egress to Kafka/Redpanda, SHA-256 hash chain → Merkle tree → Ed25519 signing → S3 Object Lock (WORM); metadata-only
 - **Live dashboard** — real-time UI showing backend health, stats, and recent requests
 - **Rate limiting** — basic token bucket for now, will be upgraded to support org, team
 
@@ -27,7 +28,6 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **Semantic caching** — cache similar prompts at the gateway level
 - **PII detection & redaction** — jurisdiction-specific entity packs
 - **RBAC** — org → team → user hierarchy with budget caps
-- **Tamper-evident audit logs** — Merkle hash chain, configurable retention
 - **Batch inference** — async endpoint for bulk processing
 - **On-prem deployment** — OCI containers + Helm charts, air-gapped mode
 
