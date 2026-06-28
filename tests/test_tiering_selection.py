@@ -6,7 +6,7 @@ from meridian.registry.backend import Backend, BackendRegistry
 from meridian.router.strategies import RequestContext, create_strategy
 
 
-def _setup(monkeypatch, tier_tags):
+def _setup(monkeypatch, tier_tags, enabled=True):
     backends = [
         Backend(BackendConfig(name="prefill", url="http://p", model="m1", tags=["prefill-pool"])),
         Backend(BackendConfig(name="general", url="http://g", model="m1", tags=["general"])),
@@ -15,7 +15,7 @@ def _setup(monkeypatch, tier_tags):
     cfg = MeridianConfig.from_dict({
         "gateway": {"strategy": "least_inflight"},
         "tiering": {
-            "enabled": True,
+            "enabled": enabled,
             "long_prompt_tokens": 4000,
             "long_decode_tokens": 1000,
             "tiers": tier_tags,
@@ -57,12 +57,13 @@ def test_empty_tier_falls_back_to_all_healthy(monkeypatch):
     _setup(monkeypatch, _TIERS)
     backend, tier = main._select_with_tier("m1", _ctx(100, 2000))
     assert tier == "long_decode"
-    assert backend is not None  # fell back to a healthy backend
+    # Fell back to the full healthy pool — one of the registered backends.
+    assert backend is not None
+    assert backend.name in {"prefill", "general"}
 
 
 def test_tiering_disabled_returns_none_tier(monkeypatch):
-    _setup(monkeypatch, _TIERS)
-    main._config.tiering.enabled = False
+    _setup(monkeypatch, _TIERS, enabled=False)
     backend, tier = main._select_with_tier("m1", _ctx(5000, 100))
     assert tier is None
     assert backend is not None

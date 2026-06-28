@@ -208,6 +208,11 @@ def _select_with_tier(
     tier_name, tags = derive_tier(request_ctx, _config.tiering)
     eligible = _registry.eligible(model, tags)
     if not eligible:
+        logger.warning(
+            "Tier %r pool (tags=%s) has no healthy backend for model %r; "
+            "falling back to all healthy backends.",
+            tier_name, sorted(tags), model,
+        )
         eligible = _registry.eligible(model, None)
     return _strategy.select(eligible, request_ctx), tier_name
 
