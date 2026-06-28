@@ -147,6 +147,9 @@ async def test_stream_completions(client):
     assert "text/event-stream" in resp.headers.get("content-type", "")
     assert "x-request-id" in resp.headers
     assert resp.headers["x-meridian-backend"] == "test-backend"
+    # Tiering is enabled in the fixture; a small request maps to the default tier
+    # on the streaming path too.
+    assert resp.headers["x-meridian-tier"] == "default"
 
     text = resp.text
     data_lines = [line for line in text.split("\n") if line.startswith("data:")]

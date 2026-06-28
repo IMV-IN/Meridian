@@ -320,6 +320,7 @@ async def chat_completions(request: Request) -> Response:
                             request_id=request_id, model=model, stream=True,
                             backend=backend.name, status_code=status_code,
                             latency_ms=latency, error_type=error_type,
+                            extra={"tier": tier_name},
                         ))
 
             resp.body_iterator = tracked_stream()
@@ -377,6 +378,7 @@ async def chat_completions(request: Request) -> Response:
                     request_id=request_id, model=model, stream=False,
                     backend=backend.name, status_code=status_code,
                     latency_ms=latency, error_type=error_type,
+                    extra={"tier": tier_name},
                 ))
 
 
