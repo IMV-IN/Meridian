@@ -1,6 +1,9 @@
 """Tests for configuration loading and validation."""
 
-from meridian.config.models import BackendConfig, MeridianConfig
+import pytest
+from pydantic import ValidationError
+
+from meridian.config.models import BackendConfig, MeridianConfig, TieringConfig
 
 
 def test_default_config():
@@ -76,3 +79,10 @@ def test_tiering_config_parses_thresholds_and_tags():
     assert cfg.tiering.long_prompt_tokens == 4000
     assert cfg.tiering.long_decode_tokens == 1000
     assert cfg.tiering.tiers["long_prompt"] == ["prefill-pool"]
+    assert cfg.tiering.tiers["long_decode"] == ["decode-pool"]
+    assert cfg.tiering.tiers["default"] == ["general"]
+
+
+def test_tiering_config_rejects_missing_bucket():
+    with pytest.raises(ValidationError):
+        TieringConfig(tiers={"long_prompt": ["a"], "long_decode": ["b"]})
