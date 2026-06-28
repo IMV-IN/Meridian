@@ -1,0 +1,53 @@
+# Workload tiering demo (Milestone D).
+#
+# Routes requests to dedicated backend pools by request shape:
+#   - estimated prompt_tokens >= long_prompt_tokens  -> "long_prompt" tier
+#   - else max_tokens        >= long_decode_tokens   -> "long_decode" tier
+#   - else                                           -> "default" tier
+# Precedence is fixed (long_prompt checked first). Each tier maps to backend
+# tags; if a tier's pool has no healthy backend, Meridian falls back to all
+# healthy backends (reliability over isolation) and logs a warning.
+#
+# Run:
+#   MERIDIAN_CONFIG=configs/tiering_demo.yaml \
+#     uvicorn meridian.api.main:app --host 0.0.0.0 --port 8080
+#
+# NOTE: for a single-machine demo the "prefill" and "general" pools point at the
+# same backend URL (backend-fast). In a real deployment each pool would be a
+# distinct set of backends.
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+  strategy: "least_inflight"
+
+tiering:
+  enabled: true
+  long_prompt_tokens: 4000
+  long_decode_tokens: 1000
+  tiers:
+    long_prompt: ["prefill-pool"]
+    long_decode: ["decode-pool"]
+    default: ["general"]
+
+health:
+  interval_s: 5
+  timeout_s: 2
+  fail_threshold: 2
+  success_threshold: 1
+
+backends:
+  - name: "prefill"
+    url: "http://backend-fast:9001"
+    model: "demo-model"
+    tags: ["prefill-pool"]
+    health_endpoint: "/v1/models"
+  - name: "decode"
+    url: "http://backend-slow:9002"
+    model: "demo-model"
+    tags: ["decode-pool"]
+    health_endpoint: "/v1/models"
+  - name: "general"
+    url: "http://backend-fast:9001"
+    model: "demo-model"
+    tags: ["general"]
+    health_endpoint: "/v1/models"

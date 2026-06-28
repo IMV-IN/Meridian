@@ -7,7 +7,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, Set
+from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, Set, Tuple
 
 import httpx
 from fastapi import FastAPI, Request
@@ -28,6 +28,7 @@ from meridian.metrics.logger import RequestLogger
 from meridian.proxy.forward import close_client, forward_get, forward_non_stream, forward_stream
 from meridian.registry.backend import Backend, BackendRegistry
 from meridian.router.strategies import RequestContext, RoutingStrategy, create_strategy
+from meridian.router.tiering import derive_tier
 from meridian.router.token_estimator import estimate_prompt_tokens, extract_max_tokens
 from meridian.telemetry import JsonTelemetryAdapter, TelemetryAdapter, TelemetryPoller
 from meridian.util.helpers import generate_request_id, now_ms
@@ -190,6 +191,32 @@ def _select_backend(
     return _strategy.select(eligible, request_ctx)
 
 
+def _select_with_tier(
+    model: str,
+    request_ctx: RequestContext,
+) -> Tuple[Optional[Backend], Optional[str]]:
+    """Select a backend, applying workload tiering when enabled.
+
+    Returns (backend, tier_name). tier_name is None when tiering is disabled.
+    When the matched tier's pool is empty, falls back to all healthy backends
+    (reliability over isolation) and still returns the tier name for visibility.
+    """
+    assert _registry is not None and _strategy is not None and _config is not None
+    if not _config.tiering.enabled:
+        return _select_backend(model, request_ctx=request_ctx), None
+
+    tier_name, tags = derive_tier(request_ctx, _config.tiering)
+    eligible = _registry.eligible(model, tags)
+    if not eligible:
+        logger.warning(
+            "Tier %r pool (tags=%s) has no healthy backend for model %r; "
+            "falling back to all healthy backends.",
+            tier_name, sorted(tags), model,
+        )
+        eligible = _registry.eligible(model, None)
+    return _strategy.select(eligible, request_ctx), tier_name
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> Response:
     assert _registry is not None and _health_checker is not None
@@ -231,7 +258,7 @@ async def chat_completions(request: Request) -> Response:
     is_stream = body.get("stream", False)
 
     request_ctx = _build_request_context(body)
-    backend = _select_backend(model, request_ctx=request_ctx)
+    backend, tier_name = _select_with_tier(model, request_ctx)
     if backend is None:
         return _error_json(
             f"No healthy backend available for model {model!r}",
@@ -285,6 +312,7 @@ async def chat_completions(request: Request) -> Response:
                         status_code=status_code,
                         latency_ms=latency,
                         error_type=error_type,
+                        tier=tier_name,
                     )
                     _record_request(request_id, model, True, backend.name, status_code, latency, error_type)
                     if _audit_publisher:
@@ -292,11 +320,14 @@ async def chat_completions(request: Request) -> Response:
                             request_id=request_id, model=model, stream=True,
                             backend=backend.name, status_code=status_code,
                             latency_ms=latency, error_type=error_type,
+                            extra={"tier": tier_name},
                         ))
 
             resp.body_iterator = tracked_stream()
             resp.headers["x-request-id"] = request_id
             resp.headers["x-meridian-backend"] = backend.name
+            if tier_name is not None:
+                resp.headers["x-meridian-tier"] = tier_name
             return resp
         else:
             non_stream_resp = await forward_non_stream(backend, body, request)
@@ -306,6 +337,8 @@ async def chat_completions(request: Request) -> Response:
                 error_type = "upstream_5xx"
             non_stream_resp.headers["x-request-id"] = request_id
             non_stream_resp.headers["x-meridian-backend"] = backend.name
+            if tier_name is not None:
+                non_stream_resp.headers["x-meridian-tier"] = tier_name
             return non_stream_resp
 
     except httpx.RequestError as exc:
@@ -337,6 +370,7 @@ async def chat_completions(request: Request) -> Response:
                 status_code=status_code,
                 latency_ms=latency,
                 error_type=error_type,
+                tier=tier_name,
             )
             _record_request(request_id, model, False, backend.name, status_code, latency, error_type)
             if _audit_publisher:
@@ -344,6 +378,7 @@ async def chat_completions(request: Request) -> Response:
                     request_id=request_id, model=model, stream=False,
                     backend=backend.name, status_code=status_code,
                     latency_ms=latency, error_type=error_type,
+                    extra={"tier": tier_name},
                 ))
 
 
