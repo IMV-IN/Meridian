@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.0] - Unreleased
+
+### Added
+
+- **Workload tiering (Milestone D)** — route requests to dedicated backend pools by request shape, config-driven and disabled by default. A request maps to `long_prompt` (estimated `prompt_tokens >= long_prompt_tokens`), else `long_decode` (`max_tokens >= long_decode_tokens`), else `default`; each tier name maps to backend tags used for eligibility. Precedence is fixed (`long_prompt` first). If the matched tier's pool has no healthy backend, Meridian logs a warning and falls back to all healthy backends (reliability over isolation). The chosen tier is exposed via the `x-meridian-tier` response header, the `tier` JSONL log field, and the `extra.tier` field on audit-bus events. New `meridian/router/tiering.py` (`derive_tier`), `TieringConfig`, and `configs/tiering_demo.yaml`.
+
 ## [0.2.1] - Unreleased
 
 ### Added

@@ -195,6 +195,22 @@ gateway:
   queue_weight: 0.0            # multiplied by reported queue_depth
   mem_weight: 0.0              # multiplied by reported gpu_mem_util (0.0-1.0)
 
+# Workload tiering (optional, disabled by default). Routes requests to backend
+# pools by request shape. A request maps to "long_prompt" when its estimated
+# prompt size >= long_prompt_tokens, else "long_decode" when max_tokens >=
+# long_decode_tokens, else "default". Precedence is fixed (long_prompt first).
+# Each tier maps to backend tags; if the matched tier has no healthy backend,
+# Meridian falls back to all healthy backends (reliability over isolation). The
+# chosen tier is surfaced on the `x-meridian-tier` response header and in logs.
+tiering:
+  enabled: false
+  long_prompt_tokens: 4000
+  long_decode_tokens: 1000
+  tiers:
+    long_prompt: ["prefill-pool"]
+    long_decode: ["decode-pool"]
+    default: ["general"]
+
 health:
   interval_s: 5
   timeout_s: 2
@@ -235,6 +251,7 @@ Pre-built configs are available in the `configs/` directory:
 - `configs/mock_demo.yaml` — mock backends for Docker Compose demo
 - `configs/local_gpu.yaml` — single GPU backend (Ollama)
 - `configs/dual_backend.yaml` — dual-backend failover testing with delay proxy
+- `configs/tiering_demo.yaml` — workload tiering across prefill/decode/general pools
 
 ## API Reference
 
