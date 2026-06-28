@@ -258,7 +258,7 @@ async def chat_completions(request: Request) -> Response:
     is_stream = body.get("stream", False)
 
     request_ctx = _build_request_context(body)
-    backend = _select_backend(model, request_ctx=request_ctx)
+    backend, tier_name = _select_with_tier(model, request_ctx)
     if backend is None:
         return _error_json(
             f"No healthy backend available for model {model!r}",
@@ -312,6 +312,7 @@ async def chat_completions(request: Request) -> Response:
                         status_code=status_code,
                         latency_ms=latency,
                         error_type=error_type,
+                        tier=tier_name,
                     )
                     _record_request(request_id, model, True, backend.name, status_code, latency, error_type)
                     if _audit_publisher:
@@ -324,6 +325,8 @@ async def chat_completions(request: Request) -> Response:
             resp.body_iterator = tracked_stream()
             resp.headers["x-request-id"] = request_id
             resp.headers["x-meridian-backend"] = backend.name
+            if tier_name is not None:
+                resp.headers["x-meridian-tier"] = tier_name
             return resp
         else:
             non_stream_resp = await forward_non_stream(backend, body, request)
@@ -333,6 +336,8 @@ async def chat_completions(request: Request) -> Response:
                 error_type = "upstream_5xx"
             non_stream_resp.headers["x-request-id"] = request_id
             non_stream_resp.headers["x-meridian-backend"] = backend.name
+            if tier_name is not None:
+                non_stream_resp.headers["x-meridian-tier"] = tier_name
             return non_stream_resp
 
     except httpx.RequestError as exc:
@@ -364,6 +369,7 @@ async def chat_completions(request: Request) -> Response:
                 status_code=status_code,
                 latency_ms=latency,
                 error_type=error_type,
+                tier=tier_name,
             )
             _record_request(request_id, model, False, backend.name, status_code, latency, error_type)
             if _audit_publisher:

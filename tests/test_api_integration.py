@@ -69,6 +69,16 @@ async def client():
             "gateway": {"host": "0.0.0.0", "port": 8080, "strategy": "least_inflight"},
             "health": {"interval_s": 60, "timeout_s": 2, "fail_threshold": 2, "success_threshold": 1},
             "logging": {"level": "DEBUG", "jsonl_path": _jsonl_path},
+            "tiering": {
+                "enabled": True,
+                "long_prompt_tokens": 4000,
+                "long_decode_tokens": 1000,
+                "tiers": {
+                    "long_prompt": ["prefill-pool"],
+                    "long_decode": ["decode-pool"],
+                    "default": ["test"],
+                },
+            },
             "backends": [
                 {
                     "name": "test-backend",
@@ -154,6 +164,21 @@ async def test_backend_header_present(client):
         "/v1/chat/completions",
         json={"model": "demo-model", "messages": [{"role": "user", "content": "test"}]},
     )
+    assert resp.headers["x-meridian-backend"] == "test-backend"
+
+
+# ── Milestone D: workload tiering header ────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_tier_header_present_when_enabled(client):
+    """Tiering enabled: a small request maps to the default tier and is served."""
+    resp = await client.post(
+        "/v1/chat/completions",
+        json={"model": "demo-model", "messages": [{"role": "user", "content": "hi"}]},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["x-meridian-tier"] == "default"
     assert resp.headers["x-meridian-backend"] == "test-backend"
 
 
