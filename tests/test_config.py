@@ -86,3 +86,19 @@ def test_tiering_config_parses_thresholds_and_tags():
 def test_tiering_config_rejects_missing_bucket():
     with pytest.raises(ValidationError):
         TieringConfig(tiers={"long_prompt": ["a"], "long_decode": ["b"]})
+
+
+def test_session_affinity_config_defaults_disabled():
+    cfg = MeridianConfig.from_dict({})
+    assert cfg.session_affinity.enabled is False
+    assert cfg.session_affinity.header == "x-meridian-session"
+    assert cfg.session_affinity.ttl_s == 600
+
+
+def test_session_affinity_config_parses():
+    cfg = MeridianConfig.from_dict({
+        "session_affinity": {"enabled": True, "ttl_s": 120, "max_sessions": 50}
+    })
+    assert cfg.session_affinity.enabled is True
+    assert cfg.session_affinity.ttl_s == 120
+    assert cfg.session_affinity.max_sessions == 50
