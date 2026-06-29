@@ -107,6 +107,22 @@ class TieringConfig(BaseModel):
         return v
 
 
+class SessionAffinityConfig(BaseModel):
+    """KV-affinity lite: pin a session to one backend while it stays healthy.
+
+    Disabled by default. When enabled, requests carrying the ``header`` route
+    consistently to the same backend. Sliding TTL: each use refreshes the idle
+    expiry. ``max_sessions`` bounds memory; ``sweep_interval_s`` controls the
+    background eviction cadence.
+    """
+
+    enabled: bool = Field(default=False)
+    header: str = "x-meridian-session"
+    ttl_s: float = Field(default=600.0, gt=0.0)
+    sweep_interval_s: float = Field(default=60.0, gt=0.0)
+    max_sessions: int = Field(default=100_000, ge=1)
+
+
 class MeridianConfig(BaseModel):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
@@ -115,6 +131,7 @@ class MeridianConfig(BaseModel):
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
     audit_bus: AuditBusConfig = Field(default_factory=AuditBusConfig)
     tiering: TieringConfig = Field(default_factory=TieringConfig)
+    session_affinity: SessionAffinityConfig = Field(default_factory=SessionAffinityConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:

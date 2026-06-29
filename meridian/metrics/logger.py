@@ -27,6 +27,7 @@ class RequestLogger:
         latency_ms: float,
         error_type: Optional[str] = None,
         tier: Optional[str] = None,
+        session_route: Optional[str] = None,
     ) -> None:
         record = {
             "request_id": request_id,
@@ -38,6 +39,7 @@ class RequestLogger:
             "latency_ms": round(latency_ms, 2),
             "error_type": error_type,
             "tier": tier,
+            "session_route": session_route,
         }
         try:
             self._file.write(json.dumps(record) + "\n")

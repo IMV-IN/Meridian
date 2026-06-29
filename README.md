@@ -211,6 +211,19 @@ tiering:
     long_decode: ["decode-pool"]
     default: ["general"]
 
+# Session affinity (optional, disabled by default). Pins a session to one backend
+# for KV-cache reuse. Requests carrying the `header` route to the same backend
+# while it stays healthy. Sliding TTL: each use refreshes the idle timeout.
+# `max_sessions` bounds memory; `sweep_interval_s` controls background eviction.
+# If the pinned backend becomes unhealthy, requests remap to another healthy
+# backend. Affinity state is surfaced via `x-meridian-session-route` header.
+session_affinity:
+  enabled: false
+  header: "x-meridian-session"
+  ttl_s: 600.0
+  sweep_interval_s: 60.0
+  max_sessions: 100000
+
 health:
   interval_s: 5
   timeout_s: 2

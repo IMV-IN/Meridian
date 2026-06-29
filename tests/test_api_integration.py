@@ -517,3 +517,78 @@ async def test_token_aware_decrements_inflight_cost_after_request(token_aware_cl
     assert slow.inflight_cost == 0.0
     assert fast.inflight == 0
     assert slow.inflight == 0
+
+
+# ── Milestone E: session affinity end-to-end ────────────────────────
+
+
+@pytest.fixture
+async def affinity_client():
+    """Fixture with two backends and session affinity enabled."""
+    cfg = MeridianConfig.from_dict({
+        "gateway": {"host": "0.0.0.0", "port": 8080, "strategy": "least_inflight"},
+        "health": {"interval_s": 60, "timeout_s": 2, "fail_threshold": 2, "success_threshold": 1},
+        "logging": {"level": "DEBUG", "jsonl_path": _jsonl_path},
+        "session_affinity": {"enabled": True, "ttl_s": 600},
+        "backends": [
+            {
+                "name": "backend-a",
+                "url": _mock_url,
+                "engine": "mock",
+                "model": "demo-model",
+                "weight": 1,
+                "health_endpoint": "/v1/models",
+            },
+            {
+                "name": "backend-b",
+                "url": _mock_url,
+                "engine": "mock",
+                "model": "demo-model",
+                "weight": 1,
+                "health_endpoint": "/v1/models",
+            },
+        ],
+    })
+    await init_app(cfg, start_health=False)
+
+    transport = httpx.ASGITransport(app=meridian_app)
+    async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
+        yield c
+
+
+@pytest.mark.asyncio
+async def test_session_affinity_sticks_then_remaps_on_failure(affinity_client):
+    """Session pins to one backend, then remaps when that backend goes unhealthy."""
+    # First request with session header -> pins to a backend.
+    resp1 = await affinity_client.post(
+        "/v1/chat/completions",
+        json={"model": "demo-model", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"x-meridian-session": "test-session-123"},
+    )
+    assert resp1.status_code == 200
+    assert resp1.headers["x-meridian-session-route"] == "new"
+    pinned_backend = resp1.headers["x-meridian-backend"]
+
+    # Second request with same session -> should hit the same backend (pinned).
+    resp2 = await affinity_client.post(
+        "/v1/chat/completions",
+        json={"model": "demo-model", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"x-meridian-session": "test-session-123"},
+    )
+    assert resp2.status_code == 200
+    assert resp2.headers["x-meridian-session-route"] == "pinned"
+    assert resp2.headers["x-meridian-backend"] == pinned_backend
+
+    # Kill the pinned backend.
+    from meridian.api.main import _registry
+    _registry.get(pinned_backend).healthy = False
+
+    # Third request with same session -> should remap to the other backend.
+    resp3 = await affinity_client.post(
+        "/v1/chat/completions",
+        json={"model": "demo-model", "messages": [{"role": "user", "content": "hi"}]},
+        headers={"x-meridian-session": "test-session-123"},
+    )
+    assert resp3.status_code == 200
+    assert resp3.headers["x-meridian-session-route"] == "remapped"
+    assert resp3.headers["x-meridian-backend"] != pinned_backend

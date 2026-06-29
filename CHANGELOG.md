@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.1] - Unreleased
+
+### Added
+
+- **KV-affinity lite (Milestone E)** — session stickiness for KV-cache reuse, config-driven and disabled by default. When enabled, requests carrying the `session_affinity.header` (default `x-meridian-session`) route consistently to the same backend while it remains healthy and serving the model. Session state is an in-memory map with sliding TTL (each use refreshes expiry) and max-sessions cap (evicts nearest-expiry when full). A background sweep task drops expired entries. If the pinned backend becomes unhealthy, the request remaps to another healthy backend (reliability over stickiness). Affinity state is surfaced via the `x-meridian-session-route` response header (`new` / `pinned` / `remapped`), the `session_route` JSONL log field, and `RequestLogger`. New `meridian/router/affinity.py` (`SessionStore`), `SessionAffinityConfig`, and the `_route` helper composing affinity over workload tiering.
+
 ## [0.3.0] - Unreleased
 
 ### Added
