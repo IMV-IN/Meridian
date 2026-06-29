@@ -27,6 +27,7 @@ from meridian.metrics.collectors import (
 from meridian.metrics.logger import RequestLogger
 from meridian.proxy.forward import close_client, forward_get, forward_non_stream, forward_stream
 from meridian.registry.backend import Backend, BackendRegistry
+from meridian.router.affinity import SessionStore
 from meridian.router.strategies import RequestContext, RoutingStrategy, create_strategy
 from meridian.router.tiering import derive_tier
 from meridian.router.token_estimator import estimate_prompt_tokens, extract_max_tokens
@@ -43,6 +44,7 @@ _telemetry_poller: Optional[TelemetryPoller] = None
 _request_logger: Optional[RequestLogger] = None
 _audit_publisher: Optional[AuditEventPublisher] = None
 _config: Optional[MeridianConfig] = None
+_session_store: Optional[SessionStore] = None
 
 # rate limiting
 _rate_limit: Dict[str, TokenBucket] = {}
@@ -215,6 +217,41 @@ def _select_with_tier(
         )
         eligible = _registry.eligible(model, None)
     return _strategy.select(eligible, request_ctx), tier_name
+
+
+def _route(
+    model: str,
+    request_ctx: RequestContext,
+    session_id: Optional[str],
+) -> Tuple[Optional[Backend], Optional[str], Optional[str]]:
+    """Resolve (backend, tier_name, session_route).
+
+    Affinity wins while healthy: if the session is pinned to a healthy backend
+    that still serves ``model``, route to it (skipping tier+strategy) and return
+    session_route="pinned". Otherwise route normally (tiering + strategy), pin
+    the result, and return "new" (first time) or "remapped" (stale prior pin).
+    session_route is None when affinity is disabled or no session id is given.
+    """
+    assert _config is not None and _registry is not None
+    affinity_on = _config.session_affinity.enabled and session_id is not None
+
+    session_route: Optional[str] = None
+    if affinity_on and _session_store is not None:
+        pinned_name = _session_store.get(session_id)  # type: ignore[arg-type]
+        if pinned_name is not None:
+            b = _registry.get(pinned_name)
+            if b is not None and b.healthy and (not b.model or b.model == model):
+                return b, None, "pinned"
+            session_route = "remapped"  # had a pin but it was stale
+
+    backend, tier_name = _select_with_tier(model, request_ctx)
+
+    if affinity_on and _session_store is not None and backend is not None:
+        _session_store.put(session_id, backend.name)  # type: ignore[arg-type]
+        if session_route is None:
+            session_route = "new"
+
+    return backend, tier_name, session_route
 
 
 @app.post("/v1/chat/completions")
