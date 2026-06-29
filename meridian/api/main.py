@@ -210,7 +210,7 @@ async def _auth_gate(request: Request, call_next: Callable[[Request], Awaitable[
     """Enforce Bearer-key auth on /v1/* when enabled. All other paths open."""
     if _config is not None and _config.auth.enabled and request.url.path.startswith("/v1/"):
         try:
-            authenticate(request.headers.get("authorization"), _key_index)
+            request.state.identity = authenticate(request.headers.get("authorization"), _key_index)
         except AuthError as exc:
             return _error_json(exc.message, exc.error_type, 401)
     return await call_next(request)
@@ -349,6 +349,13 @@ async def chat_completions(request: Request) -> Response:
     model = body.get("model", "")
     is_stream = body.get("stream", False)
 
+    # Identity is stashed on request.state by the auth middleware (only when
+    # auth is enabled and the key validated). None otherwise. Metadata only —
+    # never the key itself.
+    identity: Optional[IdentityContext] = getattr(request.state, "identity", None)
+    org_id = identity.org_id if identity else None
+    team_id = identity.team_id if identity else None
+
     request_ctx = _build_request_context(body)
     session_id = request.headers.get(_config.session_affinity.header) if _config.session_affinity.enabled else None
     backend, tier_name, session_route = _route(model, request_ctx, session_id)
@@ -407,6 +414,8 @@ async def chat_completions(request: Request) -> Response:
                         error_type=error_type,
                         tier=tier_name,
                         session_route=session_route,
+                        org_id=org_id,
+                        team_id=team_id,
                     )
                     _record_request(request_id, model, True, backend.name, status_code, latency, error_type)
                     if _audit_publisher:
@@ -414,7 +423,7 @@ async def chat_completions(request: Request) -> Response:
                             request_id=request_id, model=model, stream=True,
                             backend=backend.name, status_code=status_code,
                             latency_ms=latency, error_type=error_type,
-                            extra={"tier": tier_name},
+                            extra={"tier": tier_name, "org_id": org_id, "team_id": team_id},
                         ))
 
             resp.body_iterator = tracked_stream()
@@ -470,6 +479,8 @@ async def chat_completions(request: Request) -> Response:
                 error_type=error_type,
                 tier=tier_name,
                 session_route=session_route,
+                org_id=org_id,
+                team_id=team_id,
             )
             _record_request(request_id, model, False, backend.name, status_code, latency, error_type)
             if _audit_publisher:
@@ -477,7 +488,7 @@ async def chat_completions(request: Request) -> Response:
                     request_id=request_id, model=model, stream=False,
                     backend=backend.name, status_code=status_code,
                     latency_ms=latency, error_type=error_type,
-                    extra={"tier": tier_name},
+                    extra={"tier": tier_name, "org_id": org_id, "team_id": team_id},
                 ))
 
 
