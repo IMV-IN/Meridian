@@ -27,6 +27,10 @@ class SessionStore:
 
     def get(self, session_id: str) -> Optional[str]:
         """Return the pinned backend name if live; slide its expiry on hit."""
+        # Clock is read outside the lock intentionally: `now` is only used to
+        # compute/compare an expiry, and TTL granularity dwarfs any scheduling
+        # skew between this read and acquiring the lock. The expiry comparison
+        # itself happens under the lock, so there is no check-then-act race.
         now = self._clock()
         with self._lock:
             entry = self._map.get(session_id)
@@ -57,5 +61,6 @@ class SessionStore:
                 del self._map[k]
 
     def size(self) -> int:
+        """Return the current number of mapped sessions (live or not-yet-swept)."""
         with self._lock:
             return len(self._map)

@@ -53,6 +53,31 @@ def test_sweep_evicts_expired():
     assert store.size() == 0
 
 
+def test_sweep_preserves_live_entries():
+    clk = FakeClock()
+    store = SessionStore(ttl_ms=1000, max_sessions=10, clock=clk)
+    store.put("dead", "a")  # expires at 2000
+    clk.advance(500)
+    store.put("live", "b")  # expires at 2500
+    clk.advance(600)        # t=2100: "dead" expired, "live" still alive
+    store.sweep()
+    assert store.size() == 1
+    assert store.get("live") == "b"
+    assert store.get("dead") is None
+
+
+def test_put_refresh_updates_backend_without_growing_or_evicting():
+    clk = FakeClock()
+    store = SessionStore(ttl_ms=1000, max_sessions=1, clock=clk)
+    store.put("s1", "a")
+    clk.advance(500)
+    store.put("s1", "b")           # refresh same key: no eviction though map is full
+    assert store.size() == 1
+    assert store.get("s1") == "b"  # backend updated
+    clk.advance(900)               # t=1400 < refreshed expiry (1500): still alive
+    assert store.get("s1") == "b"  # TTL was reset on refresh
+
+
 def test_max_sessions_evicts_nearest_expiry():
     clk = FakeClock()
     store = SessionStore(ttl_ms=1000, max_sessions=2, clock=clk)
