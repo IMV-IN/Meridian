@@ -23,6 +23,8 @@ jobs:
 
       - name: Resolve image tag
         id: meta
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         run: |
           if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
             RAW="${{ github.event.inputs.tag }}"
@@ -33,6 +35,24 @@ jobs:
           OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "owner_lc=${OWNER_LC}" >> "$GITHUB_OUTPUT"
+
+          # GHCR always publishes (built-in GITHUB_TOKEN). Docker Hub only when
+          # the secret is configured, so forks / unconfigured repos don't fail.
+          TAGS="ghcr.io/${OWNER_LC}/meridian:${VERSION}
+          ghcr.io/${OWNER_LC}/meridian:latest"
+          if [ -n "${DOCKERHUB_USERNAME}" ]; then
+            TAGS="${DOCKERHUB_USERNAME}/meridian:${VERSION}
+          ${DOCKERHUB_USERNAME}/meridian:latest
+          ${TAGS}"
+            echo "dockerhub=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "dockerhub=false" >> "$GITHUB_OUTPUT"
+          fi
+          {
+            echo "tags<<EOF"
+            echo "${TAGS}"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
           echo "Publishing version: ${VERSION} (ghcr owner: ${OWNER_LC})"
 
       - name: Set up QEMU
@@ -42,6 +62,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Log in to Docker Hub
+        if: ${{ steps.meta.outputs.dockerhub == 'true' }}
         uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -61,11 +82,7 @@ jobs:
           file: ./Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: |
-            ${{ secrets.DOCKERHUB_USERNAME }}/meridian:${{ steps.meta.outputs.version }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/meridian:latest
-            ghcr.io/${{ steps.meta.outputs.owner_lc }}/meridian:${{ steps.meta.outputs.version }}
-            ghcr.io/${{ steps.meta.outputs.owner_lc }}/meridian:latest
+          tags: ${{ steps.meta.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
