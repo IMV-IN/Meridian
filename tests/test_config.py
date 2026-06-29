@@ -3,7 +3,7 @@
 import pytest
 from pydantic import ValidationError
 
-from meridian.config.models import BackendConfig, MeridianConfig, TieringConfig
+from meridian.config.models import AuthConfig, BackendConfig, MeridianConfig, TieringConfig
 
 
 def test_default_config():
@@ -102,3 +102,39 @@ def test_session_affinity_config_parses():
     assert cfg.session_affinity.enabled is True
     assert cfg.session_affinity.ttl_s == 120
     assert cfg.session_affinity.max_sessions == 50
+
+
+def test_auth_config_defaults_disabled():
+    cfg = MeridianConfig.from_dict({})
+    assert cfg.auth.enabled is False
+    assert cfg.auth.keys == []
+
+
+def test_auth_config_parses_keys():
+    cfg = MeridianConfig.from_dict({
+        "auth": {
+            "enabled": True,
+            "keys": [
+                {"key": "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ", "org_id": "acme", "team_id": "eng", "user_id": "alice"},
+                {"key": "mrdn_9Bv4QwX8Ty2Rs5Np7MfLkHgDc", "org_id": "acme"},
+            ],
+        }
+    })
+    assert cfg.auth.enabled is True
+    assert len(cfg.auth.keys) == 2
+    assert cfg.auth.keys[0].org_id == "acme"
+    assert cfg.auth.keys[0].team_id == "eng"
+    assert cfg.auth.keys[1].team_id is None
+
+
+def test_auth_config_rejects_duplicate_keys():
+    with pytest.raises(ValidationError):
+        AuthConfig(enabled=True, keys=[
+            {"key": "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ", "org_id": "a"},
+            {"key": "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ", "org_id": "b"},
+        ])
+
+
+def test_auth_config_rejects_bad_key_format():
+    with pytest.raises(ValidationError):
+        AuthConfig(enabled=True, keys=[{"key": "not-a-valid-key", "org_id": "a"}])
