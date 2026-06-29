@@ -4,7 +4,7 @@ A scannable record of **what's shipped** and **what's next**. For the full
 strategic picture see [`ROADMAP.md`](./ROADMAP.md); for per-change detail see
 [`../CHANGELOG.md`](../CHANGELOG.md). Keep this file updated as milestones land.
 
-_Last updated: 2026-06-30._
+_Last updated: 2026-06-30 (Milestone H)._
 
 ---
 
@@ -20,6 +20,7 @@ _Last updated: 2026-06-30._
 | **E** — KV-affinity lite | `v0.3.1` | Session stickiness via `x-meridian-session`, sliding-TTL in-memory store, remap on unhealthy |
 | **F** — API-key auth | `v0.4.0` | Opt-in Bearer-key gate on `/v1/*`, config-driven, disabled by default; keys map to org/team/user identity |
 | **G** — Identity-aware logging | `v0.4.0` | `org_id`/`team_id` attached to JSONL logs + audit events (metadata only; key never logged) |
+| **H** — Per-identity rate limiting | `v0.4.0` | Token bucket keys on `org:{org_id}` when authenticated (else `ip:{ip}`); same org shares a bucket across source IPs |
 
 Also shipped outside the A–E track: IP-based rate limiting (token bucket) and
 the tamper-evident audit pipeline (Kafka → SHA-256 hash chain → Merkle →
@@ -31,8 +32,8 @@ Ed25519 → S3 Object Lock WORM).
 
 | Milestone | Status | What |
 |---|---|---|
-| **H** — Per-identity rate limiting | planned | Re-key the token bucket on `org_id`/`team_id` when auth is enabled (today it keys on IP, meaningless behind a VPC LB). Unblocked by F + G. Backend-agnostic, no GPU. |
+| Per-org quotas | planned | Let each org declare its own `token_capacity`/`refill_rate` instead of one global limit; optional team-level granularity. Builds on H. |
 
-After H, the identity keystone unblocks the enterprise controls tracked in
+The identity keystone (F+G+H) now unblocks the enterprise controls tracked in
 [`ROADMAP.md`](./ROADMAP.md): RBAC (org→team→user budgets), per-team cost
 attribution, and PII detection/redaction.

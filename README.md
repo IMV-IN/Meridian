@@ -19,7 +19,7 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **JSONL request logs** — every request logged with backend, latency, status
 - **Tamper-evident audit pipeline** — optional async egress to Kafka/Redpanda, SHA-256 hash chain → Merkle tree → Ed25519 signing → S3 Object Lock (WORM); metadata-only
 - **Live dashboard** — real-time UI showing backend health, stats, and recent requests
-- **Rate limiting** — basic token bucket for now, will be upgraded to support org, team
+- **Rate limiting** — token bucket keyed per-org when auth is enabled (falls back to per-IP otherwise)
 - **API-key authentication** — opt-in Bearer-key enforcement on `/v1/*`; each key maps to an org/team/user identity (attached to logs as metadata); disabled by default for backward compatibility
 
 ### Coming soon
@@ -305,7 +305,9 @@ When auth is enabled, the resolved identity is attached to every request's obser
 {"request_id": "mrdn-...", "model": "demo", "chosen_backend": "vllm-a", "status_code": 200, "org_id": "acme", "team_id": "eng", ...}
 ```
 
-> **Scope:** authentication enforcement + identity-aware logging are shipped. Per-identity rate limiting (re-keying the token bucket on `org_id`/`team_id`) is planned for a later slice.
+When auth is enabled, **rate limiting keys on the caller's org** (`org:{org_id}`) instead of source IP, so a tenant shares one bucket no matter which IP its requests arrive from. With auth disabled the limiter falls back to per-IP. The same `rate_limit.token_capacity`/`token_refill_rate` apply per bucket.
+
+> **Scope:** authentication enforcement, identity-aware logging, and per-org rate limiting are shipped. Per-org custom quotas and team-level granularity are planned for a later slice.
 
 ### Quick curl examples
 
