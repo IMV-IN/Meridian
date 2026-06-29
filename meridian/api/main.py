@@ -1,6 +1,7 @@
 """FastAPI application — Meridian inference gateway."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 from collections import deque
@@ -79,6 +80,7 @@ def _load_config() -> MeridianConfig:
 async def init_app(config: Optional[MeridianConfig] = None, start_health: bool = True) -> None:
     """Initialize app state. Called by lifespan or directly in tests."""
     global _registry, _strategy, _health_checker, _telemetry_poller, _request_logger, _audit_publisher, _config
+    global _session_store
 
     _config = config or _load_config()
 
@@ -136,6 +138,20 @@ async def init_app(config: Optional[MeridianConfig] = None, start_health: bool =
     _audit_publisher = AuditEventPublisher(_config.audit_bus)
     await _audit_publisher.start()
 
+    # Session affinity store (if enabled).
+    if _config.session_affinity.enabled:
+        from meridian.util.helpers import now_ms
+        _session_store = SessionStore(
+            ttl_ms=_config.session_affinity.ttl_s * 1000,
+            max_sessions=_config.session_affinity.max_sessions,
+            clock=now_ms,
+        )
+        logger.info(
+            "Session affinity enabled — ttl=%ds, max=%d",
+            _config.session_affinity.ttl_s,
+            _config.session_affinity.max_sessions,
+        )
+
 
 async def shutdown_app() -> None:
     """Clean up app state."""
@@ -153,7 +169,24 @@ async def shutdown_app() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_app()
+
+    # Background sweep task for session affinity (if enabled).
+    sweep_task: Optional[asyncio.Task[None]] = None
+    if _session_store is not None:
+        async def _sweep_loop() -> None:
+            while True:
+                await asyncio.sleep(_config.session_affinity.sweep_interval_s)  # type: ignore[union-attr]
+                _session_store.sweep()  # type: ignore[union-attr]
+        sweep_task = asyncio.create_task(_sweep_loop())
+
     yield
+
+    if sweep_task is not None:
+        sweep_task.cancel()
+        try:
+            await sweep_task
+        except asyncio.CancelledError:
+            pass
     await shutdown_app()
 
 
@@ -263,7 +296,7 @@ def _route(
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> Response:
     assert _registry is not None and _health_checker is not None
-    assert _request_logger is not None
+    assert _request_logger is not None and _config is not None
 
     # Using x-forwarded-for or x-real-ip headers first (best practise when behind a proxy)
     ip_address = request.headers.get("x-forwarded-for")
@@ -301,7 +334,8 @@ async def chat_completions(request: Request) -> Response:
     is_stream = body.get("stream", False)
 
     request_ctx = _build_request_context(body)
-    backend, tier_name = _select_with_tier(model, request_ctx)
+    session_id = request.headers.get(_config.session_affinity.header) if _config.session_affinity.enabled else None
+    backend, tier_name, session_route = _route(model, request_ctx, session_id)
     if backend is None:
         return _error_json(
             f"No healthy backend available for model {model!r}",
@@ -356,6 +390,7 @@ async def chat_completions(request: Request) -> Response:
                         latency_ms=latency,
                         error_type=error_type,
                         tier=tier_name,
+                        session_route=session_route,
                     )
                     _record_request(request_id, model, True, backend.name, status_code, latency, error_type)
                     if _audit_publisher:
@@ -371,6 +406,8 @@ async def chat_completions(request: Request) -> Response:
             resp.headers["x-meridian-backend"] = backend.name
             if tier_name is not None:
                 resp.headers["x-meridian-tier"] = tier_name
+            if session_route is not None:
+                resp.headers["x-meridian-session-route"] = session_route
             return resp
         else:
             non_stream_resp = await forward_non_stream(backend, body, request)
@@ -382,6 +419,8 @@ async def chat_completions(request: Request) -> Response:
             non_stream_resp.headers["x-meridian-backend"] = backend.name
             if tier_name is not None:
                 non_stream_resp.headers["x-meridian-tier"] = tier_name
+            if session_route is not None:
+                non_stream_resp.headers["x-meridian-session-route"] = session_route
             return non_stream_resp
 
     except httpx.RequestError as exc:
@@ -414,6 +453,7 @@ async def chat_completions(request: Request) -> Response:
                 latency_ms=latency,
                 error_type=error_type,
                 tier=tier_name,
+                session_route=session_route,
             )
             _record_request(request_id, model, False, backend.name, status_code, latency, error_type)
             if _audit_publisher:
