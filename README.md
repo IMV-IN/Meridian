@@ -20,6 +20,7 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **Tamper-evident audit pipeline** — optional async egress to Kafka/Redpanda, SHA-256 hash chain → Merkle tree → Ed25519 signing → S3 Object Lock (WORM); metadata-only
 - **Live dashboard** — real-time UI showing backend health, stats, and recent requests
 - **Rate limiting** — basic token bucket for now, will be upgraded to support org, team
+- **API-key authentication** — opt-in Bearer-key enforcement on `/v1/*`; each key maps to an org/team/user identity; disabled by default for backward compatibility
 
 ### Coming soon
 
@@ -224,6 +225,23 @@ session_affinity:
   sweep_interval_s: 60.0
   max_sessions: 100000
 
+# API-key authentication (optional, disabled by default). When enabled, every
+# request to /v1/* must carry Authorization: Bearer <key>. Keys are matched
+# against this list; unrecognised or missing keys get HTTP 401. Each key maps
+# to an identity (org_id required, team_id and user_id optional). Duplicate
+# keys are rejected at config load. The /metrics, /meridian/*, and /ui
+# endpoints are always open (no auth gate). Key format: mrdn_ followed by
+# 20-40 alphanumeric characters.
+auth:
+  enabled: false
+  keys:
+    - key: "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ"
+      org_id: "acme"
+      team_id: "eng"
+      user_id: "alice"
+    - key: "mrdn_9Bv4QwX8Ty2Rs5Np7MfLkHgDc"
+      org_id: "acme"
+
 health:
   interval_s: 5
   timeout_s: 2
@@ -265,6 +283,44 @@ Pre-built configs are available in the `configs/` directory:
 - `configs/local_gpu.yaml` — single GPU backend (Ollama)
 - `configs/dual_backend.yaml` — dual-backend failover testing with delay proxy
 - `configs/tiering_demo.yaml` — workload tiering across prefill/decode/general pools
+
+## API-key Authentication
+
+Authentication is **disabled by default** and fully backward compatible — existing deployments without an `auth:` block continue to work unchanged.
+
+When `auth.enabled: true`, every request to `/v1/*` must include a valid `Authorization: Bearer <key>` header. The `/metrics`, `/meridian/*`, and `/ui` endpoints are always open with no auth gate.
+
+**Error responses** follow the OpenAI error shape:
+
+- Missing or malformed header → HTTP 401, `"type": "invalid_request_error"`
+- Header present but key not found → HTTP 401, `"type": "authentication_error"`
+
+**Key format:** `mrdn_` followed by 20–40 alphanumeric characters. Each key is mapped to an identity at config load (`org_id` required; `team_id` and `user_id` optional). Duplicate keys are rejected at startup.
+
+> **Scope:** this milestone enforces the 401 gate only. Identity-aware logging and per-identity rate limiting are planned for a later slice.
+
+### Quick curl examples
+
+```bash
+# Without a key — returns 401
+curl -i http://localhost:8080/v1/models
+
+# HTTP/1.1 401 Unauthorized
+# {"error": {"message": "Missing or malformed Authorization header", "type": "invalid_request_error"}}
+
+# With a valid key — returns 200
+curl -i http://localhost:8080/v1/models \
+  -H "Authorization: Bearer mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ"
+
+# HTTP/1.1 200 OK
+# {"object":"list","data":[...]}
+
+# Chat completions also require the header when auth is enabled
+curl -i http://localhost:8080/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ" \
+  -d '{"model":"demo-model","messages":[{"role":"user","content":"Hello!"}]}'
+```
 
 ## API Reference
 

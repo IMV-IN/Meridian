@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - Unreleased
+
+### Added
+
+- **API-key authentication (Milestone F)** — opt-in Bearer-key enforcement on `/v1/*`, config-driven and disabled by default. When `auth.enabled: true`, every request to `/v1/chat/completions` and `/v1/models` must carry a valid `Authorization: Bearer <key>` header; missing or malformed headers return HTTP 401 with `"type": "invalid_request_error"`, unrecognised keys with `"type": "authentication_error"`. Both error shapes follow the OpenAI error envelope (`{"error": {"message": "...", "type": "..."}}`). The `/metrics`, `/meridian/*`, and `/ui` endpoints are always open with no auth gate. Keys are declared in the `auth.keys` list; each key maps to an identity (`org_id` required, `team_id` and `user_id` optional) and must match the pattern `^mrdn_[A-Za-z0-9]{20,40}$`. Duplicate keys are rejected at config load. New `meridian/auth/` package (`keys.py`), `KeyConfig` and `AuthConfig` Pydantic models (in `meridian/config/models.py`), and FastAPI middleware wired in `meridian/api/main.py`. **Scope:** authentication enforcement only — identity-aware logging and per-identity rate limiting are planned for a later slice.
+
 ## [0.3.1] - Unreleased
 
 ### Added

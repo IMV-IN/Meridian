@@ -36,3 +36,5 @@ nul
 diagrams/
 docs/
 brag-output/
+# local scratch validation config
+config_real.yaml
