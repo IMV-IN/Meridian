@@ -123,6 +123,35 @@ class SessionAffinityConfig(BaseModel):
     max_sessions: int = Field(default=100_000, ge=1)
 
 
+class KeyConfig(BaseModel):
+    """A single API key mapped to an identity."""
+
+    key: str = Field(pattern=r"^mrdn_[A-Za-z0-9]{20,40}$")
+    org_id: str = Field(min_length=1)
+    team_id: Optional[str] = None
+    user_id: Optional[str] = None
+
+
+class AuthConfig(BaseModel):
+    """API-key authentication. Disabled by default for backward compatibility.
+
+    When enabled, requests must carry a valid ``Authorization: Bearer <key>``
+    header; the key maps to an IdentityContext used for logging and (in later
+    milestones) rate limiting, cost attribution, and RBAC.
+    """
+
+    enabled: bool = Field(default=False)
+    keys: List[KeyConfig] = Field(default_factory=list)
+
+    @field_validator("keys")
+    @classmethod
+    def _no_duplicate_keys(cls, v: List[KeyConfig]) -> List[KeyConfig]:
+        seen = [kc.key for kc in v]
+        if len(seen) != len(set(seen)):
+            raise ValueError("auth.keys contains duplicate key values")
+        return v
+
+
 class MeridianConfig(BaseModel):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
@@ -132,6 +161,7 @@ class MeridianConfig(BaseModel):
     audit_bus: AuditBusConfig = Field(default_factory=AuditBusConfig)
     tiering: TieringConfig = Field(default_factory=TieringConfig)
     session_affinity: SessionAffinityConfig = Field(default_factory=SessionAffinityConfig)
+    auth: AuthConfig = Field(default_factory=AuthConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:

@@ -8,7 +8,7 @@ from collections import deque
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, AsyncGenerator, AsyncIterator, Dict, Optional, Set, Tuple
+from typing import Any, AsyncGenerator, AsyncIterator, Awaitable, Callable, Dict, Optional, Set, Tuple
 
 import httpx
 from fastapi import FastAPI, Request
@@ -17,6 +17,7 @@ from prometheus_client import generate_latest
 
 from meridian.api.ratelimitter import TokenBucket
 from meridian.audit.publisher import AuditEvent, AuditEventPublisher
+from meridian.auth import AuthError, IdentityContext, authenticate, build_key_index
 from meridian.config.models import MeridianConfig
 from meridian.health.checker import HealthChecker
 from meridian.metrics.collectors import (
@@ -46,6 +47,7 @@ _request_logger: Optional[RequestLogger] = None
 _audit_publisher: Optional[AuditEventPublisher] = None
 _config: Optional[MeridianConfig] = None
 _session_store: Optional[SessionStore] = None
+_key_index: Dict[str, IdentityContext] = {}
 
 # rate limiting
 _rate_limit: Dict[str, TokenBucket] = {}
@@ -80,9 +82,12 @@ def _load_config() -> MeridianConfig:
 async def init_app(config: Optional[MeridianConfig] = None, start_health: bool = True) -> None:
     """Initialize app state. Called by lifespan or directly in tests."""
     global _registry, _strategy, _health_checker, _telemetry_poller, _request_logger, _audit_publisher, _config
-    global _session_store
+    global _session_store, _key_index
 
     _config = config or _load_config()
+    _key_index = build_key_index(_config.auth)
+    if _config.auth.enabled:
+        logger.info("API-key auth enabled — %d key(s) loaded", len(_key_index))
 
     logging.basicConfig(
         level=getattr(logging, _config.logging.level.upper(), logging.INFO),
@@ -198,6 +203,17 @@ def _error_json(message: str, error_type: str, status: int) -> JSONResponse:
         status_code=status,
         content={"error": {"message": message, "type": error_type}},
     )
+
+
+@app.middleware("http")
+async def _auth_gate(request: Request, call_next: Callable[[Request], Awaitable[Response]]) -> Response:
+    """Enforce Bearer-key auth on /v1/* when enabled. All other paths open."""
+    if _config is not None and _config.auth.enabled and request.url.path.startswith("/v1/"):
+        try:
+            authenticate(request.headers.get("authorization"), _key_index)
+        except AuthError as exc:
+            return _error_json(exc.message, exc.error_type, 401)
+    return await call_next(request)
 
 
 def _build_request_context(body: Dict[str, Any]) -> RequestContext:
