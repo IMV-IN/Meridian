@@ -20,7 +20,7 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **Tamper-evident audit pipeline** — optional async egress to Kafka/Redpanda, SHA-256 hash chain → Merkle tree → Ed25519 signing → S3 Object Lock (WORM); metadata-only
 - **Live dashboard** — real-time UI showing backend health, stats, and recent requests
 - **Rate limiting** — basic token bucket for now, will be upgraded to support org, team
-- **API-key authentication** — opt-in Bearer-key enforcement on `/v1/*`; each key maps to an org/team/user identity; disabled by default for backward compatibility
+- **API-key authentication** — opt-in Bearer-key enforcement on `/v1/*`; each key maps to an org/team/user identity (attached to logs as metadata); disabled by default for backward compatibility
 
 ### Coming soon
 
@@ -297,7 +297,15 @@ When `auth.enabled: true`, every request to `/v1/*` must include a valid `Author
 
 **Key format:** `mrdn_` followed by 20–40 alphanumeric characters. Each key is mapped to an identity at config load (`org_id` required; `team_id` and `user_id` optional). Duplicate keys are rejected at startup.
 
-> **Scope:** this milestone enforces the 401 gate only. Identity-aware logging and per-identity rate limiting are planned for a later slice.
+### Identity-aware logging
+
+When auth is enabled, the resolved identity is attached to every request's observability output as **metadata only** — the API key itself is never logged. Each JSONL line and audit event carries `org_id` and `team_id` (both `null` when auth is disabled), so operators can attribute traffic per org/team:
+
+```json
+{"request_id": "mrdn-...", "model": "demo", "chosen_backend": "vllm-a", "status_code": 200, "org_id": "acme", "team_id": "eng", ...}
+```
+
+> **Scope:** authentication enforcement + identity-aware logging are shipped. Per-identity rate limiting (re-keying the token bucket on `org_id`/`team_id`) is planned for a later slice.
 
 ### Quick curl examples
 
