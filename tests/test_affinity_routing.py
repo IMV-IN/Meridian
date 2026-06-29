@@ -45,11 +45,20 @@ def test_remap_when_pinned_backend_unhealthy(monkeypatch):
     registry.get(b1.name).healthy = False  # kill the pinned backend
     b2, _, route2 = main._route("m1", _ctx(), session_id="sess-1")
     assert route2 == "remapped"
+    assert b2 is not None
     assert b2.name != b1.name
 
 
 def test_no_session_id_routes_normally(monkeypatch):
     _setup(monkeypatch)
     backend, _, route = main._route("m1", _ctx(), session_id=None)
+    assert backend is not None
+    assert route is None
+
+
+def test_affinity_disabled_with_session_id_routes_normally(monkeypatch):
+    _setup(monkeypatch)
+    main._config.session_affinity.enabled = False
+    backend, _, route = main._route("m1", _ctx(), session_id="sess-1")
     assert backend is not None
     assert route is None

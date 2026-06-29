@@ -246,7 +246,13 @@ def _route(
 
     backend, tier_name = _select_with_tier(model, request_ctx)
 
-    if affinity_on and _session_store is not None and backend is not None:
+    if backend is None:
+        # No healthy backend was routed (the caller will 503). Don't report a
+        # session outcome — a "remapped" with no backend is a contradictory
+        # signal. The stale pin (if any) is left to expire / remap on recovery.
+        return None, tier_name, None
+
+    if affinity_on and _session_store is not None:
         _session_store.put(session_id, backend.name)  # type: ignore[arg-type]
         if session_route is None:
             session_route = "new"
