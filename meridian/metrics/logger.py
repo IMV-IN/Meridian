@@ -28,6 +28,8 @@ class RequestLogger:
         error_type: Optional[str] = None,
         tier: Optional[str] = None,
         session_route: Optional[str] = None,
+        org_id: Optional[str] = None,
+        team_id: Optional[str] = None,
     ) -> None:
         record = {
             "request_id": request_id,
@@ -40,6 +42,8 @@ class RequestLogger:
             "error_type": error_type,
             "tier": tier,
             "session_route": session_route,
+            "org_id": org_id,
+            "team_id": team_id,
         }
         try:
             self._file.write(json.dumps(record) + "\n")
