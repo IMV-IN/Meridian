@@ -64,10 +64,15 @@ def test_bucket_blocks_after_exhaustion():
     assert b.allow_request() is False
 
 
-def test_bucket_refills_over_time():
+def test_bucket_refills_over_time(monkeypatch):
+    current_time = 100.0
+    monkeypatch.setattr(time, "time", lambda: current_time)
+
     b = TokenBucket(max_tokens=1, refill_rate=10)
     assert b.allow_request() is True
-    time.sleep(0.15)
+    assert b.allow_request() is False  # exhausted
+
+    current_time += 0.15
     assert b.allow_request() is True
 
 
@@ -77,19 +82,29 @@ def test_bucket_multiple_tokens():
     assert b.allow_request(tokens=1) is False
 
 
-def test_bucket_get_remaining():
+def test_bucket_get_remaining(monkeypatch):
+    current_time = 100.0
+    monkeypatch.setattr(time, "time", lambda: current_time)
+
     b = TokenBucket(max_tokens=5, refill_rate=1)
-    assert b.get_remaining() == pytest.approx(5, abs=1e-3)
+    assert b.get_remaining() == 5.0
     b.allow_request(tokens=2)
-    assert b.get_remaining() == pytest.approx(3, abs=1e-3)
+    assert b.get_remaining() == 3.0
+
+    current_time += 0.5
+    assert b.get_remaining() == 3.5
 
 
-def test_bucket_does_not_overfill():
+def test_bucket_does_not_overfill(monkeypatch):
+    current_time = 100.0
+    monkeypatch.setattr(time, "time", lambda: current_time)
+
     b = TokenBucket(max_tokens=2, refill_rate=100)
     b.allow_request(tokens=2)
-    time.sleep(0.1)
+
+    current_time += 1.0
     remaining = b.get_remaining()
-    assert remaining <= b.max_tokens
+    assert remaining == 2.0
 
 
 # ── Integration tests ───────────────────────────────────────────────────
