@@ -314,6 +314,13 @@ async def chat_completions(request: Request) -> Response:
     assert _registry is not None and _health_checker is not None
     assert _request_logger is not None and _config is not None
 
+    # Identity is stashed on request.state by the auth middleware (only when
+    # auth is enabled and the key validated). None otherwise. Metadata only —
+    # never the key itself. Used for rate-limit keying and logging below.
+    identity: Optional[IdentityContext] = getattr(request.state, "identity", None)
+    org_id = identity.org_id if identity else None
+    team_id = identity.team_id if identity else None
+
     # Using x-forwarded-for or x-real-ip headers first (best practise when behind a proxy)
     ip_address = request.headers.get("x-forwarded-for")
     if ip_address:
@@ -324,14 +331,17 @@ async def chat_completions(request: Request) -> Response:
     if not ip_address:
         ip_address = request.client.host if request.client else "127.0.0.1"
 
-    # check for ip in the bucket
+    # Rate-limit per tenant when authenticated (org-level), else per source IP.
+    # The namespace prefix keeps the two keyspaces from colliding.
+    # ponytail: org-level only; per-org custom quotas / team granularity later.
+    rl_key = f"org:{org_id}" if org_id else f"ip:{ip_address}"
     if _config is not None and _config.rate_limit.enabled:
         cfg = _config.rate_limit
-        bucket = _rate_limit.get(ip_address)
+        bucket = _rate_limit.get(rl_key)
 
         if bucket is None:
             bucket = TokenBucket(max_tokens=cfg.token_capacity, refill_rate=cfg.token_refill_rate)
-            _rate_limit[ip_address] = bucket
+            _rate_limit[rl_key] = bucket
 
         if not bucket.allow_request():
             error_resp = _error_json("Rate Limit Exceeded", f"Retry after {1 / bucket.refill_rate} seconds", 429)
@@ -348,13 +358,6 @@ async def chat_completions(request: Request) -> Response:
 
     model = body.get("model", "")
     is_stream = body.get("stream", False)
-
-    # Identity is stashed on request.state by the auth middleware (only when
-    # auth is enabled and the key validated). None otherwise. Metadata only —
-    # never the key itself.
-    identity: Optional[IdentityContext] = getattr(request.state, "identity", None)
-    org_id = identity.org_id if identity else None
-    team_id = identity.team_id if identity else None
 
     request_ctx = _build_request_context(body)
     session_id = request.headers.get(_config.session_affinity.header) if _config.session_affinity.enabled else None
