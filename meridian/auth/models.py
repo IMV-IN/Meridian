@@ -11,8 +11,8 @@ class IdentityContext:
     """The identity an authenticated request maps to.
 
     org_id is required (every API key belongs to an org). team_id and user_id
-    are optional (org-level keys vs user-level keys). scopes is reserved for
-    future fine-grained permissions (currently unused).
+    are optional (org-level keys vs user-level keys). scopes holds the model
+    allow-list (Milestone I); empty means all models are permitted.
     """
 
     org_id: str

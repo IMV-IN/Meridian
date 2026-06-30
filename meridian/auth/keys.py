@@ -36,6 +36,8 @@ def build_key_index(auth: AuthConfig) -> dict[str, IdentityContext]:
             org_id=kc.org_id,
             team_id=kc.team_id,
             user_id=kc.user_id,
+            # scopes carries the model allow-list (Milestone I). Empty = all.
+            scopes=frozenset(kc.allowed_models),
         )
         for kc in auth.keys
     }
