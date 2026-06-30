@@ -130,6 +130,8 @@ class KeyConfig(BaseModel):
     org_id: str = Field(min_length=1)
     team_id: Optional[str] = None
     user_id: Optional[str] = None
+    # Model allow-list. Empty = all models allowed (backward compatible).
+    allowed_models: List[str] = Field(default_factory=list)
 
 
 class AuthConfig(BaseModel):

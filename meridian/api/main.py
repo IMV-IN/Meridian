@@ -359,6 +359,17 @@ async def chat_completions(request: Request) -> Response:
     model = body.get("model", "")
     is_stream = body.get("stream", False)
 
+    # Model access control (Milestone I): a non-empty scope set is the caller's
+    # model allow-list. ponytail: lands after model-parse (so after the rate
+    # limit block) — a denied request still spends a rate token; Milestone J
+    # reorders so access denial precedes metering.
+    if identity is not None and identity.scopes and model not in identity.scopes:
+        return _error_json(
+            f"Key is not permitted to use model {model!r}",
+            "permission_error",
+            403,
+        )
+
     request_ctx = _build_request_context(body)
     session_id = request.headers.get(_config.session_affinity.header) if _config.session_affinity.enabled else None
     backend, tier_name, session_route = _route(model, request_ctx, session_id)

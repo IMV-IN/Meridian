@@ -4,7 +4,7 @@ A scannable record of **what's shipped** and **what's next**. For the full
 strategic picture see [`ROADMAP.md`](./ROADMAP.md); for per-change detail see
 [`../CHANGELOG.md`](../CHANGELOG.md). Keep this file updated as milestones land.
 
-_Last updated: 2026-06-30 (Milestone H)._
+_Last updated: 2026-06-30 (Milestone I)._
 
 ---
 
@@ -21,6 +21,7 @@ _Last updated: 2026-06-30 (Milestone H)._
 | **F** — API-key auth | `v0.4.0` | Opt-in Bearer-key gate on `/v1/*`, config-driven, disabled by default; keys map to org/team/user identity |
 | **G** — Identity-aware logging | `v0.4.0` | `org_id`/`team_id` attached to JSONL logs + audit events (metadata only; key never logged) |
 | **H** — Per-identity rate limiting | `v0.4.0` | Token bucket keys on `org:{org_id}` when authenticated (else `ip:{ip}`); same org shares a bucket across source IPs |
+| **I** — Model access control | `v0.5.0` | Per-key `allowed_models` allow-list; disallowed model → 403 (`permission_error`); empty list = unrestricted |
 
 Also shipped outside the A–E track: IP-based rate limiting (token bucket) and
 the tamper-evident audit pipeline (Kafka → SHA-256 hash chain → Merkle →
@@ -32,8 +33,8 @@ Ed25519 → S3 Object Lock WORM).
 
 | Milestone | Status | What |
 |---|---|---|
-| Per-org quotas | planned | Let each org declare its own `token_capacity`/`refill_rate` instead of one global limit; optional team-level granularity. Builds on H. |
+| **J** — Tenant budgets & quotas | designed | Pluggable `UsageMeter` (SQLite default + in-memory), org→team→user budget caps (tokens + requests, daily/monthly), pre-flight metering, 429 on exceed. Folds in per-org rate-limit overrides. Spec: `docs/superpowers/specs/2026-06-30-v0.5-tenant-governance-design.md`. Second half of v0.5. |
 
-The identity keystone (F+G+H) now unblocks the enterprise controls tracked in
-[`ROADMAP.md`](./ROADMAP.md): RBAC (org→team→user budgets), per-team cost
-attribution, and PII detection/redaction.
+After J, the identity keystone (F–J) unblocks the rest of the enterprise
+controls tracked in [`ROADMAP.md`](./ROADMAP.md): per-team cost attribution,
+multi-provider routing, and PII detection/redaction.

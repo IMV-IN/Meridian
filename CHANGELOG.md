@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.5.0] - Unreleased
+
+### Added
+
+- **Model access control (Milestone I)** — each API key may declare an `allowed_models` list; when set, requests for any other model return HTTP 403 with `"type": "permission_error"` (OpenAI error envelope). An empty/absent list means all models are allowed (backward compatible), and the gate only applies when auth is enabled. The allow-list is carried on `IdentityContext.scopes` (previously reserved) and enforced in the chat handler right after the model is parsed. First half of the v0.5 tenant-governance theme; see `docs/superpowers/specs/2026-06-30-v0.5-tenant-governance-design.md`.
+
 ## [0.4.0] - 2026-06-30
 
 ### Added

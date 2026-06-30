@@ -21,6 +21,7 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **Live dashboard** — real-time UI showing backend health, stats, and recent requests
 - **Rate limiting** — token bucket keyed per-org when auth is enabled (falls back to per-IP otherwise)
 - **API-key authentication** — opt-in Bearer-key enforcement on `/v1/*`; each key maps to an org/team/user identity (attached to logs as metadata); disabled by default for backward compatibility
+- **Model access control** — per-key `allowed_models` allow-list; disallowed models return 403 (empty list = unrestricted)
 
 ### Coming soon
 
@@ -307,7 +308,23 @@ When auth is enabled, the resolved identity is attached to every request's obser
 
 When auth is enabled, **rate limiting keys on the caller's org** (`org:{org_id}`) instead of source IP, so a tenant shares one bucket no matter which IP its requests arrive from. With auth disabled the limiter falls back to per-IP. The same `rate_limit.token_capacity`/`token_refill_rate` apply per bucket.
 
-> **Scope:** authentication enforcement, identity-aware logging, and per-org rate limiting are shipped. Per-org custom quotas and team-level granularity are planned for a later slice.
+### Model access control
+
+Each key may declare an `allowed_models` allow-list. When set, requests for any model outside the list return **HTTP 403** (`"type": "permission_error"`); an empty or absent list leaves the key unrestricted. The gate only applies when auth is enabled.
+
+```yaml
+auth:
+  enabled: true
+  keys:
+    - key: "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ"
+      org_id: "acme"
+      team_id: "eng"
+      allowed_models: ["qwen2.5:0.5b", "demo-model"]  # this key is limited to these
+    - key: "mrdn_9Bv4QwX8Ty2Rs5Np7MfLkHgDc"
+      org_id: "acme"                                    # no list => all models
+```
+
+> **Scope:** authentication, identity-aware logging, per-org rate limiting, and per-key model access control are shipped. Tenant budgets/quotas (org→team→user caps) are the next v0.5 milestone — see [`docs/ship.md`](docs/ship.md).
 
 ### Quick curl examples
 
