@@ -435,17 +435,19 @@ async def chat_completions(request: Request) -> Response:
         except ValueError:
             return _error_json("Invalid Content-Length header", "invalid_request_error", 400)
 
+    raw_buf = bytearray()
     try:
-        raw = await request.body()
+        async for chunk in request.stream():
+            raw_buf.extend(chunk)
+            if len(raw_buf) > max_body:
+                return _error_json(
+                    f"Request body exceeds limit of {max_body} bytes",
+                    "invalid_request_error",
+                    413,
+                )
+        raw = bytes(raw_buf)
     except Exception:
         return _error_json("Failed to read request body", "invalid_request_error", 400)
-
-    if len(raw) > max_body:
-        return _error_json(
-            f"Request body exceeds limit of {max_body} bytes",
-            "invalid_request_error",
-            413,
-        )
 
     try:
         body: Dict[str, Any] = json.loads(raw) if raw else {}
