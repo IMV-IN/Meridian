@@ -153,6 +153,8 @@ class KeyConfig(BaseModel):
     allowed_models: List[str] = Field(default_factory=list)
     # Optional PII policy override for this key (Milestone L). None = use global.
     pii_policy: Optional[str] = None
+    # Finance keys may read all orgs on /meridian/usage* (Milestone M enterprise).
+    cost_admin: bool = False
 
 
 class AuthConfig(BaseModel):
@@ -246,7 +248,11 @@ class ModelPrice(BaseModel):
 
 
 class CostConfig(BaseModel):
-    """Actual-token cost attribution (Milestone M). Disabled by default."""
+    """Actual-token cost attribution (Milestone M). Disabled by default.
+
+    Enterprise: use ``store: sqlite``, enable ``auth``, and grant ``cost_admin``
+    only to finance keys. Usage APIs require auth when cost is enabled.
+    """
 
     enabled: bool = Field(default=False)
     store: str = Field(default="memory")
@@ -256,6 +262,8 @@ class CostConfig(BaseModel):
     models: Dict[str, ModelPrice] = Field(default_factory=dict)
     default_prompt_per_1m: float = Field(default=0.0, ge=0.0)
     default_completion_per_1m: float = Field(default=0.0, ge=0.0)
+    # Cap query window to limit export size / DoS (days).
+    max_window_days: int = Field(default=366, ge=1, le=3660)
 
     @field_validator("store")
     @classmethod

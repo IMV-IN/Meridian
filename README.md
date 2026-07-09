@@ -31,8 +31,10 @@ Meridian is **not** an inference engine — it does not manage KV cache, batchin
 
 ### Cost attribution (Milestone M — unreleased until tagged v0.8.0)
 - Opt-in `cost.enabled`; prices per model (per 1M prompt/completion tokens)
-- Scrapes backend `usage` on non-stream responses and stream SSE tails
-- `GET /meridian/usage` + `GET /meridian/usage.csv`; `meridian_tokens_total{model,kind}`
+- Scrapes backend `usage` on non-stream responses and stream SSE tails (last usage wins)
+- `GET /meridian/usage` + `GET /meridian/usage.csv` — **auth required** when cost is on; org-scoped unless `cost_admin: true`
+- `meridian_tokens_total{model,kind}` (no org labels)
+- Enterprise checklist: [`docs/ENTERPRISE_COST.md`](docs/ENTERPRISE_COST.md)
 
 ### Coming soon (not tagged yet — do not pitch as shipped)
 - **Multi-provider routing** — OpenAI/Anthropic/Google + self-hosted

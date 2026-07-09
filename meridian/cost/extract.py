@@ -31,8 +31,8 @@ def usage_from_dict(body: Any) -> Optional[Tuple[int, int]]:
 
 
 def usage_from_sse_bytes(buf: bytes) -> Optional[Tuple[int, int]]:
-    """Best-effort: find a usage object in accumulated SSE payload."""
-    # Prefer full JSON lines after "data: "
+    """Best-effort: last usage object in SSE payload wins (final chunk preferred)."""
+    found: Optional[Tuple[int, int]] = None
     for line in buf.split(b"\n"):
         line = line.strip()
         if not line.startswith(b"data:"):
@@ -44,15 +44,17 @@ def usage_from_sse_bytes(buf: bytes) -> Optional[Tuple[int, int]]:
             obj = json.loads(payload)
         except Exception:
             continue
-        found = usage_from_dict(obj)
-        if found is not None:
-            return found
-    # Fallback regex
-    m = _USAGE_RE.search(buf)
-    if not m:
+        u = usage_from_dict(obj)
+        if u is not None:
+            found = u  # keep scanning — last wins
+    if found is not None:
+        return found
+    # Fallback: last regex match in buffer
+    matches = list(_USAGE_RE.finditer(buf))
+    if not matches:
         return None
     try:
-        usage = json.loads(m.group(1))
+        usage = json.loads(matches[-1].group(1))
     except Exception:
         return None
     return usage_from_dict({"usage": usage})

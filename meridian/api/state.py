@@ -109,9 +109,17 @@ async def build_app_state(
 
     cost_ledger: Optional[CostLedger] = None
     if cfg.cost.enabled:
+        if not cfg.auth.enabled:
+            logger.warning(
+                "cost.enabled=true but auth.enabled=false — /meridian/usage* "
+                "will refuse until auth is enabled (enterprise safety)"
+            )
         if cfg.cost.store == "memory":
             cost_ledger = InMemoryCostLedger()
-            logger.info("Cost attribution enabled — in-memory ledger")
+            logger.warning(
+                "Cost attribution using in-memory ledger — data is lost on restart; "
+                "use cost.store=sqlite for enterprise"
+            )
         else:
             cost_ledger = SqliteCostLedger(cfg.cost.sqlite_path)
             logger.info("Cost attribution enabled — sqlite at %s", cfg.cost.sqlite_path)

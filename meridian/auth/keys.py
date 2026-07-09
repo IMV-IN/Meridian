@@ -38,6 +38,7 @@ def build_key_index(auth: AuthConfig) -> dict[str, IdentityContext]:
             user_id=kc.user_id,
             allowed_models=frozenset(kc.allowed_models),
             pii_policy=kc.pii_policy,
+            cost_admin=kc.cost_admin,
         )
         for kc in auth.keys
     }

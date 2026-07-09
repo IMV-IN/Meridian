@@ -23,6 +23,7 @@ from meridian.api.routing import route
 from meridian.api.state import AppState, build_app_state, shutdown_app_state
 from meridian.auth import AuthError, authenticate
 from meridian.config.models import MeridianConfig
+from meridian.cost.authz import clamp_window_days, require_usage_identity, resolve_usage_scope
 from meridian.cost.extract import usage_from_dict, usage_from_sse_bytes
 from meridian.cost.record import record_actual_usage
 from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
@@ -302,11 +303,12 @@ async def recent_requests() -> JSONResponse:
 
 @app.get("/meridian/usage")
 async def usage_report(
+    request: Request,
     org: Optional[str] = None,
     team: Optional[str] = None,
     window_days: int = 30,
-) -> JSONResponse:
-    """Cost/token report (Milestone M). Empty when cost.enabled is false."""
+) -> Response:
+    """Cost/token report. Requires auth when cost is enabled; org-scoped by key."""
     state = get_state()
     if state.cost_ledger is None:
         return JSONResponse({
@@ -314,7 +316,17 @@ async def usage_report(
             "currency": state.config.cost.currency,
             "rows": [],
         })
-    rows = state.cost_ledger.query(org_id=org, team_id=team, window_days=window_days)
+    try:
+        identity = require_usage_identity(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+        org_f, team_f = resolve_usage_scope(identity, org, team)
+    except GatewayError as exc:
+        return exc.to_response()
+    window = clamp_window_days(window_days, state.config.cost.max_window_days)
+    rows = state.cost_ledger.query(org_id=org_f, team_id=team_f, window_days=window)
     return JSONResponse({
         "enabled": True,
         "currency": state.config.cost.currency,
@@ -336,6 +348,7 @@ async def usage_report(
 
 @app.get("/meridian/usage.csv")
 async def usage_csv(
+    request: Request,
     org: Optional[str] = None,
     team: Optional[str] = None,
     window_days: int = 30,
@@ -351,7 +364,17 @@ async def usage_csv(
         "prompt_tokens", "completion_tokens", "requests", "cost", "currency",
     ])
     if state.cost_ledger is not None:
-        for r in state.cost_ledger.query(org_id=org, team_id=team, window_days=window_days):
+        try:
+            identity = require_usage_identity(
+                auth_enabled=state.config.auth.enabled,
+                key_index=state.key_index,
+                authorization=request.headers.get("authorization"),
+            )
+            org_f, team_f = resolve_usage_scope(identity, org, team)
+        except GatewayError as exc:
+            return exc.to_response()
+        window = clamp_window_days(window_days, state.config.cost.max_window_days)
+        for r in state.cost_ledger.query(org_id=org_f, team_id=team_f, window_days=window):
             w.writerow([
                 r.org_id, r.team_id, r.model, r.day,
                 r.prompt_tokens, r.completion_tokens, r.requests,

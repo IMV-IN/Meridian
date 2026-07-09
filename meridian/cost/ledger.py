@@ -129,6 +129,9 @@ def _day_offset(day: str, delta: int) -> str:
 class SqliteCostLedger(CostLedger):
     def __init__(self, path: str) -> None:
         self._conn = sqlite3.connect(path, check_same_thread=False)
+        # Enterprise: WAL improves concurrent readers under request write load.
+        self._conn.execute("PRAGMA journal_mode=WAL")
+        self._conn.execute("PRAGMA synchronous=NORMAL")
         self._conn.execute(
             """
             CREATE TABLE IF NOT EXISTS cost_ledger (

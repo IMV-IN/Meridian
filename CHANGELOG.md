@@ -6,7 +6,7 @@ All notable changes to this project will be documented in this file.
 
 ### Added
 
-- **Cost attribution (Milestone M)** — opt-in `cost:` config; records actual `usage` from non-stream JSON and stream SSE tail (last 64KiB scrape). Per-model prices (`prompt_per_1m` / `completion_per_1m`). Ledger (memory or sqlite). `GET /meridian/usage` + `/meridian/usage.csv`. Prometheus `meridian_tokens_total{model,kind}` (no org labels).
+- **Cost attribution (Milestone M)** — opt-in `cost:` config; records actual `usage` from non-stream JSON and stream SSE tail (last 64KiB scrape, **last usage wins**). Per-model prices. Ledger (memory or sqlite + WAL). `GET /meridian/usage` + `/meridian/usage.csv` with **enterprise authz**: requires `auth.enabled` + Bearer key; non-admin org/team scoped; `cost_admin` for cross-org export. Prometheus `meridian_tokens_total{model,kind}`. See `docs/ENTERPRISE_COST.md`.
 
 ## [Unreleased]
 
