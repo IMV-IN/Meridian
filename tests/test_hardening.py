@@ -10,8 +10,9 @@ from unittest.mock import MagicMock
 import httpx
 import pytest
 
-from meridian.api.main import _finalize_request, init_app
+from meridian.api.finalize import finalize_request
 from meridian.api.main import app as meridian_app
+from meridian.api.main import init_app
 from meridian.audit.publisher import AuditEvent, AuditEventPublisher
 from meridian.config.models import AuditBusConfig, MeridianConfig
 from meridian.registry.backend import Backend
@@ -125,48 +126,46 @@ def test_audit_enqueue_is_sync_and_noop_when_disabled():
     pub.enqueue(AuditEvent(request_id="r1", model="m", backend="b", status_code=200))
 
 
-def test_finalize_request_decrements_inflight_and_enqueues_audit():
-    """Cancel-safe teardown runs fully without awaiting."""
-    # Real-ish Backend methods via MagicMock side effects
-    backend = MagicMock(spec=Backend)
-    backend.name = "b1"
-    backend.healthy = True
-
-    enqueued: List[AuditEvent] = []
-
+def _mock_state_for_finalize(enqueued: List[AuditEvent]):
+    """Minimal stand-in for AppState used only by finalize unit tests."""
     class CapturingPublisher:
         def enqueue(self, event: AuditEvent) -> None:
             enqueued.append(event)
 
-    import meridian.api.main as main_mod
+    state = MagicMock()
+    state.request_logger = MagicMock()
+    state.audit_publisher = CapturingPublisher()
+    state.record_request = MagicMock()
+    return state
 
-    old_logger = main_mod._request_logger
-    old_pub = main_mod._audit_publisher
-    mock_logger = MagicMock()
-    main_mod._request_logger = mock_logger
-    main_mod._audit_publisher = CapturingPublisher()  # type: ignore[assignment]
-    try:
-        _finalize_request(
-            request_id="req-1",
-            model="demo",
-            stream=True,
-            backend=backend,
-            status_code=499,
-            start=0.0,
-            error_type="client_disconnect",
-            request_ctx=RequestContext(prompt_tokens=1, max_tokens=1, cost=1.0),
-            tier_name=None,
-            session_route=None,
-            org_id="acme",
-            team_id=None,
-        )
-    finally:
-        main_mod._request_logger = old_logger
-        main_mod._audit_publisher = old_pub
+
+def test_finalize_request_decrements_inflight_and_enqueues_audit():
+    """Cancel-safe teardown runs fully without awaiting."""
+    backend = MagicMock(spec=Backend)
+    backend.name = "b1"
+    backend.healthy = True
+    enqueued: List[AuditEvent] = []
+    state = _mock_state_for_finalize(enqueued)
+
+    finalize_request(
+        state,
+        request_id="req-1",
+        model="demo",
+        stream=True,
+        backend=backend,
+        status_code=499,
+        start=0.0,
+        error_type="client_disconnect",
+        request_ctx=RequestContext(prompt_tokens=1, max_tokens=1, cost=1.0),
+        tier_name=None,
+        session_route=None,
+        org_id="acme",
+        team_id=None,
+    )
 
     backend.decrement_inflight.assert_called_once()
     backend.subtract_inflight_cost.assert_called_once()
-    mock_logger.log.assert_called_once()
+    state.request_logger.log.assert_called_once()
     assert len(enqueued) == 1
     assert enqueued[0].status_code == 499
     assert enqueued[0].error_type == "client_disconnect"
@@ -179,19 +178,8 @@ async def test_stream_generator_cleanup_on_cancel():
     backend = MagicMock(spec=Backend)
     backend.name = "b1"
     backend.healthy = True
-
     enqueued: List[AuditEvent] = []
-
-    class CapturingPublisher:
-        def enqueue(self, event: AuditEvent) -> None:
-            enqueued.append(event)
-
-    import meridian.api.main as main_mod
-
-    old_logger = main_mod._request_logger
-    old_pub = main_mod._audit_publisher
-    main_mod._request_logger = MagicMock()
-    main_mod._audit_publisher = CapturingPublisher()  # type: ignore[assignment]
+    state = _mock_state_for_finalize(enqueued)
 
     async def flaky_upstream() -> AsyncIterator[bytes]:
         yield b"data: hi\n\n"
@@ -211,7 +199,8 @@ async def test_stream_generator_cleanup_on_cancel():
             status_code = 499
             raise
         finally:
-            _finalize_request(
+            finalize_request(
+                state,
                 request_id="req-cancel",
                 model="demo",
                 stream=True,
@@ -226,15 +215,10 @@ async def test_stream_generator_cleanup_on_cancel():
                 team_id=None,
             )
 
-    try:
-        main_mod._request_logger = MagicMock()
-        chunks = []
-        with pytest.raises(asyncio.CancelledError):
-            async for c in tracked():
-                chunks.append(c)
-    finally:
-        main_mod._request_logger = old_logger
-        main_mod._audit_publisher = old_pub
+    chunks = []
+    with pytest.raises(asyncio.CancelledError):
+        async for c in tracked():
+            chunks.append(c)
 
     assert chunks == [b"data: hi\n\n"]
     backend.decrement_inflight.assert_called_once()

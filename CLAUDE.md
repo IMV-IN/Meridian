@@ -42,13 +42,16 @@ Client -> Meridian Gateway (FastAPI)
 -> Backend N
 
 Key modules
-- API: `meridian/api/main.py`
+- API composition: `meridian/api/main.py` (thin FastAPI routes)
+- App runtime: `meridian/api/state.py` (`AppState`)
+- Request policy chain: `meridian/api/pipeline.py`
+- Routing helpers: `meridian/api/routing.py`
+- Teardown: `meridian/api/finalize.py`
 - Router strategies: `meridian/router/strategies.py`
-- Registry/state: `meridian/registry/backend.py`
+- Registry: `meridian/registry/backend.py`
 - Health: `meridian/health/checker.py`
-- Proxy: `meridian/proxy/forward.py`
+- Proxy: `meridian/proxy/forward.py` (does not forward client Meridian keys)
 - Metrics: `meridian/metrics/collectors.py`
-- Audit logs: `meridian/metrics/logger.py`
 - Auth / identity: `meridian/auth/`
 - Usage / budgets: `meridian/usage/`
 - PII: `meridian/pii/`

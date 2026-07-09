@@ -1,0 +1,104 @@
+"""Sync request teardown (stream-cancel safe)."""
+
+from __future__ import annotations
+
+from typing import Dict, Optional
+
+from meridian.api.state import AppState
+from meridian.audit.publisher import AuditEvent
+from meridian.metrics.collectors import (
+    BACKEND_HEALTHY,
+    BACKEND_INFLIGHT,
+    REQUEST_LATENCY,
+    REQUESTS_TOTAL,
+)
+from meridian.registry.backend import Backend
+from meridian.router.strategies import RequestContext
+from meridian.util.helpers import now_ms
+
+
+def finalize_request(
+    state: AppState,
+    *,
+    request_id: str,
+    model: str,
+    stream: bool,
+    backend: Backend,
+    status_code: int,
+    start: float,
+    error_type: Optional[str],
+    request_ctx: RequestContext,
+    tier_name: Optional[str],
+    session_route: Optional[str],
+    org_id: Optional[str],
+    team_id: Optional[str],
+    pii_counts: Optional[Dict[str, int]] = None,
+) -> None:
+    """All teardown is synchronous — safe inside CancelledError finally blocks."""
+    latency = now_ms() - start
+    backend.decrement_inflight()
+    backend.subtract_inflight_cost(request_ctx.cost)
+    backend.update_latency(latency)
+    BACKEND_INFLIGHT.labels(backend=backend.name).dec()
+    REQUESTS_TOTAL.labels(
+        backend=backend.name,
+        model=model,
+        status=str(status_code),
+        stream="true" if stream else "false",
+    ).inc()
+    REQUEST_LATENCY.labels(backend=backend.name, model=model).observe(latency)
+    BACKEND_HEALTHY.labels(backend=backend.name).set(1 if backend.healthy else 0)
+
+    pii_meta = pii_counts if pii_counts else None
+    state.request_logger.log(
+        request_id=request_id,
+        model=model,
+        stream=stream,
+        backend=backend.name,
+        status_code=status_code,
+        latency_ms=latency,
+        error_type=error_type,
+        tier=tier_name,
+        session_route=session_route,
+        org_id=org_id,
+        team_id=team_id,
+        pii=pii_meta,
+    )
+    state.record_request(
+        request_id, model, stream, backend.name, status_code, latency, error_type
+    )
+    extra: Dict[str, object] = {
+        "tier": tier_name,
+        "org_id": org_id,
+        "team_id": team_id,
+    }
+    if pii_meta is not None:
+        extra["pii"] = pii_meta
+    state.audit_publisher.enqueue(
+        AuditEvent(
+            request_id=request_id,
+            model=model,
+            stream=stream,
+            backend=backend.name,
+            status_code=status_code,
+            latency_ms=latency,
+            error_type=error_type,
+            extra=extra,  # type: ignore[arg-type]
+        )
+    )
+
+
+def stamp_meridian_headers(
+    headers: Dict[str, str],
+    *,
+    request_id: str,
+    backend: str,
+    tier_name: Optional[str],
+    session_route: Optional[str],
+) -> None:
+    headers["x-request-id"] = request_id
+    headers["x-meridian-backend"] = backend
+    if tier_name is not None:
+        headers["x-meridian-tier"] = tier_name
+    if session_route is not None:
+        headers["x-meridian-session-route"] = session_route

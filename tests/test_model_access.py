@@ -15,21 +15,21 @@ from meridian.config.models import AuthConfig, KeyConfig, MeridianConfig
 KEY = "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ"
 
 
-# ── Unit: build_key_index populates scopes from allowed_models ───────────────
+# ── Unit: build_key_index populates allowed_models ───────────────────────────
 
 
-def test_allowed_models_become_scopes():
+def test_allowed_models_on_identity():
     idx = build_key_index(AuthConfig(enabled=True, keys=[
         KeyConfig(key=KEY, org_id="acme", allowed_models=["demo", "small"]),
     ]))
-    assert idx[KEY].scopes == frozenset({"demo", "small"})
+    assert idx[KEY].allowed_models == frozenset({"demo", "small"})
 
 
-def test_empty_allowed_models_is_empty_scopes():
+def test_empty_allowed_models_is_unrestricted():
     idx = build_key_index(AuthConfig(enabled=True, keys=[
         KeyConfig(key=KEY, org_id="acme"),
     ]))
-    assert idx[KEY].scopes == frozenset()
+    assert idx[KEY].allowed_models == frozenset()
 
 
 # ── Integration: the 403 gate ───────────────────────────────────────────────

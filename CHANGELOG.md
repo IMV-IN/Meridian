@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- **Architecture refactor (AppState + request pipeline)** — runtime dependencies live in `AppState` (`meridian/api/state.py`) instead of a pile of module globals; chat policies (model access, PII, budgets, rate limit) run through `prepare_chat_request` (`pipeline.py`); routing/affinity in `routing.py`; teardown in `finalize.py`. `main.py` is composition-only (~330 lines).
+- **Upstream auth isolation** — client Meridian `Authorization` is **never** forwarded to backends. Optional per-backend `backends[].auth_header` for upstream credentials.
+- **Rate-limit org overrides** — moved from `budgets.orgs.*.token_capacity` to `rate_limit.org_overrides.<org_id>` (clear product boundary).
+- **Identity model** — `IdentityContext.scopes` renamed to honest `allowed_models`.
+
 ## [0.7.0] - 2026-07-09
 
 ### Added

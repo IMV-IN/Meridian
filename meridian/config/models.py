@@ -64,6 +64,16 @@ class BackendConfig(BaseModel):
     tags: List[str] = Field(default_factory=list)
     health_endpoint: str = "/v1/models"
     telemetry: Optional[BackendTelemetryConfig] = None
+    # Optional upstream Authorization value (never the client Meridian key).
+    auth_header: Optional[str] = None
+
+
+class OrgRateLimitOverride(BaseModel):
+    """Per-org token-bucket knobs (not budget caps)."""
+
+    token_capacity: Optional[float] = Field(default=None, gt=0)
+    token_refill_rate: Optional[float] = Field(default=None, gt=0)
+
 
 class RateLimitConfig(BaseModel):
     enabled: bool = Field(default=False)
@@ -73,6 +83,8 @@ class RateLimitConfig(BaseModel):
     max_buckets: int = Field(default=100_000, ge=1)
     idle_ttl_s: float = Field(default=3600.0, gt=0.0)
     sweep_interval_s: float = Field(default=60.0, gt=0.0)
+    # Per-org capacity/refill overrides (moved off budgets — clear product boundary).
+    org_overrides: Dict[str, OrgRateLimitOverride] = Field(default_factory=dict)
 
 
 class AuditBusConfig(BaseModel):
@@ -171,16 +183,13 @@ class PeriodCaps(BaseModel):
 
 
 class ScopeBudget(BaseModel):
-    """Caps for one tenant scope (org, team, or user).
+    """Caps for one tenant scope (org, team, or user). Daily/monthly only.
 
-    Rate-limit overrides (``token_capacity`` / ``token_refill_rate``) are only
-    consulted for org-level entries when building the token bucket.
+    Per-org rate-limit overrides live under ``rate_limit.org_overrides``, not here.
     """
 
     daily: Optional[PeriodCaps] = None
     monthly: Optional[PeriodCaps] = None
-    token_capacity: Optional[float] = Field(default=None, gt=0)
-    token_refill_rate: Optional[float] = Field(default=None, gt=0)
 
 
 class BudgetConfig(BaseModel):

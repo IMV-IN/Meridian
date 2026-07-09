@@ -52,8 +52,6 @@ def test_budgets_config_parses():
             "orgs": {
                 "acme": {
                     "daily": {"tokens": 1000, "requests": 50},
-                    "token_capacity": 5,
-                    "token_refill_rate": 2,
                 },
             },
             "teams": {"acme/eng": {"daily": {"tokens": 100}}},
@@ -63,7 +61,6 @@ def test_budgets_config_parses():
     assert cfg.budgets.enabled is True
     assert cfg.budgets.store == "memory"
     assert cfg.budgets.orgs["acme"].daily.tokens == 1000
-    assert cfg.budgets.orgs["acme"].token_capacity == 5
     assert cfg.budgets.teams["acme/eng"].daily.tokens == 100
     assert cfg.budgets.users["acme/alice"].monthly.requests == 10
 
@@ -309,26 +306,23 @@ async def test_budget_429_does_not_spend_rate_limit():
 
 @pytest.mark.asyncio
 async def test_per_org_rate_limit_override():
-    """Org-level token_capacity override shrinks the burst vs global default."""
-    budgets = {
-        "enabled": True,
-        "store": "memory",
-        "orgs": {
-            "acme": {
-                "token_capacity": 1,
-                "token_refill_rate": 0.001,
-            },
-        },
-    }
+    """rate_limit.org_overrides shrinks the burst for one org vs global default."""
+    budgets = {"enabled": False, "store": "memory"}
     # Global rate limit is generous; acme override is tight.
     async with await _client(
         budgets,
-        rate_limit={"enabled": True, "token_capacity": 100, "token_refill_rate": 100},
+        rate_limit={
+            "enabled": True,
+            "token_capacity": 100,
+            "token_refill_rate": 100,
+            "org_overrides": {
+                "acme": {"token_capacity": 1, "token_refill_rate": 0.001},
+            },
+        },
     ) as c:
         h = {"Authorization": f"Bearer {KEY_ACME}"}
         first = await c.post("/v1/chat/completions", headers=h, json=_body())
         second = await c.post("/v1/chat/completions", headers=h, json=_body())
     assert first.status_code == 502
     assert second.status_code == 429
-    # Rate limiter message (not budget — no daily/monthly caps set)
     assert second.json()["error"]["message"] == "Rate Limit Exceeded"
