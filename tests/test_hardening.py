@@ -127,9 +127,6 @@ def test_audit_enqueue_is_sync_and_noop_when_disabled():
 
 def test_finalize_request_decrements_inflight_and_enqueues_audit():
     """Cancel-safe teardown runs fully without awaiting."""
-    bc = MagicMock()
-    bc.name = "b1"
-    bc.healthy = True
     # Real-ish Backend methods via MagicMock side effects
     backend = MagicMock(spec=Backend)
     backend.name = "b1"
