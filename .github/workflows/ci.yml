@@ -24,6 +24,22 @@ jobs:
       - name: Install dependencies
         run: pip install -e ".[dev]"
 
+      - name: Check package version consistency
+        run: |
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          py = Path("pyproject.toml").read_text()
+          init = Path("meridian/__init__.py").read_text()
+          m_py = re.search(r'^version\s*=\s*"([^"]+)"', py, re.M)
+          m_init = re.search(r'^__version__\s*=\s*"([^"]+)"', init, re.M)
+          assert m_py and m_init, "version fields missing"
+          assert m_py.group(1) == m_init.group(1), (
+              f"pyproject {m_py.group(1)!r} != __init__ {m_init.group(1)!r}"
+          )
+          print(f"version ok: {m_py.group(1)}")
+          PY
+
       - name: Lint with ruff
         run: ruff check .
 

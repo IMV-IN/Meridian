@@ -23,6 +23,7 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **API-key authentication** — opt-in Bearer-key enforcement on `/v1/*`; each key maps to an org/team/user identity (attached to logs as metadata); disabled by default for backward compatibility
 - **Model access control** — per-key `allowed_models` allow-list; disallowed models return 403 (empty list = unrestricted)
 - **Tenant budgets & quotas** — org→team→user caps on estimated tokens and requests (daily/monthly); pre-flight 429; SQLite meter by default; per-org rate-limit overrides
+- **Hardened for pilots** — bounded rate-limit store, stream-disconnect-safe cleanup, request body size cap, non-root container with healthcheck
 
 ### Coming soon
 

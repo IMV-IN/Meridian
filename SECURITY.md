@@ -38,6 +38,8 @@ within 14 days for confirmed high-severity issues.
 | **Model access** | Per-key `allowed_models` allow-list; out-of-scope models → 403. |
 | **Abuse / flooding** | Token-bucket rate limiting keyed per-org (auth on) or per-IP (auth off); optional org overrides. |
 | **Tenant spend** | Optional org→team→user budgets (tokens + requests, daily/monthly); pre-flight 429 when exceeded. |
+| **Resource abuse** | Bounded rate-limit key store (idle TTL + max buckets); request body size cap (`gateway.max_body_bytes` → 413). |
+| **Container baseline** | Image runs as non-root; Docker `HEALTHCHECK` on `/meridian/status`. |
 | **Prompt confidentiality in logs** | Prompts are **never logged by default**. JSONL logs and audit events are metadata-only (request_id, backend, model, stream, latency, status, org_id/team_id). |
 | **Audit integrity** | Optional tamper-evident pipeline: SHA-256 hash chain → Merkle tree → Ed25519 signature → S3 Object Lock (WORM). Any single-byte modification of archived events breaks verification. |
 | **Metric cardinality** | Prometheus labels are bounded (backend, model, status, stream — all config-constrained). Never labeled by prompt text, user id, or raw request id. |

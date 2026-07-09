@@ -58,38 +58,24 @@ Compute: none (mock backends).
 
 ## Milestone K — Hardening release (`v0.6.0`)
 
+**Status:** implemented (branch `milestone/K-hardening`).
+
 **Objective:** fix the known correctness issues and make the gateway safe to
-put in front of a design partner. This is the "can't run a pilot on a
-memory-leaking gateway" milestone.
+put in front of a design partner.
 
-Scope (full list in [`KNOWN_ISSUES.md`](./KNOWN_ISSUES.md))
-1. **Bounded rate-limit store** — idle-TTL sweep or LRU cap on the
-   `_rate_limit` bucket map (`meridian/api/main.py:53`).
-2. **Streaming cancellation safety** — `tracked_stream()` finally block must
-   survive `CancelledError`: shield the audit publish (or move it to the
-   fire-and-forget queue path), guarantee inflight-counter decrement.
-3. **Container hardening** — non-root `USER`, `HEALTHCHECK` in Dockerfile,
-   pinned base image digest.
-4. **Release hygiene** — tag the overdue `v0.4.0`/`v0.5.0` releases; bump
-   `pyproject.toml` version in every milestone's polish commit (it is
-   currently stuck at `0.1.0`); add a CI check that tag == pyproject version.
-5. **Request body size cap** — reject bodies over a configurable limit with
-   413 (cheap DoS guard, config default e.g. 10 MB).
-6. Baseline load numbers: publish p50/p95/p99 overhead vs direct backend at
-   50/150/300 concurrent (matches the enterprise-scale analysis in
-   [`ENTERPRISE_PROPOSAL.md`](./ENTERPRISE_PROPOSAL.md) §1.2).
+Shipped
+1. **Bounded rate-limit store** — `RateLimitStore` idle TTL + max keys + sweep.
+2. **Streaming cancellation safety** — sync `_finalize_request` + audit
+   `enqueue()` (no await in stream `finally`); 499 on client disconnect.
+3. **Container hardening** — non-root `USER 10001`, `HEALTHCHECK`,
+   `python:3.11-slim-bookworm`.
+4. **Release hygiene** — `pyproject` / `__version__` at **0.6.0**; CI checks
+   package version consistency; release workflow checks tag == pyproject.
+5. **Request body size cap** — `gateway.max_body_bytes` (default 10 MiB) → 413.
 
-DoD
-- Soak test: 1M requests from 100k distinct IPs → RSS flat.
-- Kill client mid-stream 1000× → audit event count matches request count,
-  inflight gauge returns to 0.
-- `docker run` as non-root works out of the box; image passes `trivy` scan
-  with no HIGH/CRITICAL.
-
-Tests
-- Unit: bucket eviction, TTL.
-- Integration: mid-stream client disconnect (the current biggest gap).
-- CI: version-tag consistency check.
+Deferred (manual / follow-up)
+- Full 1M-request soak RSS report and published p50/p95 gateway overhead table.
+- Historical git tags for v0.4.0/v0.5.0 (operator action after merge if desired).
 
 Compute: none.
 

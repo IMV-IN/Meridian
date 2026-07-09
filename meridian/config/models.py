@@ -25,6 +25,9 @@ class GatewayConfig(BaseModel):
     queue_weight: float = Field(default=0.0, ge=0.0)
     mem_weight: float = Field(default=0.0, ge=0.0)
 
+    # Max request body size for /v1/chat/completions (Milestone K). Default 10 MiB.
+    max_body_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
+
 
 class BackendTelemetryConfig(BaseModel):
     """Per-backend telemetry source configuration.
@@ -66,6 +69,10 @@ class RateLimitConfig(BaseModel):
     enabled: bool = Field(default=False)
     token_capacity: float = Field(default=1, gt=0)
     token_refill_rate: float = Field(default=1, gt=0)
+    # Bounded store (Milestone K) — idle TTL + max keys prevent unbounded growth.
+    max_buckets: int = Field(default=100_000, ge=1)
+    idle_ttl_s: float = Field(default=3600.0, gt=0.0)
+    sweep_interval_s: float = Field(default=60.0, gt=0.0)
 
 
 class AuditBusConfig(BaseModel):
