@@ -24,13 +24,13 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **Model access control** — per-key `allowed_models` allow-list; disallowed models return 403 (empty list = unrestricted)
 - **Tenant budgets & quotas** — org→team→user caps on estimated tokens and requests (daily/monthly); pre-flight 429; SQLite meter by default; per-org rate-limit overrides
 - **Hardened for pilots** — bounded rate-limit store, stream-disconnect-safe cleanup, request body size cap, non-root container with healthcheck
+- **PII detection & redaction** — opt-in India entity pack (Aadhaar, PAN, GSTIN, IFSC, UPI, mobile); block or redact on the request path; matched values never logged
 
 ### Coming soon
 
 - **Multi-provider routing** — OpenAI, Anthropic, Google + self-hosted backends through one endpoint
 - **Provider-specific cost tracking** — per-provider token pricing, per-team attribution
 - **Semantic caching** — cache similar prompts at the gateway level
-- **PII detection & redaction** — jurisdiction-specific entity packs
 - **Batch inference** — async endpoint for bulk processing
 - **On-prem deployment** — OCI containers + Helm charts, air-gapped mode
 
@@ -365,6 +365,43 @@ budgets:
 Rejections increment `meridian_budget_rejections_total{level,period}` (never labeled by tenant id). Auth must be enabled for budgets to apply — without an identity there is no tenant to meter.
 
 > **Scope:** the identity keystone (auth, identity logging, per-org rate limiting, model access, tenant budgets) is complete. See [`docs/ship.md`](docs/ship.md).
+
+### PII detection & redaction (India pack)
+
+**Disabled by default.** When `pii.enabled: true`, Meridian scans **request** message text only (response bodies are not scanned in v0.7) for:
+
+| Entity | Notes |
+|---|---|
+| Aadhaar | 12 digits + **Verhoeff** checksum (rejects random 12-digit strings) |
+| PAN | `AAAAA9999A` |
+| GSTIN | 15-char GSTIN pattern |
+| IFSC | Bank IFSC |
+| UPI | `user@handle` |
+| Indian mobile | 10-digit starting 6–9, optional `+91` |
+
+**Policies** (global `pii.policy`, optional per-key `pii_policy` override):
+
+| Policy | Behaviour |
+|---|---|
+| `block` | HTTP 400; request never reaches a backend |
+| `redact_and_replace` | Mask PII in messages, then forward |
+| `redact_for_logs` / `audit_only` | Forward raw; record **counts by type** only in JSONL/audit |
+
+**Security rules:** matched values are never written to JSONL, audit events, metrics labels, or error messages. Prometheus: `meridian_pii_detections_total{entity,policy}`.
+
+```yaml
+pii:
+  enabled: true
+  policy: redact_and_replace   # or block | redact_for_logs | audit_only
+  entities: []                 # empty = all types
+
+auth:
+  enabled: true
+  keys:
+    - key: "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ"
+      org_id: "acme"
+      pii_policy: block          # optional override for this key
+```
 
 ### Quick curl examples
 

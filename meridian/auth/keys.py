@@ -38,6 +38,7 @@ def build_key_index(auth: AuthConfig) -> dict[str, IdentityContext]:
             user_id=kc.user_id,
             # scopes carries the model allow-list (Milestone I). Empty = all.
             scopes=frozenset(kc.allowed_models),
+            pii_policy=kc.pii_policy,
         )
         for kc in auth.keys
     }

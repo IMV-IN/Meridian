@@ -35,3 +35,10 @@ BUDGET_REJECTIONS = Counter(
     "Requests rejected for exceeding a tenant budget cap",
     ["level", "period"],
 )
+
+# Cardinality-safe: entity type + policy only — never matched values or tenant id.
+PII_DETECTIONS = Counter(
+    "meridian_pii_detections_total",
+    "PII entities detected on the request path",
+    ["entity", "policy"],
+)

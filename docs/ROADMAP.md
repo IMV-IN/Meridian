@@ -23,11 +23,12 @@ _Last reconciled: 2026-07-09._
 | **F** — API-key auth | `v0.4.0` |
 | **G** — Identity-aware logging | `v0.4.0` |
 | **H** — Per-org rate limiting | `v0.4.0` |
-| **I** — Model access control | `v0.5.0` (unreleased) |
-| **J** — Tenant budgets & quotas | `v0.5.0` (unreleased) |
-| **K** — Hardening | `v0.6.0` (unreleased) |
+| **I** — Model access control | `v0.5.0` |
+| **J** — Tenant budgets & quotas | `v0.5.0` |
+| **K** — Hardening | `v0.6.0` (tagged) |
+| **L** — PII detection & redaction | `v0.7.0` (unreleased) |
 
-Identity keystone **F–J** and hardening **K** are complete.
+Identity keystone **F–J**, hardening **K**, and PII **L** are complete (tag L after merge).
 
 ---
 
@@ -36,13 +37,7 @@ Identity keystone **F–J** and hardening **K** are complete.
 Ordering principle: **ship backend-agnostic, single-node features first; do not
 block OSS progress on multi-node or deep-engine work.**
 
-### Phase 1 — Compliance differentiator (next)
-
-| Item | Why |
-|---|---|
-| **L — PII detection & redaction** | India entity pack; policies block/redact/audit. See `V1_ROADMAP.md`. |
-
-### Phase 2 — Cost & multi-provider
+### Phase 1 — Cost attribution (next)
 
 | Item | Depends on |
 |---|---|
@@ -81,7 +76,9 @@ A–E + audit (done)
       │
   K hardening (done)
       │
-  L PII  →  M cost attribution  →  multi-provider
+  L PII (done, tag pending)
+      │
+  M cost attribution  →  multi-provider
   semantic cache · batch  (independent)
   On-prem packaging
   Edge / prefix-cache / KV-aware  (deferred)

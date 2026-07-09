@@ -83,32 +83,19 @@ Compute: none.
 
 ## Milestone L — PII detection & redaction (`v0.7.0`)
 
-**Objective:** the compliance differentiator. India entity pack first — no
-competing gateway ships one.
+**Status:** implemented (branch `milestone/L-pii-redaction`).
 
-Scope
-- New middleware stage (`meridian/pii/`), regex-first (NER deferred):
-  - **Aadhaar** (12-digit, Verhoeff checksum validation)
-  - **PAN** (`[A-Z]{5}[0-9]{4}[A-Z]`)
-  - **GSTIN**, **IFSC**, **UPI ID**, Indian phone numbers
-- Policies, per-key or global: `block` (400 + audit event) ·
-  `redact_and_replace` (mask before forwarding) · `redact_for_logs` (forward
-  raw, mask in any logged/audited surface) · `audit_only` (flag, don't touch).
-- Detection events in audit log as metadata (entity *type* + count, never the
-  matched value).
-- Streaming: detection on the request only for v0.7 (response-side scanning
-  deferred — document the gap).
+**Objective:** the compliance differentiator. India entity pack first.
 
-DoD
-- Config-only enablement; zero overhead when disabled.
-- Demo: Aadhaar in prompt with `redact_and_replace` → backend receives masked
-  value; audit event shows `{"pii": {"aadhaar": 1}}`.
-- Latency overhead of regex pack < 1 ms at p99 for 8k-char prompts.
-
-Tests
-- Unit: every entity type incl. Verhoeff edge cases, false-positive guards
-  (12 digits that fail checksum must not match).
-- Integration: each policy end-to-end, stream + non-stream.
+Shipped
+- `meridian/pii/`: regex-first detectors + Verhoeff for Aadhaar; PAN, GSTIN,
+  IFSC, UPI, Indian mobile.
+- Policies: `block` · `redact_and_replace` · `redact_for_logs` · `audit_only`
+  (global + per-key `pii_policy`).
+- Findings store **spans + redaction placeholder only** — never the raw match.
+- JSONL/audit get `pii: {entity: count}`; metrics
+  `meridian_pii_detections_total{entity,policy}`.
+- Request-path only; response scanning deferred (documented in README/SECURITY).
 
 Compute: none.
 
