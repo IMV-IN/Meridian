@@ -14,6 +14,7 @@ class IdentityContext:
     are optional (org-level keys vs user-level keys).
     allowed_models is the model allow-list (empty = all models).
     pii_policy optionally overrides the global PII policy for this key.
+    cost_admin may query all orgs on /meridian/usage* (enterprise finance).
     """
 
     org_id: str
@@ -21,3 +22,4 @@ class IdentityContext:
     user_id: Optional[str] = None
     allowed_models: FrozenSet[str] = field(default_factory=frozenset)
     pii_policy: Optional[str] = None
+    cost_admin: bool = False

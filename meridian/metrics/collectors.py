@@ -42,3 +42,10 @@ PII_DETECTIONS = Counter(
     "PII entities detected on the request path",
     ["entity", "policy"],
 )
+
+# model + kind only — org lives in the ledger API (cardinality rule).
+TOKENS_TOTAL = Counter(
+    "meridian_tokens_total",
+    "Actual tokens attributed from backend usage fields",
+    ["model", "kind"],
+)

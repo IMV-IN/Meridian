@@ -7,7 +7,6 @@ Policy logic lives in ``pipeline``; routing in ``routing``; teardown in
 from __future__ import annotations
 
 import asyncio
-import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable, Optional
@@ -24,11 +23,12 @@ from meridian.api.routing import route
 from meridian.api.state import AppState, build_app_state, shutdown_app_state
 from meridian.auth import AuthError, authenticate
 from meridian.config.models import MeridianConfig
+from meridian.cost.authz import clamp_window_days, require_usage_identity, resolve_usage_scope
+from meridian.cost.extract import usage_from_dict, usage_from_sse_bytes
+from meridian.cost.record import record_actual_usage
 from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
 from meridian.proxy.forward import close_client, forward_get, forward_non_stream, forward_stream
 from meridian.util.helpers import generate_request_id, now_ms
-
-logger = logging.getLogger("meridian")
 
 _state: Optional[AppState] = None
 
@@ -87,7 +87,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await shutdown_app()
 
 
-app = FastAPI(title="Meridian", version="0.7.0", lifespan=lifespan)
+app = FastAPI(title="Meridian", version="0.8.0", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -147,14 +147,20 @@ async def chat_completions(request: Request) -> Response:
 
             async def tracked_stream() -> AsyncIterator[bytes]:
                 nonlocal status_code, error_type
+                # ponytail: keep last ~64KiB of SSE for usage scrape; don't buffer whole stream
+                tail = bytearray()
                 try:
                     async for chunk in original_body_iterator:
                         if isinstance(chunk, bytes):
-                            yield chunk
+                            raw = chunk
                         elif isinstance(chunk, str):
-                            yield chunk.encode()
+                            raw = chunk.encode()
                         else:
-                            yield bytes(chunk)
+                            raw = bytes(chunk)
+                        tail.extend(raw)
+                        if len(tail) > 65536:
+                            del tail[: len(tail) - 65536]
+                        yield raw
                 except httpx.RequestError as exc:
                     state.health_checker.check_passive_failure(backend)
                     error_type = type(exc).__name__
@@ -165,6 +171,17 @@ async def chat_completions(request: Request) -> Response:
                     status_code = 499
                     raise
                 finally:
+                    if status_code < 400 and state.cost_ledger is not None:
+                        found = usage_from_sse_bytes(bytes(tail))
+                        if found is not None:
+                            record_actual_usage(
+                                state,
+                                model=chat.model,
+                                org_id=chat.org_id,
+                                team_id=chat.team_id,
+                                prompt_tokens=found[0],
+                                completion_tokens=found[1],
+                            )
                     finalize_request(
                         state,
                         request_id=request_id,
@@ -197,6 +214,21 @@ async def chat_completions(request: Request) -> Response:
         if status_code >= 500:
             state.health_checker.check_passive_failure(backend)
             error_type = "upstream_5xx"
+        elif state.cost_ledger is not None:
+            try:
+                import json as _json
+                found = usage_from_dict(_json.loads(bytes(non_stream_resp.body)))
+            except Exception:
+                found = None
+            if found is not None:
+                record_actual_usage(
+                    state,
+                    model=chat.model,
+                    org_id=chat.org_id,
+                    team_id=chat.team_id,
+                    prompt_tokens=found[0],
+                    completion_tokens=found[1],
+                )
         stamp_meridian_headers(
             non_stream_resp.headers,
             request_id=request_id,
@@ -267,6 +299,92 @@ async def status() -> JSONResponse:
 @app.get("/meridian/requests")
 async def recent_requests() -> JSONResponse:
     return JSONResponse({"requests": list(get_state().recent_requests)})
+
+
+@app.get("/meridian/usage")
+async def usage_report(
+    request: Request,
+    org: Optional[str] = None,
+    team: Optional[str] = None,
+    window_days: int = 30,
+) -> Response:
+    """Cost/token report. Requires auth when cost is enabled; org-scoped by key."""
+    state = get_state()
+    if state.cost_ledger is None:
+        return JSONResponse({
+            "enabled": False,
+            "currency": state.config.cost.currency,
+            "rows": [],
+        })
+    try:
+        identity = require_usage_identity(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+        org_f, team_f = resolve_usage_scope(identity, org, team)
+    except GatewayError as exc:
+        return exc.to_response()
+    window = clamp_window_days(window_days, state.config.cost.max_window_days)
+    rows = state.cost_ledger.query(org_id=org_f, team_id=team_f, window_days=window)
+    return JSONResponse({
+        "enabled": True,
+        "currency": state.config.cost.currency,
+        "rows": [
+            {
+                "org_id": r.org_id,
+                "team_id": r.team_id,
+                "model": r.model,
+                "day": r.day,
+                "prompt_tokens": r.prompt_tokens,
+                "completion_tokens": r.completion_tokens,
+                "requests": r.requests,
+                "cost": round(r.cost, 6),
+            }
+            for r in rows
+        ],
+    })
+
+
+@app.get("/meridian/usage.csv")
+async def usage_csv(
+    request: Request,
+    org: Optional[str] = None,
+    team: Optional[str] = None,
+    window_days: int = 30,
+) -> Response:
+    import csv
+    import io
+
+    state = get_state()
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow([
+        "org_id", "team_id", "model", "day",
+        "prompt_tokens", "completion_tokens", "requests", "cost", "currency",
+    ])
+    if state.cost_ledger is not None:
+        try:
+            identity = require_usage_identity(
+                auth_enabled=state.config.auth.enabled,
+                key_index=state.key_index,
+                authorization=request.headers.get("authorization"),
+            )
+            org_f, team_f = resolve_usage_scope(identity, org, team)
+        except GatewayError as exc:
+            return exc.to_response()
+        window = clamp_window_days(window_days, state.config.cost.max_window_days)
+        for r in state.cost_ledger.query(org_id=org_f, team_id=team_f, window_days=window):
+            w.writerow([
+                r.org_id, r.team_id, r.model, r.day,
+                r.prompt_tokens, r.completion_tokens, r.requests,
+                f"{r.cost:.6f}", state.config.cost.currency,
+            ])
+    return Response(
+        content=buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=meridian_usage.csv"},
+    )
 
 
 @app.get("/metrics")

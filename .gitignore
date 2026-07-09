@@ -23,6 +23,7 @@ build/
 # Meridian runtime
 meridian_requests.jsonl
 meridian_usage.db
+meridian_cost.db
 *.jsonl
 *.db
 !**/testdata/**/*.db

@@ -29,8 +29,14 @@ Meridian is **not** an inference engine — it does not manage KV cache, batchin
 - **PII (India pack)** — Aadhaar (Verhoeff), PAN, GSTIN, IFSC, UPI, mobile; policies `block` / `redact_and_replace` / `audit_only`; **matched values never logged**
 - **Pilot hardening** — bounded rate-limit store, stream-disconnect-safe cleanup, body size cap, non-root container + `HEALTHCHECK`
 
+### Cost attribution (Milestone M — unreleased until tagged v0.8.0)
+- Opt-in `cost.enabled`; prices per model (per 1M prompt/completion tokens)
+- Scrapes backend `usage` on non-stream responses and stream SSE tails (last usage wins)
+- `GET /meridian/usage` + `GET /meridian/usage.csv` — **auth required** when cost is on; org-scoped unless `cost_admin: true`
+- `meridian_tokens_total{model,kind}` (no org labels)
+- Enterprise checklist: [`docs/ENTERPRISE_COST.md`](docs/ENTERPRISE_COST.md)
+
 ### Coming soon (not tagged yet — do not pitch as shipped)
-- **Cost attribution** — actual token usage + price tables + `/meridian/usage` (Milestone M)
 - **Multi-provider routing** — OpenAI/Anthropic/Google + self-hosted
 - **Semantic caching**, **batch inference**, **Helm / air-gapped packaging**
 

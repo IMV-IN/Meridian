@@ -41,6 +41,7 @@ within 14 days for confirmed high-severity issues.
 | **Resource abuse** | Bounded rate-limit key store (idle TTL + max buckets); request body size cap (`gateway.max_body_bytes` → 413). |
 | **Container baseline** | Image runs as non-root; Docker `HEALTHCHECK` on `/meridian/status`. |
 | **PII in prompts** | Opt-in request-path scan (India pack). Policies: block or redact before forward. **Matched values are never logged** — only entity-type counts in JSONL/audit/metrics. Response body not scanned (v0.7). |
+| **Cost / usage export** | When `cost.enabled`, `/meridian/usage*` **requires auth**. Non-admin keys see only their org (and team if set). `cost_admin` keys may export all orgs. Open export refused if auth is off. See `docs/ENTERPRISE_COST.md`. |
 | **Prompt confidentiality in logs** | Prompts are **never logged by default**. JSONL logs and audit events are metadata-only (request_id, backend, model, stream, latency, status, org_id/team_id). |
 | **Audit integrity** | Optional tamper-evident pipeline: SHA-256 hash chain → Merkle tree → Ed25519 signature → S3 Object Lock (WORM). Any single-byte modification of archived events breaks verification. |
 | **Metric cardinality** | Prometheus labels are bounded (backend, model, status, stream — all config-constrained). Never labeled by prompt text, user id, or raw request id. |
