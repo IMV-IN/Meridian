@@ -91,13 +91,11 @@ class AuditEventPublisher:
             self._config.bootstrap_servers,
         )
 
-    async def publish(self, event: AuditEvent) -> None:
-        """Enqueue an event for background delivery.
+    def enqueue(self, event: AuditEvent) -> None:
+        """Synchronous non-blocking enqueue (safe inside CancelledError finally).
 
-        Returns effectively instantly: the only work done on the request path is
-        a non-blocking ``put_nowait``.  If the queue is full the oldest event is
-        dropped (bounded memory) and a warning is logged.  Never blocks on the
-        broker.
+        Same semantics as :meth:`publish` without an ``await`` point so stream
+        cleanup cannot lose the event when the client disconnects mid-SSE.
         """
         if self._producer is None:
             return
@@ -120,6 +118,16 @@ class AuditEventPublisher:
                 logger.warning(
                     "Audit queue full – dropped event %s", event.request_id
                 )
+
+    async def publish(self, event: AuditEvent) -> None:
+        """Enqueue an event for background delivery.
+
+        Returns effectively instantly: the only work done on the request path is
+        a non-blocking ``put_nowait``.  If the queue is full the oldest event is
+        dropped (bounded memory) and a warning is logged.  Never blocks on the
+        broker.
+        """
+        self.enqueue(event)
 
     async def _drain_loop(self) -> None:
         """Background task: own the producer and deliver queued events in order."""

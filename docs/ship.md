@@ -4,7 +4,7 @@ A scannable record of **what's shipped** and **what's next**. For the full
 strategic picture see [`ROADMAP.md`](./ROADMAP.md); for per-change detail see
 [`../CHANGELOG.md`](../CHANGELOG.md). Keep this file updated as milestones land.
 
-_Last updated: 2026-07-09 (Milestone J)._
+_Last updated: 2026-07-09 (Milestone K)._
 
 ---
 
@@ -23,14 +23,14 @@ _Last updated: 2026-07-09 (Milestone J)._
 | **H** — Per-identity rate limiting | `v0.4.0` | Token bucket keys on `org:{org_id}` when authenticated (else `ip:{ip}`); same org shares a bucket across source IPs |
 | **I** — Model access control | `v0.5.0` | Per-key `allowed_models` allow-list; disallowed model → 403 (`permission_error`); empty list = unrestricted |
 | **J** — Tenant budgets & quotas | `v0.5.0` | Pluggable `UsageMeter` (SQLite default + in-memory), org→team→user caps (tokens + requests, daily/monthly), pre-flight metering → 429, per-org rate-limit overrides, `meridian_budget_rejections_total` |
+| **K** — Hardening | `v0.6.0` | Bounded rate-limit store (TTL + max keys), stream-cancel-safe finalize, body size cap 413, non-root Docker + HEALTHCHECK, version consistency CI |
 
 Also shipped outside the A–E track: IP-based rate limiting (token bucket) and
 the tamper-evident audit pipeline (Kafka → SHA-256 hash chain → Merkle →
 Ed25519 → S3 Object Lock WORM).
 
-The identity keystone (F–J) is complete. Next enterprise controls are tracked
-in [`ROADMAP.md`](./ROADMAP.md) and [`V1_ROADMAP.md`](./V1_ROADMAP.md)
-(Milestone K hardening, cost attribution, PII, packaging).
+Identity keystone (F–J) + hardening (K) complete. Next: PII (L), cost
+attribution (M) — see [`ROADMAP.md`](./ROADMAP.md) / [`V1_ROADMAP.md`](./V1_ROADMAP.md).
 
 ---
 
@@ -38,4 +38,4 @@ in [`ROADMAP.md`](./ROADMAP.md) and [`V1_ROADMAP.md`](./V1_ROADMAP.md)
 
 | Milestone | Status | What |
 |---|---|---|
-| **K** — Hardening release | planned | Bounded rate-limit store, streaming cancellation safety, container hardening. See `V1_ROADMAP.md` + `KNOWN_ISSUES.md`. |
+| **L** — PII detection & redaction | planned | India entity pack (Aadhaar/PAN/…), policies block/redact/audit. See `V1_ROADMAP.md`. |

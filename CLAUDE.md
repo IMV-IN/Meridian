@@ -55,7 +55,7 @@ Key modules
 - Config schema: `meridian/config/models.py`
 - UI: `meridian/ui/index.html`
 
-**Milestone status:** A–J are shipped (see `docs/ship.md`). Next: hardening (K) and enterprise backlog in `docs/V1_ROADMAP.md` / `docs/ROADMAP.md`.
+**Milestone status:** A–K are shipped (see `docs/ship.md`). Next: PII (L) and cost attribution (M) in `docs/V1_ROADMAP.md` / `docs/ROADMAP.md`.
 
 ---
 

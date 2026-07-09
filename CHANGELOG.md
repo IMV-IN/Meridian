@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.0] - Unreleased
+
+### Added
+
+- **Bounded rate-limit store (Milestone K)** — `RateLimitStore` with idle TTL (default 1h) and max keys (default 100k); sliding expiry on access, sweep drops idle buckets, nearest-expiry eviction when full. Config: `rate_limit.max_buckets`, `idle_ttl_s`, `sweep_interval_s`.
+- **Request body size cap** — `gateway.max_body_bytes` (default 10 MiB); oversized `Content-Length` or actual body → HTTP 413.
+- **Container hardening** — Dockerfile runs as non-root `meridian` (uid 10001), `HEALTHCHECK` against `/meridian/status`, `python:3.11-slim-bookworm` base.
+- **Version consistency CI** — package version must match `meridian/__init__.__version__`; release tags must match `pyproject.toml` version.
+
+### Fixed
+
+- **Stream disconnect cleanup** — request finalize path is fully synchronous (counters, JSONL, audit `enqueue`); client cancel mid-SSE no longer risks skipping inflight decrement or losing the audit event. Disconnect recorded as status `499` / `client_disconnect`.
+- Package version bumped to **0.6.0** (was stuck at 0.1.0).
+
 ## [0.5.0] - Unreleased
 
 ### Added

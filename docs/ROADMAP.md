@@ -25,8 +25,9 @@ _Last reconciled: 2026-07-09._
 | **H** — Per-org rate limiting | `v0.4.0` |
 | **I** — Model access control | `v0.5.0` (unreleased) |
 | **J** — Tenant budgets & quotas | `v0.5.0` (unreleased) |
+| **K** — Hardening | `v0.6.0` (unreleased) |
 
-Identity keystone **F–J is complete**.
+Identity keystone **F–J** and hardening **K** are complete.
 
 ---
 
@@ -35,24 +36,23 @@ Identity keystone **F–J is complete**.
 Ordering principle: **ship backend-agnostic, single-node features first; do not
 block OSS progress on multi-node or deep-engine work.**
 
-### Phase 1 — Hardening (next)
+### Phase 1 — Compliance differentiator (next)
 
 | Item | Why |
 |---|---|
-| **K — Hardening** | Bounded rate-limit store, streaming cancellation safety, container hardening. See `V1_ROADMAP.md` + `KNOWN_ISSUES.md`. |
+| **L — PII detection & redaction** | India entity pack; policies block/redact/audit. See `V1_ROADMAP.md`. |
 
 ### Phase 2 — Cost & multi-provider
 
 | Item | Depends on |
 |---|---|
-| **Provider/usage cost tracking** — reconcile estimate vs actual `usage`, per-team attribution | J (meter interface) |
+| **M — Cost attribution** — reconcile estimate vs actual `usage`, per-team reports | J (meter interface) |
 | **Multi-provider routing** — OpenAI/Anthropic/Google + self-hosted | provider adapter layer |
 
-### Phase 3 — Compliance & data-plane (mostly independent)
+### Phase 3 — Data-plane (mostly independent)
 
 | Item | Source |
 |---|---|
-| **PII detection & redaction** — India entity pack (Aadhaar/PAN/GSTIN/…), policies | Enterprise proposal |
 | **Semantic caching** | README |
 | **Batch inference** — async bulk endpoint | README |
 
@@ -79,8 +79,10 @@ A–E + audit (done)
       │
   F–J identity keystone (done)
       │
-  K hardening  →  cost tracking  →  multi-provider
-  PII · semantic cache · batch  (independent)
+  K hardening (done)
+      │
+  L PII  →  M cost attribution  →  multi-provider
+  semantic cache · batch  (independent)
   On-prem packaging
   Edge / prefix-cache / KV-aware  (deferred)
 ```

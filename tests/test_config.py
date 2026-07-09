@@ -147,6 +147,13 @@ def test_budgets_config_defaults_disabled():
     assert cfg.budgets.sqlite_path == "./meridian_usage.db"
 
 
+def test_rate_limit_store_and_body_cap_defaults():
+    cfg = MeridianConfig.from_dict({})
+    assert cfg.rate_limit.max_buckets == 100_000
+    assert cfg.rate_limit.idle_ttl_s == 3600.0
+    assert cfg.gateway.max_body_bytes == 10 * 1024 * 1024
+
+
 def test_budgets_config_parses_cascade_and_overrides():
     cfg = MeridianConfig.from_dict({
         "budgets": {

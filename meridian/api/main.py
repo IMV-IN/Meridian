@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 from collections import deque
@@ -15,7 +16,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from prometheus_client import generate_latest
 
-from meridian.api.ratelimitter import TokenBucket
+from meridian.api.ratelimitter import RateLimitStore
 from meridian.audit.publisher import AuditEvent, AuditEventPublisher
 from meridian.auth import AuthError, IdentityContext, authenticate, build_key_index
 from meridian.config.models import MeridianConfig
@@ -57,8 +58,8 @@ _session_store: Optional[SessionStore] = None
 _key_index: Dict[str, IdentityContext] = {}
 _usage_meter: Optional[UsageMeter] = None
 
-# rate limiting
-_rate_limit: Dict[str, TokenBucket] = {}
+# Rate limiting — bounded store (Milestone K); recreated in init_app.
+_rate_limit: RateLimitStore = RateLimitStore()
 
 # In-memory ring buffer for recent requests (serves the UI dashboard)
 _recent_requests: deque[Dict[str, Any]] = deque(maxlen=100)
@@ -90,12 +91,17 @@ def _load_config() -> MeridianConfig:
 async def init_app(config: Optional[MeridianConfig] = None, start_health: bool = True) -> None:
     """Initialize app state. Called by lifespan or directly in tests."""
     global _registry, _strategy, _health_checker, _telemetry_poller, _request_logger, _audit_publisher, _config
-    global _session_store, _key_index, _usage_meter
+    global _session_store, _key_index, _usage_meter, _rate_limit
 
     _config = config or _load_config()
     _key_index = build_key_index(_config.auth)
     if _config.auth.enabled:
         logger.info("API-key auth enabled — %d key(s) loaded", len(_key_index))
+
+    _rate_limit = RateLimitStore(
+        max_keys=_config.rate_limit.max_buckets,
+        idle_ttl_s=_config.rate_limit.idle_ttl_s,
+    )
 
     # Tenant budgets (Milestone J). Disabled by default; no-op when off.
     _usage_meter = None
@@ -196,27 +202,34 @@ async def shutdown_app() -> None:
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await init_app()
 
-    # Background sweep task for session affinity (if enabled).
-    sweep_task: Optional[asyncio.Task[None]] = None
+    # Background sweep tasks (session affinity + rate-limit store idle TTL).
+    sweep_tasks: list[asyncio.Task[None]] = []
     if _session_store is not None:
-        async def _sweep_loop() -> None:
+        async def _affinity_sweep() -> None:
             while True:
                 await asyncio.sleep(_config.session_affinity.sweep_interval_s)  # type: ignore[union-attr]
                 _session_store.sweep()  # type: ignore[union-attr]
-        sweep_task = asyncio.create_task(_sweep_loop())
+        sweep_tasks.append(asyncio.create_task(_affinity_sweep()))
+
+    if _config is not None and _config.rate_limit.enabled:
+        async def _rl_sweep() -> None:
+            while True:
+                await asyncio.sleep(_config.rate_limit.sweep_interval_s)  # type: ignore[union-attr]
+                _rate_limit.sweep()
+        sweep_tasks.append(asyncio.create_task(_rl_sweep()))
 
     yield
 
-    if sweep_task is not None:
-        sweep_task.cancel()
+    for task in sweep_tasks:
+        task.cancel()
         try:
-            await sweep_task
+            await task
         except asyncio.CancelledError:
             pass
     await shutdown_app()
 
 
-app = FastAPI(title="Meridian", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Meridian", version="0.6.0", lifespan=lifespan)
 
 
 def _error_json(message: str, error_type: str, status: int) -> JSONResponse:
@@ -330,6 +343,69 @@ def _route(
     return backend, tier_name, session_route
 
 
+def _finalize_request(
+    *,
+    request_id: str,
+    model: str,
+    stream: bool,
+    backend: Backend,
+    status_code: int,
+    start: float,
+    error_type: Optional[str],
+    request_ctx: RequestContext,
+    tier_name: Optional[str],
+    session_route: Optional[str],
+    org_id: Optional[str],
+    team_id: Optional[str],
+) -> None:
+    """Sync request teardown: counters, logs, audit enqueue.
+
+    Must not ``await`` — stream generators can be cancelled on client disconnect
+    and any await in ``finally`` risks skipping the rest of cleanup (Milestone K).
+    """
+    assert _request_logger is not None
+    latency = now_ms() - start
+    backend.decrement_inflight()
+    backend.subtract_inflight_cost(request_ctx.cost)
+    backend.update_latency(latency)
+    BACKEND_INFLIGHT.labels(backend=backend.name).dec()
+    REQUESTS_TOTAL.labels(
+        backend=backend.name,
+        model=model,
+        status=str(status_code),
+        stream="true" if stream else "false",
+    ).inc()
+    REQUEST_LATENCY.labels(backend=backend.name, model=model).observe(latency)
+    BACKEND_HEALTHY.labels(backend=backend.name).set(1 if backend.healthy else 0)
+    _request_logger.log(
+        request_id=request_id,
+        model=model,
+        stream=stream,
+        backend=backend.name,
+        status_code=status_code,
+        latency_ms=latency,
+        error_type=error_type,
+        tier=tier_name,
+        session_route=session_route,
+        org_id=org_id,
+        team_id=team_id,
+    )
+    _record_request(request_id, model, stream, backend.name, status_code, latency, error_type)
+    if _audit_publisher is not None:
+        _audit_publisher.enqueue(
+            AuditEvent(
+                request_id=request_id,
+                model=model,
+                stream=stream,
+                backend=backend.name,
+                status_code=status_code,
+                latency_ms=latency,
+                error_type=error_type,
+                extra={"tier": tier_name, "org_id": org_id, "team_id": team_id},
+            )
+        )
+
+
 @app.post("/v1/chat/completions")
 async def chat_completions(request: Request) -> Response:
     assert _registry is not None and _health_checker is not None
@@ -345,10 +421,41 @@ async def chat_completions(request: Request) -> Response:
     request_id = generate_request_id()
     start = now_ms()
 
+    # Body size cap (Milestone K) — reject before buffering a multi-GB POST.
+    max_body = _config.gateway.max_body_bytes
+    content_length = request.headers.get("content-length")
+    if content_length is not None:
+        try:
+            if int(content_length) > max_body:
+                return _error_json(
+                    f"Request body exceeds limit of {max_body} bytes",
+                    "invalid_request_error",
+                    413,
+                )
+        except ValueError:
+            return _error_json("Invalid Content-Length header", "invalid_request_error", 400)
+
+    raw_buf = bytearray()
     try:
-        body: Dict[str, Any] = await request.json()
+        async for chunk in request.stream():
+            raw_buf.extend(chunk)
+            if len(raw_buf) > max_body:
+                return _error_json(
+                    f"Request body exceeds limit of {max_body} bytes",
+                    "invalid_request_error",
+                    413,
+                )
+        raw = bytes(raw_buf)
+    except Exception:
+        return _error_json("Failed to read request body", "invalid_request_error", 400)
+
+    try:
+        body: Dict[str, Any] = json.loads(raw) if raw else {}
     except Exception:
         return _error_json("Invalid JSON body", "invalid_request_error", 400)
+
+    if not isinstance(body, dict):
+        return _error_json("JSON body must be an object", "invalid_request_error", 400)
 
     model = body.get("model", "")
     is_stream = body.get("stream", False)
@@ -421,10 +528,7 @@ async def chat_completions(request: Request) -> Response:
                 if org_budget.token_refill_rate is not None:
                     refill = org_budget.token_refill_rate
 
-        bucket = _rate_limit.get(rl_key)
-        if bucket is None:
-            bucket = TokenBucket(max_tokens=capacity, refill_rate=refill)
-            _rate_limit[rl_key] = bucket
+        bucket = _rate_limit.get_or_create(rl_key, capacity, refill)
 
         if not bucket.allow_request():
             error_resp = _error_json(
@@ -471,38 +575,28 @@ async def chat_completions(request: Request) -> Response:
                     error_type = type(exc).__name__
                     status_code = 502
                     raise
+                except asyncio.CancelledError:
+                    # Client disconnect mid-SSE — record then re-raise.
+                    error_type = error_type or "client_disconnect"
+                    status_code = 499
+                    raise
                 finally:
-                    latency = now_ms() - start
-                    backend.decrement_inflight()
-                    backend.subtract_inflight_cost(request_ctx.cost)
-                    backend.update_latency(latency)
-                    BACKEND_INFLIGHT.labels(backend=backend.name).dec()
-                    REQUESTS_TOTAL.labels(
-                        backend=backend.name, model=model, status=str(status_code), stream="true"
-                    ).inc()
-                    REQUEST_LATENCY.labels(backend=backend.name, model=model).observe(latency)
-                    BACKEND_HEALTHY.labels(backend=backend.name).set(1 if backend.healthy else 0)
-                    _request_logger.log(
+                    # All cleanup is synchronous (no await) so CancelledError
+                    # cannot skip inflight/accounting/audit after a disconnect.
+                    _finalize_request(
                         request_id=request_id,
                         model=model,
                         stream=True,
-                        backend=backend.name,
+                        backend=backend,
                         status_code=status_code,
-                        latency_ms=latency,
+                        start=start,
                         error_type=error_type,
-                        tier=tier_name,
+                        request_ctx=request_ctx,
+                        tier_name=tier_name,
                         session_route=session_route,
                         org_id=org_id,
                         team_id=team_id,
                     )
-                    _record_request(request_id, model, True, backend.name, status_code, latency, error_type)
-                    if _audit_publisher:
-                        await _audit_publisher.publish(AuditEvent(
-                            request_id=request_id, model=model, stream=True,
-                            backend=backend.name, status_code=status_code,
-                            latency_ms=latency, error_type=error_type,
-                            extra={"tier": tier_name, "org_id": org_id, "team_id": team_id},
-                        ))
 
             resp.body_iterator = tracked_stream()
             resp.headers["x-request-id"] = request_id
@@ -537,37 +631,20 @@ async def chat_completions(request: Request) -> Response:
         )
     finally:
         if not is_stream:
-            latency = now_ms() - start
-            backend.decrement_inflight()
-            backend.subtract_inflight_cost(request_ctx.cost)
-            backend.update_latency(latency)
-            BACKEND_INFLIGHT.labels(backend=backend.name).dec()
-            REQUESTS_TOTAL.labels(
-                backend=backend.name, model=model, status=str(status_code), stream="false"
-            ).inc()
-            REQUEST_LATENCY.labels(backend=backend.name, model=model).observe(latency)
-            BACKEND_HEALTHY.labels(backend=backend.name).set(1 if backend.healthy else 0)
-            _request_logger.log(
+            _finalize_request(
                 request_id=request_id,
                 model=model,
                 stream=False,
-                backend=backend.name,
+                backend=backend,
                 status_code=status_code,
-                latency_ms=latency,
+                start=start,
                 error_type=error_type,
-                tier=tier_name,
+                request_ctx=request_ctx,
+                tier_name=tier_name,
                 session_route=session_route,
                 org_id=org_id,
                 team_id=team_id,
             )
-            _record_request(request_id, model, False, backend.name, status_code, latency, error_type)
-            if _audit_publisher:
-                await _audit_publisher.publish(AuditEvent(
-                    request_id=request_id, model=model, stream=False,
-                    backend=backend.name, status_code=status_code,
-                    latency_ms=latency, error_type=error_type,
-                    extra={"tier": tier_name, "org_id": org_id, "team_id": team_id},
-                ))
 
 
 @app.get("/v1/models")

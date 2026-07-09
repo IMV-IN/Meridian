@@ -21,6 +21,17 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify tag matches pyproject version
+        if: ${{ github.event_name == 'push' }}
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          PY_VER="$(python3 -c "import re; print(re.search(r'^version\s*=\s*\"([^\"]+)\"', open('pyproject.toml').read(), re.M).group(1))")"
+          if [ "$TAG" != "$PY_VER" ]; then
+            echo "Tag v${TAG} does not match pyproject version ${PY_VER}"
+            exit 1
+          fi
+          echo "Tag/version ok: ${PY_VER}"
+
       - name: Resolve image tag
         id: meta
         env:

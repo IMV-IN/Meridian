@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "meridian"
-version = "0.1.0"
+version = "0.6.0"
 description = "On-soil AI inference gateway for Indian enterprises"
 license = {text = "MIT"}
 readme = "README.md"
