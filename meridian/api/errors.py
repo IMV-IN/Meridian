@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, Optional
+from typing import Dict
 
 from fastapi.responses import JSONResponse
 
@@ -25,14 +25,3 @@ class GatewayError(Exception):
         for k, v in self.headers.items():
             resp.headers[k] = v
         return resp
-
-
-def error_json(
-    message: str,
-    error_type: str,
-    status: int,
-    *,
-    headers: Optional[Dict[str, str]] = None,
-) -> JSONResponse:
-    err = GatewayError(message, error_type, status, headers=headers or {})
-    return err.to_response()

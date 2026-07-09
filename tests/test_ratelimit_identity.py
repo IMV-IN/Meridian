@@ -12,8 +12,8 @@ import socket
 import httpx
 import pytest
 
-from meridian.api.main import _rate_limit, init_app
 from meridian.api.main import app as meridian_app
+from meridian.api.main import get_state, init_app
 from meridian.config.models import MeridianConfig
 
 KEY_ACME = "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ"
@@ -40,7 +40,7 @@ async def _client() -> httpx.AsyncClient:
         }],
     })
     await init_app(cfg, start_health=False)
-    _rate_limit.clear()
+    get_state().rate_limit.clear()
     return httpx.AsyncClient(transport=httpx.ASGITransport(app=meridian_app), base_url="http://test")
 
 

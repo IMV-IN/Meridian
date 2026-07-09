@@ -308,11 +308,11 @@ async def test_token_aware_status_advertises_strategy(token_aware_client):
 @pytest.mark.asyncio
 async def test_token_aware_routes_to_lower_latency_backend(token_aware_client):
     """With identical inflight_cost, token-aware picks the backend with lower EWMA."""
-    from meridian.api.main import _registry
+    from meridian.api.main import get_state
 
-    assert _registry is not None
-    fast = _registry.get("fast-backend")
-    slow = _registry.get("slow-backend")
+    assert get_state().registry is not None
+    fast = get_state().registry.get("fast-backend")
+    slow = get_state().registry.get("slow-backend")
     assert fast is not None and slow is not None
     fast.ewma_latency_ms = 10.0
     slow.ewma_latency_ms = 200.0
@@ -334,11 +334,11 @@ async def test_token_aware_routes_to_lower_latency_backend(token_aware_client):
 @pytest.mark.asyncio
 async def test_token_aware_avoids_busy_backend(token_aware_client):
     """A backend with high inflight_cost should be skipped even if its EWMA is lower."""
-    from meridian.api.main import _registry
+    from meridian.api.main import get_state
 
-    assert _registry is not None
-    busy = _registry.get("fast-backend")
-    idle = _registry.get("slow-backend")
+    assert get_state().registry is not None
+    busy = get_state().registry.get("fast-backend")
+    idle = get_state().registry.get("slow-backend")
     assert busy is not None and idle is not None
     busy.ewma_latency_ms = 10.0
     idle.ewma_latency_ms = 50.0
@@ -411,12 +411,12 @@ async def test_dod_healthy_but_overloaded_backend_is_avoided(capacity_aware_clie
     """Milestone C DoD: a backend that is healthy but reports a heavy queue
     via telemetry must lose new requests to its idle peer. Telemetry tilts
     preference; health gates eligibility — both must show 'healthy'."""
-    from meridian.api.main import _registry
+    from meridian.api.main import get_state
     from meridian.telemetry.base import BackendTelemetry
 
-    assert _registry is not None
-    a = _registry.get("backend-a")
-    b = _registry.get("backend-b")
+    assert get_state().registry is not None
+    a = get_state().registry.get("backend-a")
+    b = get_state().registry.get("backend-b")
     assert a is not None and b is not None
 
     # Both equal under the base score: same URL, no inflight, identical EWMA.
@@ -452,12 +452,12 @@ async def test_dod_healthy_but_overloaded_backend_is_avoided(capacity_aware_clie
 async def test_clearing_telemetry_restores_normal_routing(capacity_aware_client):
     """If telemetry is removed (e.g. fetch starts failing), routing must fall
     back to base scoring with no capacity penalty — backends remain eligible."""
-    from meridian.api.main import _registry
+    from meridian.api.main import get_state
     from meridian.telemetry.base import BackendTelemetry
 
-    assert _registry is not None
-    a = _registry.get("backend-a")
-    b = _registry.get("backend-b")
+    assert get_state().registry is not None
+    a = get_state().registry.get("backend-a")
+    b = get_state().registry.get("backend-b")
     assert a is not None and b is not None
     a.ewma_latency_ms = 50.0
     b.ewma_latency_ms = 50.0
@@ -491,11 +491,11 @@ async def test_clearing_telemetry_restores_normal_routing(capacity_aware_client)
 @pytest.mark.asyncio
 async def test_token_aware_decrements_inflight_cost_after_request(token_aware_client):
     """inflight_cost must return to its pre-request value once the response completes."""
-    from meridian.api.main import _registry
+    from meridian.api.main import get_state
 
-    assert _registry is not None
-    fast = _registry.get("fast-backend")
-    slow = _registry.get("slow-backend")
+    assert get_state().registry is not None
+    fast = get_state().registry.get("fast-backend")
+    slow = get_state().registry.get("slow-backend")
     assert fast is not None and slow is not None
     fast.ewma_latency_ms = 10.0
     slow.ewma_latency_ms = 1000.0  # ensure routing picks fast
@@ -580,8 +580,8 @@ async def test_session_affinity_sticks_then_remaps_on_failure(affinity_client):
     assert resp2.headers["x-meridian-backend"] == pinned_backend
 
     # Kill the pinned backend.
-    from meridian.api.main import _registry
-    _registry.get(pinned_backend).healthy = False
+    from meridian.api.main import get_state
+    get_state().registry.get(pinned_backend).healthy = False
 
     # Third request with same session -> should remap to the other backend.
     resp3 = await affinity_client.post(

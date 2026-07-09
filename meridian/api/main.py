@@ -17,20 +17,19 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from prometheus_client import generate_latest
 
-from meridian.api.errors import GatewayError, error_json
-from meridian.api.finalize import finalize_request
+from meridian.api.errors import GatewayError
+from meridian.api.finalize import finalize_request, stamp_meridian_headers
 from meridian.api.pipeline import prepare_chat_request
 from meridian.api.routing import route
 from meridian.api.state import AppState, build_app_state, shutdown_app_state
 from meridian.auth import AuthError, authenticate
 from meridian.config.models import MeridianConfig
-from meridian.metrics.collectors import BACKEND_HEALTHY
+from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
 from meridian.proxy.forward import close_client, forward_get, forward_non_stream, forward_stream
 from meridian.util.helpers import generate_request_id, now_ms
 
 logger = logging.getLogger("meridian")
 
-# Process-wide state (set by init_app). Prefer get_state() over reaching in.
 _state: Optional[AppState] = None
 
 
@@ -61,7 +60,6 @@ async def shutdown_app() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     state = await init_app()
-    app.state.meridian = state
 
     sweep_tasks: list[asyncio.Task[None]] = []
     if state.session_store is not None:
@@ -103,7 +101,7 @@ async def _auth_gate(
                 request.headers.get("authorization"), state.key_index
             )
         except AuthError as exc:
-            return error_json(exc.message, exc.error_type, 401)
+            return GatewayError(exc.message, exc.error_type, 401).to_response()
     return await call_next(request)
 
 
@@ -128,15 +126,14 @@ async def chat_completions(request: Request) -> Response:
         state, chat.model, chat.request_ctx, session_id
     )
     if backend is None:
-        return error_json(
+        return GatewayError(
             f"No healthy backend available for model {chat.model!r}",
             "meridian_no_backend",
             503,
-        )
+        ).to_response()
 
     backend.increment_inflight()
     backend.add_inflight_cost(chat.request_ctx.cost)
-    from meridian.metrics.collectors import BACKEND_INFLIGHT
     BACKEND_INFLIGHT.labels(backend=backend.name).inc()
 
     status_code = 200
@@ -186,12 +183,13 @@ async def chat_completions(request: Request) -> Response:
                     )
 
             resp.body_iterator = tracked_stream()
-            resp.headers["x-request-id"] = request_id
-            resp.headers["x-meridian-backend"] = backend.name
-            if tier_name is not None:
-                resp.headers["x-meridian-tier"] = tier_name
-            if session_route is not None:
-                resp.headers["x-meridian-session-route"] = session_route
+            stamp_meridian_headers(
+                resp.headers,
+                request_id=request_id,
+                backend=backend.name,
+                tier_name=tier_name,
+                session_route=session_route,
+            )
             return resp
 
         non_stream_resp = await forward_non_stream(backend, chat.body)
@@ -199,23 +197,24 @@ async def chat_completions(request: Request) -> Response:
         if status_code >= 500:
             state.health_checker.check_passive_failure(backend)
             error_type = "upstream_5xx"
-        non_stream_resp.headers["x-request-id"] = request_id
-        non_stream_resp.headers["x-meridian-backend"] = backend.name
-        if tier_name is not None:
-            non_stream_resp.headers["x-meridian-tier"] = tier_name
-        if session_route is not None:
-            non_stream_resp.headers["x-meridian-session-route"] = session_route
+        stamp_meridian_headers(
+            non_stream_resp.headers,
+            request_id=request_id,
+            backend=backend.name,
+            tier_name=tier_name,
+            session_route=session_route,
+        )
         return non_stream_resp
 
     except httpx.RequestError as exc:
         state.health_checker.check_passive_failure(backend)
         error_type = type(exc).__name__
         status_code = 502
-        return error_json(
+        return GatewayError(
             f"Backend {backend.name!r} connection error: {exc}",
             "meridian_backend_error",
             502,
-        )
+        ).to_response()
     finally:
         if not is_stream:
             finalize_request(
@@ -285,47 +284,3 @@ _UI_DIR = Path(__file__).resolve().parent.parent / "ui"
 @app.get("/ui")
 async def ui() -> FileResponse:
     return FileResponse(_UI_DIR / "index.html", media_type="text/html")
-
-
-# ── Test / compat shims ─────────────────────────────────────────────────────
-# Prefer get_state().rate_limit / get_state().registry. These aliases keep
-# existing tests working with minimal churn.
-
-
-class _StateProxy:
-    """Attribute access forwards to the live AppState field of the same name."""
-
-    def __init__(self, field: str) -> None:
-        self._field = field
-
-    def _obj(self):  # type: ignore[no-untyped-def]
-        return getattr(get_state(), self._field)
-
-    def __getattr__(self, name: str):  # type: ignore[no-untyped-def]
-        return getattr(self._obj(), name)
-
-    def clear(self) -> None:
-        self._obj().clear()
-
-
-# Populated for ``from meridian.api.main import _rate_limit`` style tests.
-# After init_app, these proxy into get_state().
-_rate_limit = _StateProxy("rate_limit")  # type: ignore[assignment]
-
-
-def __getattr__(name: str):  # type: ignore[no-untyped-def]
-    """Lazy compat for ``_registry``, ``_finalize_request``, etc."""
-    if name == "_registry":
-        return get_state().registry
-    if name == "_request_logger":
-        return get_state().request_logger
-    if name == "_audit_publisher":
-        return get_state().audit_publisher
-    if name == "_config":
-        return get_state().config
-    if name == "_finalize_request":
-        # Adapt old signature used by tests (no state arg)
-        def _wrap(**kwargs):  # type: ignore[no-untyped-def]
-            return finalize_request(get_state(), **kwargs)
-        return _wrap
-    raise AttributeError(name)

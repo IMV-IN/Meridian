@@ -108,18 +108,6 @@ def _client_ip(request: Request) -> str:
     return request.client.host if request.client else "127.0.0.1"
 
 
-def apply_model_access(identity: Optional[IdentityContext], model: str) -> None:
-    if identity is None:
-        return
-    allowed = identity.allowed_models
-    if allowed and model not in allowed:
-        raise GatewayError(
-            f"Key is not permitted to use model {model!r}",
-            "permission_error",
-            403,
-        )
-
-
 def apply_pii(
     state: AppState,
     body: Dict[str, Any],
@@ -235,7 +223,12 @@ async def prepare_chat_request(
     is_stream = bool(body.get("stream", False))
 
     # Order: access → PII → (cost) → budgets → rate limit
-    apply_model_access(identity, model)
+    if identity is not None and identity.allowed_models and model not in identity.allowed_models:
+        raise GatewayError(
+            f"Key is not permitted to use model {model!r}",
+            "permission_error",
+            403,
+        )
     body, pii_counts = apply_pii(state, body, identity, request_id, org_id)
     request_ctx = build_request_context(state, body)
     apply_budgets(state, identity, request_ctx, request_id, org_id, team_id)

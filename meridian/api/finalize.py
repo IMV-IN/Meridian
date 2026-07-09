@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Dict, Optional
+from typing import Any, Dict, Optional
 
 from meridian.api.state import AppState
 from meridian.audit.publisher import AuditEvent
@@ -67,7 +67,7 @@ def finalize_request(
     state.record_request(
         request_id, model, stream, backend.name, status_code, latency, error_type
     )
-    extra: Dict[str, object] = {
+    extra: Dict[str, Any] = {
         "tier": tier_name,
         "org_id": org_id,
         "team_id": team_id,
@@ -83,19 +83,20 @@ def finalize_request(
             status_code=status_code,
             latency_ms=latency,
             error_type=error_type,
-            extra=extra,  # type: ignore[arg-type]
+            extra=extra,
         )
     )
 
 
 def stamp_meridian_headers(
-    headers: Dict[str, str],
+    headers: Any,
     *,
     request_id: str,
     backend: str,
     tier_name: Optional[str],
     session_route: Optional[str],
 ) -> None:
+    """Set x-request-id / x-meridian-* on a response headers mapping."""
     headers["x-request-id"] = request_id
     headers["x-meridian-backend"] = backend
     if tier_name is not None:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, Set, Tuple
+from typing import Optional, Tuple
 
 from meridian.api.state import AppState
 from meridian.registry.backend import Backend
@@ -13,23 +13,14 @@ from meridian.router.tiering import derive_tier
 logger = logging.getLogger("meridian")
 
 
-def select_backend(
-    state: AppState,
-    model: str,
-    tags: Optional[Set[str]] = None,
-    request_ctx: Optional[RequestContext] = None,
-) -> Optional[Backend]:
-    eligible = state.registry.eligible(model, tags)
-    return state.strategy.select(eligible, request_ctx)
-
-
 def select_with_tier(
     state: AppState,
     model: str,
     request_ctx: RequestContext,
 ) -> Tuple[Optional[Backend], Optional[str]]:
     if not state.config.tiering.enabled:
-        return select_backend(state, model, request_ctx=request_ctx), None
+        eligible = state.registry.eligible(model, None)
+        return state.strategy.select(eligible, request_ctx), None
 
     tier_name, tags = derive_tier(request_ctx, state.config.tiering)
     eligible = state.registry.eligible(model, tags)

@@ -14,8 +14,8 @@ import httpx
 import pytest
 from pydantic import ValidationError
 
-from meridian.api.main import _rate_limit, init_app
 from meridian.api.main import app as meridian_app
+from meridian.api.main import get_state, init_app
 from meridian.auth.models import IdentityContext
 from meridian.config.models import BudgetConfig, MeridianConfig, ScopeBudget
 from meridian.usage import build_meter_keys
@@ -156,7 +156,7 @@ async def _client(
         cfg_dict["rate_limit"] = rate_limit
     cfg = MeridianConfig.from_dict(cfg_dict)
     await init_app(cfg, start_health=False)
-    _rate_limit.clear()
+    get_state().rate_limit.clear()
     return httpx.AsyncClient(
         transport=httpx.ASGITransport(app=meridian_app),
         base_url="http://test",
