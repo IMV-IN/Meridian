@@ -86,12 +86,17 @@ async def _stream_response(req_id: str, model: str, reply: str):
         yield f"data: {json.dumps(chunk)}\n\n"
         await asyncio.sleep(0.05)
 
-    # Final chunk
+    # Final chunk + usage (OpenAI often attaches usage on the last chunk)
     final = {
         "id": req_id,
         "object": "chat.completion.chunk",
         "model": model,
         "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": len(words),
+            "total_tokens": 10 + len(words),
+        },
     }
     yield f"data: {json.dumps(final)}\n\n"
     yield "data: [DONE]\n\n"

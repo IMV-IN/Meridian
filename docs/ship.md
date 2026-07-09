@@ -33,6 +33,6 @@ Also: tamper-evident audit pipeline (Kafka → hash chain → Merkle → Ed25519
 
 | Milestone | Status | What |
 |---|---|---|
-| **M** — Cost attribution | next | Actual `usage` from backends, price table, `/meridian/usage` + CSV. See `V1_ROADMAP.md`. |
+| **M** — Cost attribution | implemented | Actual `usage` from backends, price table, `/meridian/usage` + CSV (`v0.8.0` unreleased). |
 | **N** — Packaging | planned | Helm, air-gap bundle, key reload. |
 | **v1.0** | gate | Design-partner PoC on a tagged release; pitch claims = shipped code. |

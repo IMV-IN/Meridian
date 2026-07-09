@@ -238,6 +238,33 @@ class PiiConfig(BaseModel):
         return v
 
 
+class ModelPrice(BaseModel):
+    """USD (or any unit) per 1M tokens."""
+
+    prompt_per_1m: float = Field(default=0.0, ge=0.0)
+    completion_per_1m: float = Field(default=0.0, ge=0.0)
+
+
+class CostConfig(BaseModel):
+    """Actual-token cost attribution (Milestone M). Disabled by default."""
+
+    enabled: bool = Field(default=False)
+    store: str = Field(default="memory")
+    sqlite_path: str = "./meridian_cost.db"
+    currency: str = "USD"
+    # model id -> prices; missing models use defaults below
+    models: Dict[str, ModelPrice] = Field(default_factory=dict)
+    default_prompt_per_1m: float = Field(default=0.0, ge=0.0)
+    default_completion_per_1m: float = Field(default=0.0, ge=0.0)
+
+    @field_validator("store")
+    @classmethod
+    def _store_kind(cls, v: str) -> str:
+        if v not in ("sqlite", "memory"):
+            raise ValueError("cost.store must be 'sqlite' or 'memory'")
+        return v
+
+
 class MeridianConfig(BaseModel):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
@@ -250,6 +277,7 @@ class MeridianConfig(BaseModel):
     auth: AuthConfig = Field(default_factory=AuthConfig)
     budgets: BudgetConfig = Field(default_factory=BudgetConfig)
     pii: PiiConfig = Field(default_factory=PiiConfig)
+    cost: CostConfig = Field(default_factory=CostConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:

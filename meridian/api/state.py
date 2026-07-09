@@ -13,6 +13,7 @@ from meridian.api.ratelimitter import RateLimitStore
 from meridian.audit.publisher import AuditEventPublisher
 from meridian.auth import IdentityContext, build_key_index
 from meridian.config.models import MeridianConfig
+from meridian.cost import CostLedger, InMemoryCostLedger, SqliteCostLedger
 from meridian.health.checker import HealthChecker
 from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
 from meridian.metrics.logger import RequestLogger
@@ -40,6 +41,7 @@ class AppState:
     key_index: Dict[str, IdentityContext]
     rate_limit: RateLimitStore
     usage_meter: Optional[UsageMeter] = None
+    cost_ledger: Optional[CostLedger] = None
     session_store: Optional[SessionStore] = None
     recent_requests: Deque[Dict[str, Any]] = field(
         default_factory=lambda: deque(maxlen=100)
@@ -104,6 +106,15 @@ async def build_app_state(
         else:
             usage_meter = SqliteUsageMeter(cfg.budgets.sqlite_path)
             logger.info("Tenant budgets enabled — sqlite at %s", cfg.budgets.sqlite_path)
+
+    cost_ledger: Optional[CostLedger] = None
+    if cfg.cost.enabled:
+        if cfg.cost.store == "memory":
+            cost_ledger = InMemoryCostLedger()
+            logger.info("Cost attribution enabled — in-memory ledger")
+        else:
+            cost_ledger = SqliteCostLedger(cfg.cost.sqlite_path)
+            logger.info("Cost attribution enabled — sqlite at %s", cfg.cost.sqlite_path)
 
     backends = [Backend(bc) for bc in cfg.backends]
     registry = BackendRegistry(backends)
@@ -174,6 +185,7 @@ async def build_app_state(
         key_index=key_index,
         rate_limit=rate_limit,
         usage_meter=usage_meter,
+        cost_ledger=cost_ledger,
         session_store=session_store,
     )
 
