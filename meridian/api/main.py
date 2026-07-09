@@ -23,6 +23,7 @@ from meridian.health.checker import HealthChecker
 from meridian.metrics.collectors import (
     BACKEND_HEALTHY,
     BACKEND_INFLIGHT,
+    BUDGET_REJECTIONS,
     REQUEST_LATENCY,
     REQUESTS_TOTAL,
 )
@@ -34,6 +35,12 @@ from meridian.router.strategies import RequestContext, RoutingStrategy, create_s
 from meridian.router.tiering import derive_tier
 from meridian.router.token_estimator import estimate_prompt_tokens, extract_max_tokens
 from meridian.telemetry import JsonTelemetryAdapter, TelemetryAdapter, TelemetryPoller
+from meridian.usage import (
+    InMemoryUsageMeter,
+    SqliteUsageMeter,
+    UsageMeter,
+    build_meter_keys,
+)
 from meridian.util.helpers import generate_request_id, now_ms
 
 logger = logging.getLogger("meridian")
@@ -48,6 +55,7 @@ _audit_publisher: Optional[AuditEventPublisher] = None
 _config: Optional[MeridianConfig] = None
 _session_store: Optional[SessionStore] = None
 _key_index: Dict[str, IdentityContext] = {}
+_usage_meter: Optional[UsageMeter] = None
 
 # rate limiting
 _rate_limit: Dict[str, TokenBucket] = {}
@@ -82,12 +90,25 @@ def _load_config() -> MeridianConfig:
 async def init_app(config: Optional[MeridianConfig] = None, start_health: bool = True) -> None:
     """Initialize app state. Called by lifespan or directly in tests."""
     global _registry, _strategy, _health_checker, _telemetry_poller, _request_logger, _audit_publisher, _config
-    global _session_store, _key_index
+    global _session_store, _key_index, _usage_meter
 
     _config = config or _load_config()
     _key_index = build_key_index(_config.auth)
     if _config.auth.enabled:
         logger.info("API-key auth enabled — %d key(s) loaded", len(_key_index))
+
+    # Tenant budgets (Milestone J). Disabled by default; no-op when off.
+    _usage_meter = None
+    if _config.budgets.enabled:
+        if _config.budgets.store == "memory":
+            _usage_meter = InMemoryUsageMeter()
+            logger.info("Tenant budgets enabled — in-memory store")
+        else:
+            _usage_meter = SqliteUsageMeter(_config.budgets.sqlite_path)
+            logger.info(
+                "Tenant budgets enabled — sqlite store at %s",
+                _config.budgets.sqlite_path,
+            )
 
     logging.basicConfig(
         level=getattr(logging, _config.logging.level.upper(), logging.INFO),
@@ -316,37 +337,10 @@ async def chat_completions(request: Request) -> Response:
 
     # Identity is stashed on request.state by the auth middleware (only when
     # auth is enabled and the key validated). None otherwise. Metadata only —
-    # never the key itself. Used for rate-limit keying and logging below.
+    # never the key itself.
     identity: Optional[IdentityContext] = getattr(request.state, "identity", None)
     org_id = identity.org_id if identity else None
     team_id = identity.team_id if identity else None
-
-    # Using x-forwarded-for or x-real-ip headers first (best practise when behind a proxy)
-    ip_address = request.headers.get("x-forwarded-for")
-    if ip_address:
-        ip_address = ip_address.split(",")[0].strip()
-    else:
-        ip_address = request.headers.get("x-real-ip")
-
-    if not ip_address:
-        ip_address = request.client.host if request.client else "127.0.0.1"
-
-    # Rate-limit per tenant when authenticated (org-level), else per source IP.
-    # The namespace prefix keeps the two keyspaces from colliding.
-    # ponytail: org-level only; per-org custom quotas / team granularity later.
-    rl_key = f"org:{org_id}" if org_id else f"ip:{ip_address}"
-    if _config is not None and _config.rate_limit.enabled:
-        cfg = _config.rate_limit
-        bucket = _rate_limit.get(rl_key)
-
-        if bucket is None:
-            bucket = TokenBucket(max_tokens=cfg.token_capacity, refill_rate=cfg.token_refill_rate)
-            _rate_limit[rl_key] = bucket
-
-        if not bucket.allow_request():
-            error_resp = _error_json("Rate Limit Exceeded", f"Retry after {1 / bucket.refill_rate} seconds", 429)
-            error_resp.headers["Retry-After"] = str(1 / bucket.refill_rate)
-            return error_resp
 
     request_id = generate_request_id()
     start = now_ms()
@@ -359,10 +353,8 @@ async def chat_completions(request: Request) -> Response:
     model = body.get("model", "")
     is_stream = body.get("stream", False)
 
-    # Model access control (Milestone I): a non-empty scope set is the caller's
-    # model allow-list. ponytail: lands after model-parse (so after the rate
-    # limit block) — a denied request still spends a rate token; Milestone J
-    # reorders so access denial precedes metering.
+    # Order: access (403) → budgets (429) → rate limit (429) → route.
+    # Access and budget denials must not spend a rate-limit token (Milestone J).
     if identity is not None and identity.scopes and model not in identity.scopes:
         return _error_json(
             f"Key is not permitted to use model {model!r}",
@@ -371,6 +363,78 @@ async def chat_completions(request: Request) -> Response:
         )
 
     request_ctx = _build_request_context(body)
+
+    # Tenant budgets (pre-flight estimate). Uses request_ctx.cost so we never
+    # parse the upstream body; keeps streaming zero-copy.
+    if (
+        _usage_meter is not None
+        and identity is not None
+        and _config.budgets.enabled
+    ):
+        meter_keys = build_meter_keys(identity, _config.budgets)
+        if meter_keys:
+            decision = _usage_meter.check_and_increment(
+                meter_keys, cost=request_ctx.cost, requests=1
+            )
+            if not decision.allowed:
+                blocked = decision.blocked_key
+                level = blocked.scope_level if blocked else "unknown"
+                period = blocked.period if blocked else "unknown"
+                BUDGET_REJECTIONS.labels(level=level, period=period).inc()
+                logger.info(
+                    "Budget exceeded request_id=%s level=%s period=%s org_id=%s team_id=%s",
+                    request_id, level, period, org_id, team_id,
+                )
+                retry = decision.retry_after_s
+                msg = (
+                    f"Budget exceeded at {level} ({period})"
+                    if blocked
+                    else "Budget exceeded"
+                )
+                error_resp = _error_json(msg, "rate_limit_exceeded", 429)
+                if retry is not None:
+                    error_resp.headers["Retry-After"] = str(int(max(1, retry)))
+                return error_resp
+
+    # Using x-forwarded-for or x-real-ip headers first (best practise when behind a proxy)
+    ip_address = request.headers.get("x-forwarded-for")
+    if ip_address:
+        ip_address = ip_address.split(",")[0].strip()
+    else:
+        ip_address = request.headers.get("x-real-ip")
+
+    if not ip_address:
+        ip_address = request.client.host if request.client else "127.0.0.1"
+
+    # Rate-limit per tenant when authenticated (org-level), else per source IP.
+    # Per-org overrides (budgets.orgs[*].token_capacity/refill) fold in here.
+    rl_key = f"org:{org_id}" if org_id else f"ip:{ip_address}"
+    if _config.rate_limit.enabled:
+        cfg = _config.rate_limit
+        capacity = cfg.token_capacity
+        refill = cfg.token_refill_rate
+        if org_id and _config.budgets.enabled:
+            org_budget = _config.budgets.orgs.get(org_id)
+            if org_budget is not None:
+                if org_budget.token_capacity is not None:
+                    capacity = org_budget.token_capacity
+                if org_budget.token_refill_rate is not None:
+                    refill = org_budget.token_refill_rate
+
+        bucket = _rate_limit.get(rl_key)
+        if bucket is None:
+            bucket = TokenBucket(max_tokens=capacity, refill_rate=refill)
+            _rate_limit[rl_key] = bucket
+
+        if not bucket.allow_request():
+            error_resp = _error_json(
+                "Rate Limit Exceeded",
+                "rate_limit_exceeded",
+                429,
+            )
+            error_resp.headers["Retry-After"] = str(1 / bucket.refill_rate)
+            return error_resp
+
     session_id = request.headers.get(_config.session_affinity.header) if _config.session_affinity.enabled else None
     backend, tier_name, session_route = _route(model, request_ctx, session_id)
     if backend is None:

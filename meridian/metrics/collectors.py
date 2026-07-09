@@ -28,3 +28,10 @@ BACKEND_HEALTHY = Gauge(
     "Backend health status (1=healthy, 0=unhealthy)",
     ["backend"],
 )
+
+# Cardinality-safe: level + period only — never tenant id (CLAUDE.md §5).
+BUDGET_REJECTIONS = Counter(
+    "meridian_budget_rejections_total",
+    "Requests rejected for exceeding a tenant budget cap",
+    ["level", "period"],
+)

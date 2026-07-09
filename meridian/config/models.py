@@ -138,8 +138,8 @@ class AuthConfig(BaseModel):
     """API-key authentication. Disabled by default for backward compatibility.
 
     When enabled, requests must carry a valid ``Authorization: Bearer <key>``
-    header; the key maps to an IdentityContext used for logging and (in later
-    milestones) rate limiting, cost attribution, and RBAC.
+    header; the key maps to an IdentityContext used for logging, rate limiting,
+    model access, and budgets.
     """
 
     enabled: bool = Field(default=False)
@@ -154,6 +154,52 @@ class AuthConfig(BaseModel):
         return v
 
 
+class PeriodCaps(BaseModel):
+    """Optional token/request caps for one period window (daily or monthly)."""
+
+    tokens: Optional[float] = Field(default=None, gt=0)
+    requests: Optional[float] = Field(default=None, gt=0)
+
+
+class ScopeBudget(BaseModel):
+    """Caps for one tenant scope (org, team, or user).
+
+    Rate-limit overrides (``token_capacity`` / ``token_refill_rate``) are only
+    consulted for org-level entries when building the token bucket.
+    """
+
+    daily: Optional[PeriodCaps] = None
+    monthly: Optional[PeriodCaps] = None
+    token_capacity: Optional[float] = Field(default=None, gt=0)
+    token_refill_rate: Optional[float] = Field(default=None, gt=0)
+
+
+class BudgetConfig(BaseModel):
+    """Tenant budgets & quotas. Disabled by default (no block = unchanged).
+
+    Caps are declared per scope id:
+    - ``orgs``: key = org_id
+    - ``teams``: key = ``{org_id}/{team_id}``
+    - ``users``: key = ``{org_id}/{user_id}``
+
+    ``store`` is ``sqlite`` (default, survives restart) or ``memory`` (tests).
+    """
+
+    enabled: bool = Field(default=False)
+    store: str = Field(default="sqlite")
+    sqlite_path: str = "./meridian_usage.db"
+    orgs: Dict[str, ScopeBudget] = Field(default_factory=dict)
+    teams: Dict[str, ScopeBudget] = Field(default_factory=dict)
+    users: Dict[str, ScopeBudget] = Field(default_factory=dict)
+
+    @field_validator("store")
+    @classmethod
+    def _store_kind(cls, v: str) -> str:
+        if v not in ("sqlite", "memory"):
+            raise ValueError("budgets.store must be 'sqlite' or 'memory'")
+        return v
+
+
 class MeridianConfig(BaseModel):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
@@ -164,6 +210,7 @@ class MeridianConfig(BaseModel):
     tiering: TieringConfig = Field(default_factory=TieringConfig)
     session_affinity: SessionAffinityConfig = Field(default_factory=SessionAffinityConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
+    budgets: BudgetConfig = Field(default_factory=BudgetConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:

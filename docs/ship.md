@@ -4,7 +4,7 @@ A scannable record of **what's shipped** and **what's next**. For the full
 strategic picture see [`ROADMAP.md`](./ROADMAP.md); for per-change detail see
 [`../CHANGELOG.md`](../CHANGELOG.md). Keep this file updated as milestones land.
 
-_Last updated: 2026-06-30 (Milestone I)._
+_Last updated: 2026-07-09 (Milestone J)._
 
 ---
 
@@ -22,10 +22,15 @@ _Last updated: 2026-06-30 (Milestone I)._
 | **G** — Identity-aware logging | `v0.4.0` | `org_id`/`team_id` attached to JSONL logs + audit events (metadata only; key never logged) |
 | **H** — Per-identity rate limiting | `v0.4.0` | Token bucket keys on `org:{org_id}` when authenticated (else `ip:{ip}`); same org shares a bucket across source IPs |
 | **I** — Model access control | `v0.5.0` | Per-key `allowed_models` allow-list; disallowed model → 403 (`permission_error`); empty list = unrestricted |
+| **J** — Tenant budgets & quotas | `v0.5.0` | Pluggable `UsageMeter` (SQLite default + in-memory), org→team→user caps (tokens + requests, daily/monthly), pre-flight metering → 429, per-org rate-limit overrides, `meridian_budget_rejections_total` |
 
 Also shipped outside the A–E track: IP-based rate limiting (token bucket) and
 the tamper-evident audit pipeline (Kafka → SHA-256 hash chain → Merkle →
 Ed25519 → S3 Object Lock WORM).
+
+The identity keystone (F–J) is complete. Next enterprise controls are tracked
+in [`ROADMAP.md`](./ROADMAP.md) and [`V1_ROADMAP.md`](./V1_ROADMAP.md)
+(Milestone K hardening, cost attribution, PII, packaging).
 
 ---
 
@@ -33,8 +38,4 @@ Ed25519 → S3 Object Lock WORM).
 
 | Milestone | Status | What |
 |---|---|---|
-| **J** — Tenant budgets & quotas | designed | Pluggable `UsageMeter` (SQLite default + in-memory), org→team→user budget caps (tokens + requests, daily/monthly), pre-flight metering, 429 on exceed. Folds in per-org rate-limit overrides. Spec: `docs/superpowers/specs/2026-06-30-v0.5-tenant-governance-design.md`. Second half of v0.5. |
-
-After J, the identity keystone (F–J) unblocks the rest of the enterprise
-controls tracked in [`ROADMAP.md`](./ROADMAP.md): per-team cost attribution,
-multi-provider routing, and PII detection/redaction.
+| **K** — Hardening release | planned | Bounded rate-limit store, streaming cancellation safety, container hardening. See `V1_ROADMAP.md` + `KNOWN_ISSUES.md`. |

@@ -7,6 +7,11 @@ All notable changes to this project will be documented in this file.
 ### Added
 
 - **Model access control (Milestone I)** — each API key may declare an `allowed_models` list; when set, requests for any other model return HTTP 403 with `"type": "permission_error"` (OpenAI error envelope). An empty/absent list means all models are allowed (backward compatible), and the gate only applies when auth is enabled. The allow-list is carried on `IdentityContext.scopes` (previously reserved) and enforced in the chat handler right after the model is parsed. First half of the v0.5 tenant-governance theme; see `docs/superpowers/specs/2026-06-30-v0.5-tenant-governance-design.md`.
+- **Tenant budgets & quotas (Milestone J)** — opt-in org→team→user usage caps. New `budgets:` config block (`enabled` default false) declares daily/monthly limits on estimated **tokens** (`request_ctx.cost`) and **requests** at `orgs` / `teams` / `users` maps. Pluggable `UsageMeter` (`meridian/usage/`): `SqliteUsageMeter` (default, path `budgets.sqlite_path`) and `InMemoryUsageMeter` (tests). Pre-flight `check_and_increment` before routing — exceed any level → HTTP 429 `"type": "rate_limit_exceeded"` with `Retry-After` until period rollover. Per-org rate-limit overrides via `budgets.orgs.<id>.token_capacity` / `token_refill_rate`. Prometheus counter `meridian_budget_rejections_total{level,period}` (never labeled by tenant id). Chat path order is now access → budget → rate-limit → route so 403/budget 429 do not spend rate tokens.
+
+### Changed
+
+- **Chat handler gate order** — model access and budget checks run before the token-bucket rate limiter (was: rate limit before body parse / model access).
 
 ## [0.4.0] - 2026-06-30
 
