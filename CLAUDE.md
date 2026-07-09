@@ -15,10 +15,11 @@ Meridian is the reliability + routing layer today, and is designed to evolve int
 - Performs active health checks and automatic failover
 - Exposes Prometheus metrics and structured JSONL audit logs (metadata only)
 - Includes a minimal operator UI for backend state and recent requests
+- Optional multi-tenant controls: API-key auth, model allow-lists, per-org rate limits, org→team→user budgets
 
 ### What Meridian is not (yet)
 - Not an inference engine (does not run models)
-- Not a full multi-tenant enterprise control plane (no RBAC/SSO/budgets/SLO management)
+- Not a full enterprise control plane (no SSO/OIDC, no hierarchical RBAC roles, no multi-region edge)
 - Not an engine-internal scheduler (no direct control of continuous batching or KV allocators)
 
 ### Mission alignment rule
@@ -48,12 +49,21 @@ Key modules
 - Proxy: `meridian/proxy/forward.py`
 - Metrics: `meridian/metrics/collectors.py`
 - Audit logs: `meridian/metrics/logger.py`
+- Auth / identity: `meridian/auth/`
+- Usage / budgets: `meridian/usage/`
+- Telemetry: `meridian/telemetry/`
 - Config schema: `meridian/config/models.py`
 - UI: `meridian/ui/index.html`
+
+**Milestone status:** A–J are shipped (see `docs/ship.md`). Next: hardening (K) and enterprise backlog in `docs/V1_ROADMAP.md` / `docs/ROADMAP.md`.
 
 ---
 
 ## 3) Short-term goals (ship one milestone at a time)
+
+> Historical plan for the A–E reliability track. Status of each is in
+> [`docs/ship.md`](docs/ship.md). Prefer that file and `docs/V1_ROADMAP.md` for
+> what to build next.
 
 The immediate plan is to add inference-aware value without tight coupling to any single engine.
 

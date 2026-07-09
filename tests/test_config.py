@@ -138,3 +138,34 @@ def test_auth_config_rejects_duplicate_keys():
 def test_auth_config_rejects_bad_key_format():
     with pytest.raises(ValidationError):
         AuthConfig(enabled=True, keys=[{"key": "not-a-valid-key", "org_id": "a"}])
+
+
+def test_budgets_config_defaults_disabled():
+    cfg = MeridianConfig.from_dict({})
+    assert cfg.budgets.enabled is False
+    assert cfg.budgets.store == "sqlite"
+    assert cfg.budgets.sqlite_path == "./meridian_usage.db"
+
+
+def test_budgets_config_parses_cascade_and_overrides():
+    cfg = MeridianConfig.from_dict({
+        "budgets": {
+            "enabled": True,
+            "store": "memory",
+            "orgs": {
+                "acme": {
+                    "daily": {"tokens": 1e6, "requests": 1000},
+                    "monthly": {"tokens": 1e7},
+                    "token_capacity": 20,
+                    "token_refill_rate": 5,
+                },
+            },
+            "teams": {"acme/eng": {"daily": {"tokens": 5e4}}},
+            "users": {"acme/alice": {"daily": {"requests": 100}}},
+        },
+    })
+    assert cfg.budgets.enabled is True
+    assert cfg.budgets.orgs["acme"].daily.tokens == 1e6
+    assert cfg.budgets.orgs["acme"].token_capacity == 20
+    assert cfg.budgets.teams["acme/eng"].daily.tokens == 5e4
+    assert cfg.budgets.users["acme/alice"].daily.requests == 100

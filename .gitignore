@@ -22,7 +22,10 @@ build/
 
 # Meridian runtime
 meridian_requests.jsonl
+meridian_usage.db
 *.jsonl
+*.db
+!**/testdata/**/*.db
 
 # Audit signing keys — NEVER commit the private key
 audit_keys/
@@ -32,9 +35,8 @@ audit_keys/
 Thumbs.db
 nul
 
-# Under dev
+# Under dev / local media (not product docs)
 diagrams/
-docs/
 brag-output/
 # local scratch validation config
 config_real.yaml

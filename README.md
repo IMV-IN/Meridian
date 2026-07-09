@@ -22,6 +22,7 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **Rate limiting** — token bucket keyed per-org when auth is enabled (falls back to per-IP otherwise)
 - **API-key authentication** — opt-in Bearer-key enforcement on `/v1/*`; each key maps to an org/team/user identity (attached to logs as metadata); disabled by default for backward compatibility
 - **Model access control** — per-key `allowed_models` allow-list; disallowed models return 403 (empty list = unrestricted)
+- **Tenant budgets & quotas** — org→team→user caps on estimated tokens and requests (daily/monthly); pre-flight 429; SQLite meter by default; per-org rate-limit overrides
 
 ### Coming soon
 
@@ -29,7 +30,6 @@ Meridian is **not** an inference engine — it doesn't manage KV cache, batching
 - **Provider-specific cost tracking** — per-provider token pricing, per-team attribution
 - **Semantic caching** — cache similar prompts at the gateway level
 - **PII detection & redaction** — jurisdiction-specific entity packs
-- **RBAC** — org → team → user hierarchy with budget caps
 - **Batch inference** — async endpoint for bulk processing
 - **On-prem deployment** — OCI containers + Helm charts, air-gapped mode
 
@@ -324,7 +324,46 @@ auth:
       org_id: "acme"                                    # no list => all models
 ```
 
-> **Scope:** authentication, identity-aware logging, per-org rate limiting, and per-key model access control are shipped. Tenant budgets/quotas (org→team→user caps) are the next v0.5 milestone — see [`docs/ship.md`](docs/ship.md).
+### Tenant budgets & quotas
+
+Budgets are **disabled by default**. When `budgets.enabled: true`, Meridian meters each authenticated request against configured caps **before** routing to a backend. Metering uses the same estimated request cost as token-aware routing (`prompt_tokens * prefill_weight + max_tokens * decode_weight`) plus a request count — no response-body parsing, so streaming stays zero-copy.
+
+Caps cascade **org → team → user**. A request debits every applicable level; the first exhausted level returns **HTTP 429** (`"type": "rate_limit_exceeded"`) with `Retry-After` until the UTC period rolls (daily `YYYY-MM-DD` / monthly `YYYY-MM`). Scope keys:
+
+| Level | Config map | Key format |
+|---|---|---|
+| org | `budgets.orgs` | `org_id` |
+| team | `budgets.teams` | `{org_id}/{team_id}` |
+| user | `budgets.users` | `{org_id}/{user_id}` |
+
+```yaml
+budgets:
+  enabled: true
+  store: sqlite                    # or memory (ephemeral / tests)
+  sqlite_path: ./meridian_usage.db
+  orgs:
+    acme:
+      daily:
+        tokens: 1000000
+        requests: 5000
+      monthly:
+        tokens: 20000000
+      # Optional per-org rate-limit override (else global rate_limit.*)
+      token_capacity: 20
+      token_refill_rate: 5
+  teams:
+    acme/eng:
+      daily:
+        tokens: 200000
+  users:
+    acme/alice:
+      daily:
+        requests: 200
+```
+
+Rejections increment `meridian_budget_rejections_total{level,period}` (never labeled by tenant id). Auth must be enabled for budgets to apply — without an identity there is no tenant to meter.
+
+> **Scope:** the identity keystone (auth, identity logging, per-org rate limiting, model access, tenant budgets) is complete. See [`docs/ship.md`](docs/ship.md).
 
 ### Quick curl examples
 
