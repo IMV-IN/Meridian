@@ -1,38 +1,38 @@
 # Meridian
 
-Meridian is an **L7 inference gateway** that sits between your applications and multiple inference backends (vLLM, SGLang, TensorRT-LLM, or any OpenAI-compatible server). It provides:
+**Latest release: [v0.7.0](https://github.com/IMV-IN/Meridian/releases/tag/v0.7.0)** · Ship log: [`docs/ship.md`](docs/ship.md)
 
-- A single API endpoint that routes to the best available backend
-- Automatic health checking and failover when backends go down
-- Streaming SSE passthrough with minimal overhead
-- Prometheus metrics and structured audit logs for production visibility
+Meridian is an **L7 inference gateway** for on-soil / self-hosted LLM fleets. It sits between your applications and multiple inference backends (vLLM, SGLang, TensorRT-LLM, Ollama, or any OpenAI-compatible server) and adds **routing, reliability, multi-tenant controls, and compliance hooks** without changing application code.
 
-Meridian is **not** an inference engine — it doesn't manage KV cache, batching, or GPU scheduling. It's the routing and reliability layer that makes your existing backends production-ready.
+Meridian is **not** an inference engine — it does not manage KV cache, batching, or GPU scheduling.
 
-## Features
+## Features (shipped through v0.7.0)
 
-- **OpenAI-compatible API** — drop-in replacement (`/v1/chat/completions`, `/v1/models`)
-- **Streaming SSE passthrough** — zero-copy byte forwarding, no parsing
-- **4 routing strategies** — weighted round-robin, least inflight, EWMA latency, **token-aware**
-- **Health checking & failover** — active pings + passive failure detection
-- **Prometheus metrics** — request counters, latency histograms, backend health gauges
-- **JSONL request logs** — every request logged with backend, latency, status
-- **Tamper-evident audit pipeline** — optional async egress to Kafka/Redpanda, SHA-256 hash chain → Merkle tree → Ed25519 signing → S3 Object Lock (WORM); metadata-only
-- **Live dashboard** — real-time UI showing backend health, stats, and recent requests
-- **Rate limiting** — token bucket keyed per-org when auth is enabled (falls back to per-IP otherwise)
-- **API-key authentication** — opt-in Bearer-key enforcement on `/v1/*`; each key maps to an org/team/user identity (attached to logs as metadata); disabled by default for backward compatibility
-- **Model access control** — per-key `allowed_models` allow-list; disallowed models return 403 (empty list = unrestricted)
-- **Tenant budgets & quotas** — org→team→user caps on estimated tokens and requests (daily/monthly); pre-flight 429; SQLite meter by default; per-org rate-limit overrides
-- **Hardened for pilots** — bounded rate-limit store, stream-disconnect-safe cleanup, request body size cap, non-root container with healthcheck
-- **PII detection & redaction** — opt-in India entity pack (Aadhaar, PAN, GSTIN, IFSC, UPI, mobile); block or redact on the request path; matched values never logged
+### Core gateway
+- **OpenAI-compatible API** — `/v1/chat/completions`, `/v1/models`
+- **Streaming SSE passthrough** — zero-copy byte forwarding
+- **Routing strategies** — weighted round-robin, least inflight, EWMA latency, **token-aware**
+- **Workload tiering** — pools by prompt/decode shape; **session affinity** (`x-meridian-session`)
+- **Health checks & failover** — active + passive
+- **Telemetry-aware scoring** — optional capacity penalties from backend JSON signals
+- **Prometheus + JSONL** — metadata only (no prompts by default)
+- **Operator UI** — `/ui` backend health and recent requests
+- **Tamper-evident audit pipeline** — optional Kafka → hash chain → Merkle → Ed25519 → S3 WORM
 
-### Coming soon
+### Multi-tenant controls
+- **API-key auth** — opt-in Bearer keys → org/team/user identity
+- **Identity-aware logs & rate limits** — per-org buckets when auth is on
+- **Model access control** — per-key `allowed_models` → 403
+- **Tenant budgets** — org→team→user daily/monthly tokens + requests; pre-flight 429
 
-- **Multi-provider routing** — OpenAI, Anthropic, Google + self-hosted backends through one endpoint
-- **Provider-specific cost tracking** — per-provider token pricing, per-team attribution
-- **Semantic caching** — cache similar prompts at the gateway level
-- **Batch inference** — async endpoint for bulk processing
-- **On-prem deployment** — OCI containers + Helm charts, air-gapped mode
+### Compliance & hardening
+- **PII (India pack)** — Aadhaar (Verhoeff), PAN, GSTIN, IFSC, UPI, mobile; policies `block` / `redact_and_replace` / `audit_only`; **matched values never logged**
+- **Pilot hardening** — bounded rate-limit store, stream-disconnect-safe cleanup, body size cap, non-root container + `HEALTHCHECK`
+
+### Coming soon (not tagged yet — do not pitch as shipped)
+- **Cost attribution** — actual token usage + price tables + `/meridian/usage` (Milestone M)
+- **Multi-provider routing** — OpenAI/Anthropic/Google + self-hosted
+- **Semantic caching**, **batch inference**, **Helm / air-gapped packaging**
 
 ## 10-Minute Quickstart
 

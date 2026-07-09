@@ -56,7 +56,7 @@ Key modules
 - Config schema: `meridian/config/models.py`
 - UI: `meridian/ui/index.html`
 
-**Milestone status:** A–L are implemented (see `docs/ship.md`; tag L as v0.7.0 when merged). Next: cost attribution (M) in `docs/V1_ROADMAP.md`.
+**Milestone status:** A–L shipped and tagged through **v0.7.0** (see `docs/ship.md`). Next: **M — cost attribution** in `docs/V1_ROADMAP.md`.
 
 ---
 

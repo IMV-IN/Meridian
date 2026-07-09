@@ -26,9 +26,9 @@ _Last reconciled: 2026-07-09._
 | **I** — Model access control | `v0.5.0` |
 | **J** — Tenant budgets & quotas | `v0.5.0` |
 | **K** — Hardening | `v0.6.0` (tagged) |
-| **L** — PII detection & redaction | `v0.7.0` (unreleased) |
+| **L** — PII detection & redaction | `v0.7.0` (tagged) |
 
-Identity keystone **F–J**, hardening **K**, and PII **L** are complete (tag L after merge).
+Identity keystone **F–J**, hardening **K**, and PII **L** are complete and tagged through **v0.7.0**.
 
 ---
 
@@ -76,7 +76,7 @@ A–E + audit (done)
       │
   K hardening (done)
       │
-  L PII (done, tag pending)
+  L PII (done, v0.7.0)
       │
   M cost attribution  →  multi-provider
   semantic cache · batch  (independent)
