@@ -83,7 +83,7 @@ Compute: none.
 
 ## Milestone L — PII detection & redaction (`v0.7.0`)
 
-**Status:** implemented (branch `milestone/L-pii-redaction`).
+**Status:** shipped — tag **v0.7.0** (2026-07-09).
 
 **Objective:** the compliance differentiator. India entity pack first.
 
@@ -102,6 +102,8 @@ Compute: none.
 ---
 
 ## Milestone M — Cost attribution (`v0.8.0`)
+
+**Status:** next (not started). Depends on J's `UsageMeter` + identity.
 
 **Objective:** the second half of the CFO pitch — turn J's metering into
 reports.

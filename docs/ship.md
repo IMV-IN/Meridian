@@ -4,33 +4,28 @@ A scannable record of **what's shipped** and **what's next**. For the full
 strategic picture see [`ROADMAP.md`](./ROADMAP.md); for per-change detail see
 [`../CHANGELOG.md`](../CHANGELOG.md). Keep this file updated as milestones land.
 
-_Last updated: 2026-07-09 (Milestone L)._
+_Last updated: 2026-07-09 — **v0.7.0 tagged** (Milestone L)._
 
 ---
 
-## Shipped
+## Shipped (tagged)
 
-| Milestone | Version | What |
+| Milestone | Tag | What |
 |---|---|---|
-| Core gateway | `v0.1.0` | OpenAI-compatible API, SSE streaming passthrough, health checks + automatic failover, Prometheus metrics, metadata-only JSONL logs, operator UI |
-| **A** — Distribution | `v0.1.1` | Multi-arch Docker images, smoke test, release CI (GHCR always; Docker Hub when configured) |
-| **B** — Token-aware routing | `v0.2.0` | Route by estimated request cost (prefill/decode weights, EWMA latency) |
-| **C** — Telemetry adapters | `v0.2.1` | Capacity-aware routing inputs (generic JSON poll adapter) + queue/mem penalties |
-| **D** — Workload tiering | `v0.3.0` | Dedicated backend pools by request shape (`long_prompt` / `long_decode` / `default`), tag-driven, fallback to all-healthy |
-| **E** — KV-affinity lite | `v0.3.1` | Session stickiness via `x-meridian-session`, sliding-TTL in-memory store, remap on unhealthy |
-| **F** — API-key auth | `v0.4.0` | Opt-in Bearer-key gate on `/v1/*`, config-driven, disabled by default; keys map to org/team/user identity |
-| **G** — Identity-aware logging | `v0.4.0` | `org_id`/`team_id` attached to JSONL logs + audit events (metadata only; key never logged) |
-| **H** — Per-identity rate limiting | `v0.4.0` | Token bucket keys on `org:{org_id}` when authenticated (else `ip:{ip}`); same org shares a bucket across source IPs |
-| **I** — Model access control | `v0.5.0` | Per-key `allowed_models` allow-list; disallowed model → 403 (`permission_error`); empty list = unrestricted |
-| **J** — Tenant budgets & quotas | `v0.5.0` | Pluggable `UsageMeter` (SQLite default + in-memory), org→team→user caps (tokens + requests, daily/monthly), pre-flight metering → 429, per-org rate-limit overrides, `meridian_budget_rejections_total` |
-| **K** — Hardening | `v0.6.0` | Bounded rate-limit store (TTL + max keys), stream-cancel-safe finalize, body size cap 413, non-root Docker + HEALTHCHECK, version consistency CI |
-| **L** — PII detection & redaction | `v0.7.0` | India pack (Aadhaar/PAN/GSTIN/IFSC/UPI/phone); policies block / redact_and_replace / redact_for_logs / audit_only; counts-only audit; request-path only |
+| Core gateway | `v0.1.0` | OpenAI-compatible API, SSE streaming, health/failover, Prometheus, JSONL logs, operator UI |
+| **A** — Distribution | `v0.1.1` | Multi-arch Docker images, smoke test, release CI |
+| **B** — Token-aware routing | `v0.2.0` | Route by estimated request cost |
+| **C** — Telemetry adapters | `v0.2.1` | Capacity-aware routing inputs + queue/mem penalties |
+| **D** — Workload tiering | `v0.3.0` | Backend pools by request shape |
+| **E** — KV-affinity lite | `v0.3.1` | Session stickiness via `x-meridian-session` |
+| **F–H** — Identity keystone | `v0.4.0` | API-key auth, identity logging, per-org rate limiting |
+| **I–J** — Tenant governance | `v0.5.0` | Model allow-lists + org→team→user budgets |
+| **K** — Hardening | `v0.6.0` | Bounded RL store, stream-safe cleanup, body cap, non-root image |
+| **L** — PII (India pack) | **`v0.7.0`** | Aadhaar/PAN/GSTIN/IFSC/UPI/phone; block/redact/audit; counts-only logs |
 
-Also shipped outside the A–E track: IP-based rate limiting (token bucket) and
-the tamper-evident audit pipeline (Kafka → SHA-256 hash chain → Merkle →
-Ed25519 → S3 Object Lock WORM).
+Also: tamper-evident audit pipeline (Kafka → hash chain → Merkle → Ed25519 → S3 WORM).
 
-Next: cost attribution (M), packaging (N) — see [`ROADMAP.md`](./ROADMAP.md).
+**Latest release:** `v0.7.0` — `docker pull lothnic0801/meridian:0.7.0` (or `:latest` after publish).
 
 ---
 
@@ -38,4 +33,6 @@ Next: cost attribution (M), packaging (N) — see [`ROADMAP.md`](./ROADMAP.md).
 
 | Milestone | Status | What |
 |---|---|---|
-| **M** — Cost attribution | planned | Actual token usage + price table + `/meridian/usage`. See `V1_ROADMAP.md`. |
+| **M** — Cost attribution | next | Actual `usage` from backends, price table, `/meridian/usage` + CSV. See `V1_ROADMAP.md`. |
+| **N** — Packaging | planned | Helm, air-gap bundle, key reload. |
+| **v1.0** | gate | Design-partner PoC on a tagged release; pitch claims = shipped code. |

@@ -10,7 +10,7 @@ report vulnerabilities.
 
 | Version | Supported |
 |---|---|
-| latest tagged release | ✅ |
+| **v0.7.0** (latest) and current `main` | ✅ |
 | older tags | ❌ — upgrade to latest |
 
 ## Reporting a vulnerability

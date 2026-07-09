@@ -6,9 +6,10 @@ this file is what you actually say, show, and send. Keep it synced with
 [`ship.md`](./ship.md) — **never pitch a feature that isn't in a tagged
 release** (that's a v1.0 gate rule).
 
-_Last updated: 2026-07-09. Shipped basis: Milestones A–K on tag **v0.6.0**
-(identity + budgets + hardening). **Do not pitch PII until L is tagged**
-(`v0.7.0`); see [`ship.md`](./ship.md)._
+_Last updated: 2026-07-09. Shipped basis: Milestones **A–L** on tag **v0.7.0**
+(routing, identity, budgets, hardening, **India PII pack**). See
+[`ship.md`](./ship.md). Do not pitch **cost attribution** or multi-provider
+until those milestones are tagged._
 
 ---
 
