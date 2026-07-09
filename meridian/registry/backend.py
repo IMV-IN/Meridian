@@ -22,6 +22,8 @@ class Backend:
         self.weight = config.weight
         self.tags: Set[str] = set(config.tags)
         self.health_endpoint = config.health_endpoint
+        # Upstream credential only — never a Meridian client API key.
+        self.auth_header: Optional[str] = config.auth_header
 
         # Runtime state (thread-safe via lock)
         self._lock = threading.Lock()

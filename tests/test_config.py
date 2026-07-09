@@ -154,7 +154,7 @@ def test_rate_limit_store_and_body_cap_defaults():
     assert cfg.gateway.max_body_bytes == 10 * 1024 * 1024
 
 
-def test_budgets_config_parses_cascade_and_overrides():
+def test_budgets_config_parses_cascade():
     cfg = MeridianConfig.from_dict({
         "budgets": {
             "enabled": True,
@@ -163,8 +163,6 @@ def test_budgets_config_parses_cascade_and_overrides():
                 "acme": {
                     "daily": {"tokens": 1e6, "requests": 1000},
                     "monthly": {"tokens": 1e7},
-                    "token_capacity": 20,
-                    "token_refill_rate": 5,
                 },
             },
             "teams": {"acme/eng": {"daily": {"tokens": 5e4}}},
@@ -173,6 +171,19 @@ def test_budgets_config_parses_cascade_and_overrides():
     })
     assert cfg.budgets.enabled is True
     assert cfg.budgets.orgs["acme"].daily.tokens == 1e6
-    assert cfg.budgets.orgs["acme"].token_capacity == 20
     assert cfg.budgets.teams["acme/eng"].daily.tokens == 5e4
     assert cfg.budgets.users["acme/alice"].daily.requests == 100
+
+
+def test_rate_limit_org_overrides():
+    cfg = MeridianConfig.from_dict({
+        "rate_limit": {
+            "enabled": True,
+            "token_capacity": 100,
+            "org_overrides": {
+                "acme": {"token_capacity": 20, "token_refill_rate": 5},
+            },
+        },
+    })
+    assert cfg.rate_limit.org_overrides["acme"].token_capacity == 20
+    assert cfg.rate_limit.org_overrides["acme"].token_refill_rate == 5

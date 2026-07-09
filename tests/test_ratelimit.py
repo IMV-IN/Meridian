@@ -46,8 +46,8 @@ _mock_url = f"http://127.0.0.1:{_mock_port}"
 _tmpdir = tempfile.mkdtemp()
 _jsonl_path = os.path.join(_tmpdir, "requests.jsonl")
 
-from meridian.api.main import _rate_limit, init_app  # noqa: E402
 from meridian.api.main import app as meridian_app  # noqa: E402
+from meridian.api.main import get_state, init_app  # noqa: E402
 from meridian.config.models import MeridianConfig  # noqa: E402
 
 # ── TokenBucket unit tests ──────────────────────────────────────────────
@@ -131,7 +131,7 @@ async def rl_client():
         ],
     })
     await init_app(cfg, start_health=False)
-    _rate_limit.clear()
+    get_state().rate_limit.clear()
 
     transport = httpx.ASGITransport(app=meridian_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
@@ -159,7 +159,7 @@ async def rl_disabled_client():
         ],
     })
     await init_app(cfg, start_health=False)
-    _rate_limit.clear()
+    get_state().rate_limit.clear()
 
     transport = httpx.ASGITransport(app=meridian_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:
@@ -187,7 +187,7 @@ async def rl_burst_client():
         ],
     })
     await init_app(cfg, start_health=False)
-    _rate_limit.clear()
+    get_state().rate_limit.clear()
 
     transport = httpx.ASGITransport(app=meridian_app)
     async with httpx.AsyncClient(transport=transport, base_url="http://test") as c:

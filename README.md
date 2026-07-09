@@ -349,9 +349,6 @@ budgets:
         requests: 5000
       monthly:
         tokens: 20000000
-      # Optional per-org rate-limit override (else global rate_limit.*)
-      token_capacity: 20
-      token_refill_rate: 5
   teams:
     acme/eng:
       daily:
@@ -360,6 +357,16 @@ budgets:
     acme/alice:
       daily:
         requests: 200
+
+# Per-org token-bucket overrides (not budget caps)
+rate_limit:
+  enabled: true
+  token_capacity: 100
+  token_refill_rate: 10
+  org_overrides:
+    acme:
+      token_capacity: 20
+      token_refill_rate: 5
 ```
 
 Rejections increment `meridian_budget_rejections_total{level,period}` (never labeled by tenant id). Auth must be enabled for budgets to apply — without an identity there is no tenant to meter.
