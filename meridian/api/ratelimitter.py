@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Callable, Dict, Optional, Tuple
+from heapq import heappop, heappush
+from typing import Callable, Dict, List, Optional, Tuple
 
 
 class TokenBucket:
@@ -72,6 +73,8 @@ class RateLimitStore:
         self._lock = threading.Lock()
         # key -> (bucket, expiry_epoch_s)
         self._map: Dict[str, Tuple[TokenBucket, float]] = {}
+        # min-heap of (expiry_epoch_s, key) for O(log n) eviction
+        self._expiry_heap: List[Tuple[float, str]] = []
 
     def get_or_create(
         self,
@@ -86,17 +89,20 @@ class RateLimitStore:
             if entry is not None:
                 bucket, expiry = entry
                 if now < expiry:
-                    self._map[key] = (bucket, now + self._ttl)
+                    new_expiry = now + self._ttl
+                    self._map[key] = (bucket, new_expiry)
+                    heappush(self._expiry_heap, (new_expiry, key))
                     return bucket
                 # Expired — drop and recreate below
                 del self._map[key]
 
             if len(self._map) >= self._max:
-                victim = min(self._map, key=lambda k: self._map[k][1])
-                del self._map[victim]
+                self._evict_nearest_expiry()
 
             bucket = TokenBucket(max_tokens=max_tokens, refill_rate=refill_rate)
-            self._map[key] = (bucket, now + self._ttl)
+            expiry = now + self._ttl
+            self._map[key] = (bucket, expiry)
+            heappush(self._expiry_heap, (expiry, key))
             return bucket
 
     def sweep(self) -> int:
@@ -111,6 +117,7 @@ class RateLimitStore:
     def clear(self) -> None:
         with self._lock:
             self._map.clear()
+            self._expiry_heap.clear()
 
     def size(self) -> int:
         with self._lock:
@@ -123,3 +130,14 @@ class RateLimitStore:
             if entry is None:
                 return False
             return now < entry[1]
+
+    def _evict_nearest_expiry(self) -> None:
+        while self._expiry_heap:
+            expiry, victim = heappop(self._expiry_heap)
+            entry = self._map.get(victim)
+            if entry is not None and entry[1] == expiry:
+                del self._map[victim]
+                return
+        # Fallback for consistency if heap has no live entries
+        if self._map:
+            self._map.pop(next(iter(self._map)))
