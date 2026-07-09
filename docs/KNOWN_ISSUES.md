@@ -37,6 +37,14 @@ _Last updated: 2026-07-09 (Milestone K)._
 
 ## Test gaps (remaining)
 
-- Full soak: 1M requests from many IPs with RSS flat (manual / load recipe for K DoD).
 - Passive failure coverage from request-path 5xx remains thin.
 - No concurrency race tests for `Backend` counters under simultaneous health + traffic.
+
+## Manual validation recipes
+
+### Rate-limit store bound (K leftover)
+
+With `rate_limit.enabled: true` and auth off, generate traffic from many
+distinct `X-Forwarded-For` values. After idle TTL, `RateLimitStore.sweep()`
+(or wait for the background sweep) should drop idle keys so RSS does not
+grow without bound. Unit coverage lives in `tests/test_rate_limit_store.py`.

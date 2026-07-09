@@ -139,6 +139,8 @@ class KeyConfig(BaseModel):
     user_id: Optional[str] = None
     # Model allow-list. Empty = all models allowed (backward compatible).
     allowed_models: List[str] = Field(default_factory=list)
+    # Optional PII policy override for this key (Milestone L). None = use global.
+    pii_policy: Optional[str] = None
 
 
 class AuthConfig(BaseModel):
@@ -207,6 +209,26 @@ class BudgetConfig(BaseModel):
         return v
 
 
+class PiiConfig(BaseModel):
+    """Request-path PII detection (India pack). Disabled by default.
+
+    Policies: ``block``, ``redact_and_replace``, ``redact_for_logs``, ``audit_only``.
+    ``entities`` empty = all supported types. Matched values are never logged.
+    """
+
+    enabled: bool = Field(default=False)
+    policy: str = Field(default="redact_and_replace")
+    entities: List[str] = Field(default_factory=list)
+
+    @field_validator("policy")
+    @classmethod
+    def _policy_ok(cls, v: str) -> str:
+        allowed = {"block", "redact_and_replace", "redact_for_logs", "audit_only"}
+        if v not in allowed:
+            raise ValueError(f"pii.policy must be one of {sorted(allowed)}")
+        return v
+
+
 class MeridianConfig(BaseModel):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
@@ -218,6 +240,7 @@ class MeridianConfig(BaseModel):
     session_affinity: SessionAffinityConfig = Field(default_factory=SessionAffinityConfig)
     auth: AuthConfig = Field(default_factory=AuthConfig)
     budgets: BudgetConfig = Field(default_factory=BudgetConfig)
+    pii: PiiConfig = Field(default_factory=PiiConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:

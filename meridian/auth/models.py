@@ -13,9 +13,11 @@ class IdentityContext:
     org_id is required (every API key belongs to an org). team_id and user_id
     are optional (org-level keys vs user-level keys). scopes holds the model
     allow-list (Milestone I); empty means all models are permitted.
+    pii_policy optionally overrides the global PII policy for this key (L).
     """
 
     org_id: str
     team_id: Optional[str] = None
     user_id: Optional[str] = None
     scopes: FrozenSet[str] = field(default_factory=frozenset)
+    pii_policy: Optional[str] = None

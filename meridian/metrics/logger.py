@@ -30,6 +30,7 @@ class RequestLogger:
         session_route: Optional[str] = None,
         org_id: Optional[str] = None,
         team_id: Optional[str] = None,
+        pii: Optional[dict] = None,
     ) -> None:
         record = {
             "request_id": request_id,
@@ -44,6 +45,8 @@ class RequestLogger:
             "session_route": session_route,
             "org_id": org_id,
             "team_id": team_id,
+            # Counts by entity type only — never matched values (Milestone L).
+            "pii": pii,
         }
         try:
             self._file.write(json.dumps(record) + "\n")

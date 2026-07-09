@@ -51,11 +51,12 @@ Key modules
 - Audit logs: `meridian/metrics/logger.py`
 - Auth / identity: `meridian/auth/`
 - Usage / budgets: `meridian/usage/`
+- PII: `meridian/pii/`
 - Telemetry: `meridian/telemetry/`
 - Config schema: `meridian/config/models.py`
 - UI: `meridian/ui/index.html`
 
-**Milestone status:** A–K are shipped (see `docs/ship.md`). Next: PII (L) and cost attribution (M) in `docs/V1_ROADMAP.md` / `docs/ROADMAP.md`.
+**Milestone status:** A–L are implemented (see `docs/ship.md`; tag L as v0.7.0 when merged). Next: cost attribution (M) in `docs/V1_ROADMAP.md`.
 
 ---
 

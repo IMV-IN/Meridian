@@ -2,7 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.6.0] - Unreleased
+## [0.7.0] - Unreleased
+
+### Added
+
+- **PII detection & redaction (Milestone L)** — opt-in India entity pack (`meridian/pii/`): Aadhaar (Verhoeff), PAN, GSTIN, IFSC, UPI, Indian mobile. Policies: `block` (400), `redact_and_replace` (mask before forward), `redact_for_logs` / `audit_only` (forward raw; counts only in audit/JSONL). Global `pii:` config + per-key `pii_policy` override. Request-path only (response scanning deferred). Metrics: `meridian_pii_detections_total{entity,policy}` — never logs matched values.
+
+## [0.6.0] - 2026-07-09
 
 ### Added
 
@@ -16,7 +22,7 @@ All notable changes to this project will be documented in this file.
 - **Stream disconnect cleanup** — request finalize path is fully synchronous (counters, JSONL, audit `enqueue`); client cancel mid-SSE no longer risks skipping inflight decrement or losing the audit event. Disconnect recorded as status `499` / `client_disconnect`.
 - Package version bumped to **0.6.0** (was stuck at 0.1.0).
 
-## [0.5.0] - Unreleased
+## [0.5.0] - 2026-07-09
 
 ### Added
 

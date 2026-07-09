@@ -25,10 +25,12 @@ from meridian.metrics.collectors import (
     BACKEND_HEALTHY,
     BACKEND_INFLIGHT,
     BUDGET_REJECTIONS,
+    PII_DETECTIONS,
     REQUEST_LATENCY,
     REQUESTS_TOTAL,
 )
 from meridian.metrics.logger import RequestLogger
+from meridian.pii import apply_pii_policy, resolve_policy
 from meridian.proxy.forward import close_client, forward_get, forward_non_stream, forward_stream
 from meridian.registry.backend import Backend, BackendRegistry
 from meridian.router.affinity import SessionStore
@@ -229,7 +231,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await shutdown_app()
 
 
-app = FastAPI(title="Meridian", version="0.6.0", lifespan=lifespan)
+app = FastAPI(title="Meridian", version="0.7.0", lifespan=lifespan)
 
 
 def _error_json(message: str, error_type: str, status: int) -> JSONResponse:
@@ -357,6 +359,7 @@ def _finalize_request(
     session_route: Optional[str],
     org_id: Optional[str],
     team_id: Optional[str],
+    pii_counts: Optional[Dict[str, int]] = None,
 ) -> None:
     """Sync request teardown: counters, logs, audit enqueue.
 
@@ -377,6 +380,8 @@ def _finalize_request(
     ).inc()
     REQUEST_LATENCY.labels(backend=backend.name, model=model).observe(latency)
     BACKEND_HEALTHY.labels(backend=backend.name).set(1 if backend.healthy else 0)
+    # pii_counts: entity type → count only (never matched values).
+    pii_meta = pii_counts if pii_counts else None
     _request_logger.log(
         request_id=request_id,
         model=model,
@@ -389,9 +394,17 @@ def _finalize_request(
         session_route=session_route,
         org_id=org_id,
         team_id=team_id,
+        pii=pii_meta,
     )
     _record_request(request_id, model, stream, backend.name, status_code, latency, error_type)
     if _audit_publisher is not None:
+        extra: Dict[str, Any] = {
+            "tier": tier_name,
+            "org_id": org_id,
+            "team_id": team_id,
+        }
+        if pii_meta is not None:
+            extra["pii"] = pii_meta
         _audit_publisher.enqueue(
             AuditEvent(
                 request_id=request_id,
@@ -401,7 +414,7 @@ def _finalize_request(
                 status_code=status_code,
                 latency_ms=latency,
                 error_type=error_type,
-                extra={"tier": tier_name, "org_id": org_id, "team_id": team_id},
+                extra=extra,
             )
         )
 
@@ -460,7 +473,7 @@ async def chat_completions(request: Request) -> Response:
     model = body.get("model", "")
     is_stream = body.get("stream", False)
 
-    # Order: access (403) → budgets (429) → rate limit (429) → route.
+    # Order: access (403) → PII → budgets (429) → rate limit (429) → route.
     # Access and budget denials must not spend a rate-limit token (Milestone J).
     if identity is not None and identity.scopes and model not in identity.scopes:
         return _error_json(
@@ -468,6 +481,30 @@ async def chat_completions(request: Request) -> Response:
             "permission_error",
             403,
         )
+
+    # PII gate (Milestone L) — request path only; disabled = zero work.
+    pii_counts: Optional[Dict[str, int]] = None
+    if _config.pii.enabled:
+        key_override = identity.pii_policy if identity is not None else None
+        policy = resolve_policy(_config.pii.policy, key_override)
+        entities = _config.pii.entities or None
+        pii_decision = apply_pii_policy(body, policy=policy, entities=entities)
+        if pii_decision.counts:
+            pii_counts = pii_decision.counts
+            for ent, n in pii_decision.counts.items():
+                PII_DETECTIONS.labels(entity=ent, policy=policy).inc(n)
+        if not pii_decision.allowed:
+            logger.info(
+                "PII blocked request_id=%s policy=%s counts=%s org_id=%s",
+                request_id, policy, pii_decision.counts, org_id,
+            )
+            return _error_json(
+                pii_decision.message or "Request blocked: PII detected",
+                "invalid_request_error",
+                400,
+            )
+        if pii_decision.body is not None:
+            body = pii_decision.body
 
     request_ctx = _build_request_context(body)
 
@@ -596,6 +633,7 @@ async def chat_completions(request: Request) -> Response:
                         session_route=session_route,
                         org_id=org_id,
                         team_id=team_id,
+                        pii_counts=pii_counts,
                     )
 
             resp.body_iterator = tracked_stream()
@@ -644,6 +682,7 @@ async def chat_completions(request: Request) -> Response:
                 session_route=session_route,
                 org_id=org_id,
                 team_id=team_id,
+                pii_counts=pii_counts,
             )
 
 
