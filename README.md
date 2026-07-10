@@ -47,9 +47,14 @@ Meridian is **not** an inference engine — it does not manage KV cache, batchin
 ### Budget ↔ actual (0.9.2)
 - Pre-flight budgets reserve on estimated cost; after a successful response with backend `usage`, **token** meters adjust to actual (`prompt * prefill_weight + completion * decode_weight`). Request counters and failed requests are not refunded.
 
+### Load, e2e, ops (0.9.3)
+- Overhead bench: `python scripts/bench_overhead.py` + [`docs/LOAD.md`](docs/LOAD.md)
+- Enterprise e2e tests + CI gateway smoke; budget remaining response headers
+- Day-2 ops: [`docs/OPS_RUNBOOK.md`](docs/OPS_RUNBOOK.md)
+
 ### Coming later (not product-complete / not 1.0 yet)
 - **Multi-provider routing**, **semantic caching**, **batch inference**
-- Load numbers / broader e2e; design-partner v1.0 gate
+- Design-partner v1.0 gate
 
 ## 10-Minute Quickstart
 

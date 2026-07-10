@@ -95,6 +95,8 @@ def stamp_meridian_headers(
     backend: str,
     tier_name: Optional[str],
     session_route: Optional[str],
+    budget_remaining_tokens: Optional[float] = None,
+    budget_remaining_requests: Optional[float] = None,
 ) -> None:
     """Set x-request-id / x-meridian-* on a response headers mapping."""
     headers["x-request-id"] = request_id
@@ -103,3 +105,19 @@ def stamp_meridian_headers(
         headers["x-meridian-tier"] = tier_name
     if session_route is not None:
         headers["x-meridian-session-route"] = session_route
+    # Post pre-flight reserve (estimate). Not re-stamped after reconcile.
+    if budget_remaining_tokens is not None:
+        headers["x-meridian-budget-remaining-tokens"] = _fmt_remaining(
+            budget_remaining_tokens
+        )
+    if budget_remaining_requests is not None:
+        headers["x-meridian-budget-remaining-requests"] = _fmt_remaining(
+            budget_remaining_requests
+        )
+
+
+def _fmt_remaining(value: float) -> str:
+    """Compact remaining value for headers (no scientific notation)."""
+    if value == int(value):
+        return str(int(value))
+    return f"{value:.4f}".rstrip("0").rstrip(".")
