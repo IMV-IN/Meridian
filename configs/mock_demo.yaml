@@ -1,6 +1,7 @@
-# Mock demo configuration for Meridian
-# Uses the mock backends from docker-compose.yml (no GPU required)
+# Mock demo for Docker Compose quickstart (no GPU, no auth, no rate limit).
+# Mounted by docker-compose.yml as /app/config.yaml.
 # Usage: docker compose up --build
+# Then: curl http://localhost:8080/v1/chat/completions ...
 
 gateway:
   host: "0.0.0.0"

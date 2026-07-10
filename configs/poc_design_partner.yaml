@@ -1,5 +1,5 @@
 # Design-partner PoC config — local Ollama, multi-tenant features on.
-# NOT for production keys. Used by docs/POC_REPORT.md validation recipe.
+# NOT for production keys. Used by docs/internal/POC_REPORT.md validation recipe.
 #
 #   ollama pull qwen2.5:0.5b && ollama serve
 #   MERIDIAN_CONFIG=configs/poc_design_partner.yaml \

@@ -1,8 +1,8 @@
 # Road to v1.0 — Detailed Milestone Plan
 
 This is the execution plan from today's state (Milestones A–I shipped, see
-[`ship.md`](./ship.md)) to a **v1.0 launch as a startup**. It extends
-[`ROADMAP.md`](./ROADMAP.md) (the strategic backlog) with per-milestone scope,
+[`ship.md`](../ship.md)) to a **v1.0 launch as a startup**. It extends
+[`ROADMAP.md`](../ROADMAP.md) (the strategic backlog) with per-milestone scope,
 DoD, tests, and release mechanics. When they conflict, `ROADMAP.md`'s ordering
 principles win; this file wins on milestone detail.
 

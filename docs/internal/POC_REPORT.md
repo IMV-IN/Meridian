@@ -7,9 +7,9 @@
 | Want | Document |
 |------|----------|
 | Gate checklist | [`V1_GATE.md`](./V1_GATE.md) |
-| Load numbers | [`LOAD.md`](./LOAD.md) |
-| Ops day-2 | [`OPS_RUNBOOK.md`](./OPS_RUNBOOK.md) |
-| Cost authz | [`ENTERPRISE_COST.md`](./ENTERPRISE_COST.md) |
+| Load numbers | [`LOAD.md`](../LOAD.md) |
+| Ops day-2 | [`OPS_RUNBOOK.md`](../OPS_RUNBOOK.md) |
+| Cost authz | [`ENTERPRISE_COST.md`](../ENTERPRISE_COST.md) |
 | Pitch claims | [`PITCH.md`](./PITCH.md) — only what is true on this tag |
 
 ---
@@ -59,7 +59,7 @@ PoC keys (dev only — pattern `mrdn_` + 20–40 alphanumeric):
 | 8 | Cost admin export | **Pass** — 200 |
 | 9 | Prometheus samples | **Pass** — `meridian_requests_total`, `meridian_tokens_total{model,kind}`, no org labels |
 | 10 | JSONL prompt leak | **Pass** — prompt text **absent** from `poc_meridian_requests.jsonl` |
-| 11 | Load overhead (prior run) | **Pass** — ~**1.9 ms** p50 gateway overhead vs ~151 ms engine ([LOAD.md](./LOAD.md)) |
+| 11 | Load overhead (prior run) | **Pass** — ~**1.9 ms** p50 gateway overhead vs ~151 ms engine ([LOAD.md](../LOAD.md)) |
 
 ### Sample evidence (2026-07-10)
 
@@ -138,7 +138,7 @@ python scripts/bench_overhead.py \
 ```
 
 For production-shaped config (sqlite paths, keys_file, PII on), start from
-`configs/enterprise_example.yaml` + [`DEPLOY.md`](./DEPLOY.md).
+`configs/enterprise_example.yaml` + [`DEPLOY.md`](../DEPLOY.md).
 
 ---
 

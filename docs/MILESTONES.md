@@ -9,10 +9,10 @@ shipped, **why it mattered**, and how pieces fit together.
 | [`ship.md`](./ship.md) | One-line status table + “what’s next” |
 | [`CHANGELOG.md`](../CHANGELOG.md) | Release-note detail per version |
 | [`ROADMAP.md`](./ROADMAP.md) | Ordering of backlog (what’s left) |
-| [`V1_ROADMAP.md`](./V1_ROADMAP.md) | Detailed plans / DoD for remaining work |
-| [`PITCH.md`](./PITCH.md) | What sales can claim (must match **tagged** releases) |
+| [`V1_ROADMAP.md`](./internal/V1_ROADMAP.md) | Detailed plans / DoD for remaining work |
+| [`PITCH.md`](./internal/PITCH.md) | What sales can claim (must match **tagged** releases) |
 
-_Last updated: 2026-07-10. Latest tagged: **v0.9.3**. v1.0 gate **in progress** ([POC_REPORT](./POC_REPORT.md), [V1_GATE](./V1_GATE.md)); features paused._
+_Last updated: 2026-07-10. Latest tagged: **v0.9.3**. v1.0 gate **in progress** ([POC_REPORT](./internal/POC_REPORT.md), [V1_GATE](./internal/V1_GATE.md)); features paused._
 
 ---
 
@@ -413,5 +413,5 @@ in production.”
 
 1. When a milestone merges and tags, add a short **What / Why** section here.  
 2. Update the one-line row in [`ship.md`](./ship.md).  
-3. Update [`PITCH.md`](./PITCH.md) only for **tagged** capabilities.  
+3. Update [`PITCH.md`](./internal/PITCH.md) only for **tagged** capabilities.  
 4. If “why” changes (e.g. estimate vs actual), document it here—not only in code comments.
