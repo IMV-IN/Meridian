@@ -54,8 +54,9 @@ behind a private network / LB allowlist for those paths.
 1. **Backup** `sqlite_path` with the same cadence as other stateful data.
 2. **Disk**: WAL mode is enabled; leave room for `-wal` / `-shm` sidecars.
 3. **Do not use `store: memory`** in production (lost on restart; startup warns).
-4. Budgets (pre-flight estimates) ≠ cost ledger (actual `usage`). Train finance on that.
-5. Stream usage is scraped from the SSE tail (last `usage` object wins). Prefer backends that emit OpenAI-style usage on the final chunk.
+4. **Budgets vs cost ledger**: pre-flight budgets still reserve on **estimates**. As of **0.9.2**, token meters are **reconciled** to actual backend `usage` after a successful response (same weights as estimate). The cost ledger remains the finance report; budget meters remain the enforcement plane.
+5. Stream usage is scraped from the SSE tail (last `usage` object wins). Prefer backends that emit OpenAI-style usage on the final chunk. No reconcile (and no ledger row) if the tail has no `usage`.
+6. Upstream failures keep the pre-flight budget charge (no refund on 502 / disconnect).
 
 ## Smoke validation
 

@@ -36,6 +36,13 @@ BUDGET_REJECTIONS = Counter(
     ["level", "period"],
 )
 
+# Cardinality-safe: direction only — never tenant id.
+BUDGET_RECONCILES = Counter(
+    "meridian_budget_reconciles_total",
+    "Budget meter adjustments after actual backend usage",
+    ["direction"],  # over | under | equal (equal rare; usually no-op before count)
+)
+
 # Cardinality-safe: entity type + policy only — never matched values or tenant id.
 PII_DETECTIONS = Counter(
     "meridian_pii_detections_total",

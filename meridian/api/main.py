@@ -20,7 +20,7 @@ from prometheus_client import generate_latest
 
 from meridian.api.errors import GatewayError
 from meridian.api.finalize import finalize_request, stamp_meridian_headers
-from meridian.api.pipeline import prepare_chat_request
+from meridian.api.pipeline import ChatRequest, prepare_chat_request, reconcile_budget_usage
 from meridian.api.reload import reload_keys
 from meridian.api.routing import route
 from meridian.api.state import AppState, build_app_state, shutdown_app_state
@@ -32,6 +32,34 @@ from meridian.cost.record import record_actual_usage
 from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
 from meridian.proxy.forward import close_client, forward_get, forward_non_stream, forward_stream
 from meridian.util.helpers import generate_request_id, now_ms
+
+
+def _wants_usage_scrape(state: AppState, chat: ChatRequest) -> bool:
+    """Scrape backend usage for cost ledger and/or budget reconcile."""
+    return state.cost_ledger is not None or bool(chat.meter_keys)
+
+
+def _apply_actual_usage(
+    state: AppState,
+    chat: ChatRequest,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> None:
+    record_actual_usage(
+        state,
+        model=chat.model,
+        org_id=chat.org_id,
+        team_id=chat.team_id,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+    )
+    reconcile_budget_usage(
+        state,
+        meter_keys=chat.meter_keys,
+        estimated_cost=chat.request_ctx.cost,
+        prompt_tokens=prompt_tokens,
+        completion_tokens=completion_tokens,
+    )
 
 logger = logging.getLogger("meridian")
 
@@ -194,17 +222,10 @@ async def chat_completions(request: Request) -> Response:
                     status_code = 499
                     raise
                 finally:
-                    if status_code < 400 and state.cost_ledger is not None:
+                    if status_code < 400 and _wants_usage_scrape(state, chat):
                         found = usage_from_sse_bytes(bytes(tail))
                         if found is not None:
-                            record_actual_usage(
-                                state,
-                                model=chat.model,
-                                org_id=chat.org_id,
-                                team_id=chat.team_id,
-                                prompt_tokens=found[0],
-                                completion_tokens=found[1],
-                            )
+                            _apply_actual_usage(state, chat, found[0], found[1])
                     finalize_request(
                         state,
                         request_id=request_id,
@@ -237,21 +258,14 @@ async def chat_completions(request: Request) -> Response:
         if status_code >= 500:
             state.health_checker.check_passive_failure(backend)
             error_type = "upstream_5xx"
-        elif state.cost_ledger is not None:
+        elif status_code < 400 and _wants_usage_scrape(state, chat):
             try:
                 import json as _json
                 found = usage_from_dict(_json.loads(bytes(non_stream_resp.body)))
             except Exception:
                 found = None
             if found is not None:
-                record_actual_usage(
-                    state,
-                    model=chat.model,
-                    org_id=chat.org_id,
-                    team_id=chat.team_id,
-                    prompt_tokens=found[0],
-                    completion_tokens=found[1],
-                )
+                _apply_actual_usage(state, chat, found[0], found[1])
         stamp_meridian_headers(
             non_stream_resp.headers,
             request_id=request_id,

@@ -212,6 +212,61 @@ class TestUsageObservability:
         assert meter.usage(key).consumed == pytest.approx(3.0)
 
 
+class TestAdjust:
+    """Post-hoc token reconcile: charge more / refund / clamp / ignore requests."""
+
+    def test_adjust_positive_charges_more(self, meter: UsageMeter) -> None:
+        key = daily_key("adj-pos", cap=1000.0, now=NOW)
+        meter.check_and_increment([key], cost=50.0, now=NOW)
+        meter.adjust([key], token_delta=20.0)
+        assert meter.usage(key).consumed == pytest.approx(70.0)
+
+    def test_adjust_negative_refunds(self, meter: UsageMeter) -> None:
+        key = daily_key("adj-neg", cap=1000.0, now=NOW)
+        meter.check_and_increment([key], cost=50.0, now=NOW)
+        meter.adjust([key], token_delta=-15.0)
+        assert meter.usage(key).consumed == pytest.approx(35.0)
+
+    def test_adjust_clamp_floor_zero(self, meter: UsageMeter) -> None:
+        key = daily_key("adj-clamp", cap=1000.0, now=NOW)
+        meter.check_and_increment([key], cost=10.0, now=NOW)
+        meter.adjust([key], token_delta=-999.0)
+        assert meter.usage(key).consumed == pytest.approx(0.0)
+
+    def test_adjust_zero_is_noop(self, meter: UsageMeter) -> None:
+        key = daily_key("adj-zero", cap=1000.0, now=NOW)
+        meter.check_and_increment([key], cost=40.0, now=NOW)
+        meter.adjust([key], token_delta=0.0)
+        assert meter.usage(key).consumed == pytest.approx(40.0)
+
+    def test_adjust_skips_request_keys(self, meter: UsageMeter) -> None:
+        tok = daily_key("adj-tok", cap=1000.0, now=NOW)
+        req = req_key("adj-req", cap=100.0, now=NOW)
+        meter.check_and_increment([tok, req], cost=10.0, requests=1, now=NOW)
+        meter.adjust([tok, req], token_delta=5.0)
+        assert meter.usage(tok).consumed == pytest.approx(15.0)
+        assert meter.usage(req).consumed == pytest.approx(1.0)
+
+    def test_adjust_ignores_cap(self, meter: UsageMeter) -> None:
+        """Request already ran — force charge even if over cap for next checks."""
+        key = daily_key("adj-over", cap=50.0, now=NOW)
+        meter.check_and_increment([key], cost=40.0, now=NOW)
+        meter.adjust([key], token_delta=30.0)  # 70 > cap 50
+        assert meter.usage(key).consumed == pytest.approx(70.0)
+        d = meter.check_and_increment([key], cost=1.0, now=NOW)
+        assert d.allowed is False
+
+    def test_adjust_missing_key_inserts(self, meter: UsageMeter) -> None:
+        key = daily_key("adj-new", cap=100.0, now=NOW)
+        meter.adjust([key], token_delta=12.0)
+        assert meter.usage(key).consumed == pytest.approx(12.0)
+
+    def test_adjust_missing_key_negative_stays_zero(self, meter: UsageMeter) -> None:
+        key = daily_key("adj-new-neg", cap=100.0, now=NOW)
+        meter.adjust([key], token_delta=-5.0)
+        assert meter.usage(key).consumed == pytest.approx(0.0)
+
+
 class TestSqlitePersistence:
     """SQLite-only: verify that data survives closing and reopening the file."""
 

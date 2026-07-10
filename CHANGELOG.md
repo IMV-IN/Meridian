@@ -2,7 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.9.1] - Unreleased
+## [0.9.2] - Unreleased
+
+### Added
+
+- **Budget ↔ actual reconcile** — after a successful response with backend `usage`, token meters are adjusted so consumption matches actual cost (`prompt * prefill_weight + completion * decode_weight`). Pre-flight still reserves on the estimate; request counters are never adjusted. Failed/upstream-error requests keep the estimate (no refund). Works with budgets alone (usage scrape no longer requires `cost.enabled`). Prometheus: `meridian_budget_reconciles_total{direction}` (`over` / `under` / `equal`).
+
+### Changed
+
+- Usage scrape on stream/non-stream success when **cost ledger or budget meter keys** are active.
+- `UsageMeter.adjust(keys, token_delta)` on both in-memory and sqlite stores (clamp consumed ≥ 0; ignore request keys).
+
+## [0.9.1] - 2026-07-10
 
 ### Added
 
