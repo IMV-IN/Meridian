@@ -1,34 +1,28 @@
 # Meridian Roadmap
 
-Single source of truth for **ordering**. Per-milestone detail lives in
-[`V1_ROADMAP.md`](./V1_ROADMAP.md); what has shipped is in
-[`ship.md`](./ship.md). When these conflict on ordering, this file wins.
+Single source of truth for **ordering**. Narrative history (what + why) lives in
+[`MILESTONES.md`](./MILESTONES.md); one-line status in [`ship.md`](./ship.md);
+remaining plans in [`V1_ROADMAP.md`](./V1_ROADMAP.md). When ordering conflicts,
+this file wins.
 
-_Last reconciled: 2026-07-09._
+_Last reconciled: 2026-07-10._
 
 ---
 
 ## Shipped
 
-| Item | Notes |
-|---|---|
-| Core gateway | OpenAI API, SSE streaming, health/failover, metrics, UI — `v0.1.0` |
-| **A** — Docker images + smoke + release CI | `v0.1.1` |
-| **B** — Token-aware routing | `v0.2.0` |
-| **C** — Telemetry adapters + capacity penalties | `v0.2.1` |
-| **D** — Workload tiering | `v0.3.0` |
-| **E** — KV-affinity lite (session stickiness) | `v0.3.1` |
-| Rate limiting (token bucket) | IP-based; upgraded by H |
-| Tamper-evident audit pipeline | Kafka → hash chain → Merkle → Ed25519 → S3 WORM |
-| **F** — API-key auth | `v0.4.0` |
-| **G** — Identity-aware logging | `v0.4.0` |
-| **H** — Per-org rate limiting | `v0.4.0` |
-| **I** — Model access control | `v0.5.0` |
-| **J** — Tenant budgets & quotas | `v0.5.0` |
-| **K** — Hardening | `v0.6.0` (tagged) |
-| **L** — PII detection & redaction | `v0.7.0` (tagged) |
+Through **v0.8.0** (see [`MILESTONES.md`](./MILESTONES.md) for detail):
 
-Identity keystone **F–J**, hardening **K**, and PII **L** are complete and tagged through **v0.7.0**.
+| Item | Tag |
+|---|---|
+| Core + A–E (gateway, routing, tiering, affinity) | `v0.1`–`v0.3.x` |
+| Audit pipeline (optional WORM path) | alongside core track |
+| F–J identity + governance | `v0.4`–`v0.5` |
+| K hardening | `v0.6.0` |
+| L India PII | `v0.7.0` |
+| AppState/pipeline refactor | pre-M on main |
+| M cost attribution (+ enterprise usage authz) | `v0.8.0` |
+| N packaging (Helm, air-gap, key reload) | `v0.9.0` when tagged |
 
 ---
 
@@ -37,12 +31,19 @@ Identity keystone **F–J**, hardening **K**, and PII **L** are complete and tag
 Ordering principle: **ship backend-agnostic, single-node features first; do not
 block OSS progress on multi-node or deep-engine work.**
 
-### Phase 1 — Cost attribution (next)
+### Phase 1 — Finish packaging + v1.0 gate
 
 | Item | Depends on |
 |---|---|
-| **M — Cost attribution** — reconcile estimate vs actual `usage`, per-team reports | J (meter interface) |
-| **Multi-provider routing** — OpenAI/Anthropic/Google + self-hosted | provider adapter layer |
+| **N** tag `v0.9.0` | merge packaging PR |
+| **v1.0** verification | design-partner PoC; pitch = tagged code only |
+
+### Phase 2 — Post-v1 product (optional)
+
+| Item | Depends on |
+|---|---|
+| Budget ↔ actual reconcile / refunds | M ledger + J meter |
+| **Multi-provider routing** | provider adapters |
 
 ### Phase 3 — Data-plane (mostly independent)
 

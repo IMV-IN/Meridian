@@ -6,8 +6,10 @@ pulling in the web framework.
 
 from __future__ import annotations
 
+from typing import List
+
 from meridian.auth.models import IdentityContext
-from meridian.config.models import AuthConfig
+from meridian.config.models import AuthConfig, KeyConfig
 
 
 class AuthError(Exception):
@@ -26,22 +28,50 @@ class AuthError(Exception):
         self.error_type = error_type
 
 
+def _identity_from_key(kc: KeyConfig) -> IdentityContext:
+    return IdentityContext(
+        org_id=kc.org_id,
+        team_id=kc.team_id,
+        user_id=kc.user_id,
+        allowed_models=frozenset(kc.allowed_models),
+        pii_policy=kc.pii_policy,
+        cost_admin=kc.cost_admin,
+        ops_admin=kc.ops_admin,
+    )
+
+
+def load_keys_from_file(path: str) -> List[KeyConfig]:
+    """Load a YAML file with top-level ``keys:`` list (KeyConfig shape)."""
+    import yaml
+
+    with open(path) as f:
+        data = yaml.safe_load(f) or {}
+    raw = data.get("keys") if isinstance(data, dict) else None
+    if raw is None:
+        raise ValueError(f"keys file {path!r} must contain a top-level 'keys' list")
+    if not isinstance(raw, list):
+        raise ValueError(f"keys file {path!r}: 'keys' must be a list")
+    return [KeyConfig.model_validate(item) for item in raw]
+
+
 def build_key_index(auth: AuthConfig) -> dict[str, IdentityContext]:
     """Return a mapping of raw key string -> IdentityContext.
 
-    Returns an empty dict when *auth* has no keys configured.
+    Merges inline ``auth.keys`` with optional ``auth.keys_file``. Duplicates
+    across both sources raise ValueError.
     """
-    return {
-        kc.key: IdentityContext(
-            org_id=kc.org_id,
-            team_id=kc.team_id,
-            user_id=kc.user_id,
-            allowed_models=frozenset(kc.allowed_models),
-            pii_policy=kc.pii_policy,
-            cost_admin=kc.cost_admin,
-        )
-        for kc in auth.keys
-    }
+    keys: List[KeyConfig] = list(auth.keys)
+    if auth.keys_file:
+        keys.extend(load_keys_from_file(auth.keys_file))
+    seen = [kc.key for kc in keys]
+    if len(seen) != len(set(seen)):
+        raise ValueError("duplicate API keys across auth.keys and auth.keys_file")
+    return {kc.key: _identity_from_key(kc) for kc in keys}
+
+
+def rebuild_key_index(auth: AuthConfig) -> dict[str, IdentityContext]:
+    """Same as build_key_index — named for reload call sites."""
+    return build_key_index(auth)
 
 
 def authenticate(

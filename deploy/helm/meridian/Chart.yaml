@@ -1,0 +1,6 @@
+apiVersion: v2
+name: meridian
+description: Meridian L7 OpenAI-compatible inference gateway
+type: application
+version: 0.9.0
+appVersion: "0.9.0"

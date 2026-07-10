@@ -1,10 +1,17 @@
 # Meridian — Ship Log
 
-A scannable record of **what's shipped** and **what's next**. For the full
-strategic picture see [`ROADMAP.md`](./ROADMAP.md); for per-change detail see
-[`../CHANGELOG.md`](../CHANGELOG.md). Keep this file updated as milestones land.
+A scannable record of **what's shipped** and **what's next**.
 
-_Last updated: 2026-07-09 — **v0.7.0 tagged** (Milestone L)._
+| Want | Read |
+|------|------|
+| **Full story (what + why for every milestone)** | **[`MILESTONES.md`](./MILESTONES.md)** |
+| Backlog order | [`ROADMAP.md`](./ROADMAP.md) |
+| Release-note detail | [`../CHANGELOG.md`](../CHANGELOG.md) |
+| Pitchable claims only | [`PITCH.md`](./PITCH.md) |
+
+Keep this table updated as milestones land.
+
+_Last updated: 2026-07-10 — **v0.8.0 tagged** (Milestone M); N in progress._
 
 ---
 
@@ -22,10 +29,12 @@ _Last updated: 2026-07-09 — **v0.7.0 tagged** (Milestone L)._
 | **I–J** — Tenant governance | `v0.5.0` | Model allow-lists + org→team→user budgets |
 | **K** — Hardening | `v0.6.0` | Bounded RL store, stream-safe cleanup, body cap, non-root image |
 | **L** — PII (India pack) | **`v0.7.0`** | Aadhaar/PAN/GSTIN/IFSC/UPI/phone; block/redact/audit; counts-only logs |
+| **M** — Cost attribution | **`v0.8.0`** | Actual usage ledger, `/meridian/usage` + CSV, enterprise authz |
+| **N** — Packaging | `v0.9.0` unreleased | Helm chart, air-gap bundle, keys_file + reload |
 
 Also: tamper-evident audit pipeline (Kafka → hash chain → Merkle → Ed25519 → S3 WORM).
 
-**Latest release:** `v0.7.0` — `docker pull lothnic0801/meridian:0.7.0` (or `:latest` after publish).
+**Latest release:** `v0.8.0` — `ghcr.io/imv-in/meridian:0.8.0`
 
 ---
 
@@ -33,6 +42,5 @@ Also: tamper-evident audit pipeline (Kafka → hash chain → Merkle → Ed25519
 
 | Milestone | Status | What |
 |---|---|---|
-| **M** — Cost attribution | implemented | Actual `usage` from backends, price table, `/meridian/usage` + CSV (`v0.8.0` unreleased). |
-| **N** — Packaging | planned | Helm, air-gap bundle, key reload. |
-| **v1.0** | gate | Design-partner PoC on a tagged release; pitch claims = shipped code. |
+| **N** — Packaging | in PR | Helm, air-gap, key reload → tag `v0.9.0` after merge |
+| **v1.0** | gate | Design-partner PoC; pitch = tagged code only. |

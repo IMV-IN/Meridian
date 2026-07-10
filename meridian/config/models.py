@@ -155,6 +155,8 @@ class KeyConfig(BaseModel):
     pii_policy: Optional[str] = None
     # Finance keys may read all orgs on /meridian/usage* (Milestone M enterprise).
     cost_admin: bool = False
+    # Ops keys may call POST /meridian/reload (Milestone N).
+    ops_admin: bool = False
 
 
 class AuthConfig(BaseModel):
@@ -163,10 +165,16 @@ class AuthConfig(BaseModel):
     When enabled, requests must carry a valid ``Authorization: Bearer <key>``
     header; the key maps to an IdentityContext used for logging, rate limiting,
     model access, and budgets.
+
+    ``keys_file`` (optional): path to a YAML file with a top-level ``keys:`` list
+    (same shape as inline keys). Loaded at startup and on reload (SIGHUP or
+    POST /meridian/reload). Inline ``keys`` and file keys are merged; duplicates
+    rejected across both sources.
     """
 
     enabled: bool = Field(default=False)
     keys: List[KeyConfig] = Field(default_factory=list)
+    keys_file: Optional[str] = None
 
     @field_validator("keys")
     @classmethod

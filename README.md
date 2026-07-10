@@ -1,6 +1,8 @@
 # Meridian
 
-**Latest release: [v0.7.0](https://github.com/IMV-IN/Meridian/releases/tag/v0.7.0)** · Ship log: [`docs/ship.md`](docs/ship.md)
+**Latest release: [v0.8.0](https://github.com/IMV-IN/Meridian/releases/tag/v0.8.0)** ·  
+**Full milestone history (what + why):** [`docs/MILESTONES.md`](docs/MILESTONES.md) ·  
+Ship log: [`docs/ship.md`](docs/ship.md) · Deploy: [`docs/DEPLOY.md`](docs/DEPLOY.md)
 
 Meridian is an **L7 inference gateway** for on-soil / self-hosted LLM fleets. It sits between your applications and multiple inference backends (vLLM, SGLang, TensorRT-LLM, Ollama, or any OpenAI-compatible server) and adds **routing, reliability, multi-tenant controls, and compliance hooks** without changing application code.
 
@@ -36,9 +38,14 @@ Meridian is **not** an inference engine — it does not manage KV cache, batchin
 - `meridian_tokens_total{model,kind}` (no org labels)
 - Enterprise checklist: [`docs/ENTERPRISE_COST.md`](docs/ENTERPRISE_COST.md)
 
+### Deploy / packaging (Milestone N — unreleased until v0.9.0 tag)
+- Helm chart: `deploy/helm/meridian/`
+- Air-gap bundle: `scripts/package_airgap.sh` + `docs/AIRGAP.md`
+- Key hot-reload: `auth.keys_file` + SIGHUP or `POST /meridian/reload` (`ops_admin`)
+
 ### Coming soon (not tagged yet — do not pitch as shipped)
 - **Multi-provider routing** — OpenAI/Anthropic/Google + self-hosted
-- **Semantic caching**, **batch inference**, **Helm / air-gapped packaging**
+- **Semantic caching**, **batch inference**
 
 ## 10-Minute Quickstart
 
