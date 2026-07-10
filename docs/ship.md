@@ -9,7 +9,7 @@ A scannable record of **what's shipped** and **what's next**.
 | Release-note detail | [`../CHANGELOG.md`](../CHANGELOG.md) |
 | Pitchable claims only | [`PITCH.md`](./PITCH.md) |
 
-_Last updated: 2026-07-10 — **v0.9.3 tagged**; Ollama real-path load proof in `LOAD.md` (v1.0 later)._
+_Last updated: 2026-07-10 — **v0.9.3 tagged**; design-partner **PoC report** + **v1.0 gate** checklist (tag v1.0 only when gate complete)._
 
 ---
 
@@ -46,6 +46,7 @@ Also: tamper-evident audit pipeline (optional); Ollama real-path numbers in
 |---|---|---|
 | **0.9.1–0.9.3** | **shipped** | Product-complete 0.9.x track |
 | **Ollama load proof** | **done** | Real-path overhead in `LOAD.md` |
-| **v1.0 gate** | next | Design-partner PoC + pitch honesty (verification, not features) |
+| **Design-partner PoC** | **done (lab)** | [`POC_REPORT.md`](./POC_REPORT.md) |
+| **v1.0 gate** | **in progress** | [`V1_GATE.md`](./V1_GATE.md) — remaining: image scan + partner sign-off → then tag **v1.0.0** |
 
 See [`ROADMAP.md`](./ROADMAP.md) and [`MILESTONES.md`](./MILESTONES.md).

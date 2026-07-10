@@ -41,3 +41,6 @@ diagrams/
 brag-output/
 # local scratch validation config
 config_real.yaml
+
+# local PoC artifacts
+poc_meridian_requests.jsonl

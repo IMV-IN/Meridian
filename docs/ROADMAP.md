@@ -41,10 +41,19 @@ block OSS progress on multi-node or deep-engine work.**
 | **Ollama real-path proof** | **done** — `LOAD.md` section (~2 ms gateway overhead on qwen2.5:0.5b) |
 | **Multi-provider / semantic cache / batch** | Optional; features paused until after v1.0 gate decision |
 
-### Phase 2 — v1.0 gate (**next**)
+### Phase 2 — v1.0 gate (**in progress**)
 
-Verification only (no new product features): design-partner PoC report on a
-tagged image, pitch = code, SECURITY checklist, clean image scan.
+Verification only (no new product features):
+
+| Item | Status |
+|------|--------|
+| PoC report on tagged image | **Done** — [`POC_REPORT.md`](./POC_REPORT.md) |
+| Pitch = code | **Done** — [`PITCH.md`](./PITCH.md) |
+| SECURITY current | **Done** — root `SECURITY.md` |
+| Load + Ollama proof | **Done** — [`LOAD.md`](./LOAD.md) |
+| Image scan (Critical clean) | **Open** before tag |
+| Partner sign-off | **Open** before tag |
+| Tag **v1.0.0** | **Not yet** — see [`V1_GATE.md`](./V1_GATE.md) |
 
 ### Phase 3 — Data-plane (mostly independent)
 

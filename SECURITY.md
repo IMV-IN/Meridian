@@ -6,12 +6,15 @@ network boundary** (VPC, private datacenter LAN). This document describes the
 threat model, what Meridian protects, what it explicitly does not, and how to
 report vulnerabilities.
 
+_Last reviewed: 2026-07-10 (v0.9.3 / v1.0 gate)._
+
 ## Supported versions
 
 | Version | Supported |
 |---|---|
-| **v0.7.0** (latest) and current `main` | ✅ |
-| older tags | ❌ — upgrade to latest |
+| **v0.9.3** (latest tag) and current `main` | ✅ |
+| v0.9.x, v0.8.x | Security fixes on a best-effort basis — upgrade to latest 0.9.x |
+| older than v0.8 | ❌ — upgrade |
 
 ## Reporting a vulnerability
 
@@ -36,47 +39,43 @@ within 14 days for confirmed high-severity issues.
 |---|---|
 | **API access** | Opt-in Bearer-key auth on `/v1/*` (`auth.enabled: true`). Keys map to org/team/user identity. Unknown or missing keys → 401. |
 | **Model access** | Per-key `allowed_models` allow-list; out-of-scope models → 403. |
-| **Abuse / flooding** | Token-bucket rate limiting keyed per-org (auth on) or per-IP (auth off); optional org overrides. |
-| **Tenant spend** | Optional org→team→user budgets (tokens + requests, daily/monthly); pre-flight 429 when exceeded. |
-| **Resource abuse** | Bounded rate-limit key store (idle TTL + max buckets); request body size cap (`gateway.max_body_bytes` → 413). |
+| **Abuse / flooding** | Token-bucket rate limiting keyed per-org (auth on) or per-IP (auth off); org overrides; bounded store (`max_buckets` + idle TTL). |
+| **Tenant spend** | Optional org→team→user budgets (tokens + requests, daily/monthly); pre-flight 429; token meters reconciled to backend `usage` after success (0.9.2+). |
+| **Resource abuse** | Request body size cap (`gateway.max_body_bytes` → 413). |
 | **Container baseline** | Image runs as non-root; Docker `HEALTHCHECK` on `/meridian/status`. |
-| **PII in prompts** | Opt-in request-path scan (India pack). Policies: block or redact before forward. **Matched values are never logged** — only entity-type counts in JSONL/audit/metrics. Response body not scanned (v0.7). |
-| **Cost / usage export** | When `cost.enabled`, `/meridian/usage*` **requires auth**. Non-admin keys see only their org (and team if set). `cost_admin` keys may export all orgs. Open export refused if auth is off. See `docs/ENTERPRISE_COST.md`. |
-| **Prompt confidentiality in logs** | Prompts are **never logged by default**. JSONL logs and audit events are metadata-only (request_id, backend, model, stream, latency, status, org_id/team_id). |
-| **Audit integrity** | Optional tamper-evident pipeline: SHA-256 hash chain → Merkle tree → Ed25519 signature → S3 Object Lock (WORM). Any single-byte modification of archived events breaks verification. |
-| **Metric cardinality** | Prometheus labels are bounded (backend, model, status, stream — all config-constrained). Never labeled by prompt text, user id, or raw request id. |
+| **PII in prompts** | Opt-in request-path India pack. Policies: block or redact before forward. **Matched values are never logged** — only entity-type counts. Response body not scanned. |
+| **Cost / usage export** | When `cost.enabled`, `/meridian/usage*` **requires auth** and **auth must be enabled at startup**. Non-admin keys see only their org (and team if set). `cost_admin` may export all orgs. |
+| **Prompt confidentiality in logs** | Prompts are **never logged by default**. JSONL and audit events are metadata-only. |
+| **Upstream key isolation** | Client Meridian `Authorization` is **never** forwarded to backends. Optional `backends[].auth_header` for upstream credentials only. |
+| **Audit integrity** | Optional tamper-evident pipeline: SHA-256 hash chain → Merkle tree → Ed25519 → S3 Object Lock (WORM). |
+| **Metric cardinality** | Prometheus labels are bounded (backend, model, status, stream, entity type, etc.). Never labeled by prompt text, user id, or raw request id. Org is not on token counters. |
 
 ### Out of scope — what Meridian does NOT defend (deploy accordingly)
 
 | Gap | Operator responsibility |
 |---|---|
-| **TLS termination** | Meridian serves plain HTTP. Terminate TLS at a reverse proxy / LB in front of it. |
-| **`/metrics`, `/meridian/*`, `/ui`** | These endpoints are **always unauthenticated** by design (operator plane). Restrict them at the network layer — do not expose them to the internet. |
-| **Backend trust** | Meridian forwards requests (including the client `Authorization` header) to configured backends. Backends are assumed trusted. |
-| **Key storage** | API keys live in plaintext in `config.yaml`. Protect the file (mode 0600, secret mounts). Secret-manager integration is on the roadmap ([docs/V1_ROADMAP.md](docs/V1_ROADMAP.md), Milestone N). |
-| **Prompt content inspection** | No PII detection/redaction yet (roadmap Milestone L). Until then, prompt content passes through unmodified. |
-| **DoS beyond token buckets** | No request-size caps or connection limits beyond what uvicorn/httpx provide. Front with an LB that enforces body-size limits. |
-
-### Known hardening gaps (tracked)
-
-These are open items, tracked in [docs/KNOWN_ISSUES.md](docs/KNOWN_ISSUES.md):
-
-1. **Unbounded rate-limit bucket map** — per-IP buckets are never evicted; a
-   source-IP spray grows memory. Mitigation until fixed: enable auth (buckets
-   key on org, bounded by configured keys) or front with an LB that limits
-   unique clients.
-2. **Audit event loss on client disconnect mid-stream** — the streaming
-   cleanup path can drop the audit event if the client disconnects during SSE.
-3. **Container runs as root** — the published image has no `USER` directive.
-   Run with `--user` or a pod security context until the image is hardened.
+| **TLS termination** | Meridian serves plain HTTP. Terminate TLS at a reverse proxy / LB. |
+| **`/metrics`, `/meridian/*`, `/ui`** | Operator plane is **unauthenticated** by design. Restrict at the network layer. |
+| **Backend trust** | Backends are assumed trusted; Meridian is not a zero-trust mesh. |
+| **Key storage** | Keys live in config or `keys_file`. Protect with secret mounts (mode 0600). External secret managers are operator-side. |
+| **SSO / OIDC / full RBAC** | API keys only in 0.9.x. |
+| **Response-body PII** | Not scanned. |
+| **Multi-process shared meters** | In-process sqlite/memory; multi-replica shared state is future work. |
+| **DoS beyond configured limits** | Front with an LB that enforces connection and body limits. |
 
 ## Deployment hardening checklist
 
 - [ ] TLS terminated in front of Meridian
-- [ ] `auth.enabled: true` with per-org keys; `config.yaml` permissions 0600
+- [ ] `auth.enabled: true` with per-org keys; config / `keys_file` permissions 0600
 - [ ] `/metrics`, `/meridian/*`, `/ui` blocked from untrusted networks
-- [ ] Rate limits (`rate_limit.token_capacity` / `token_refill_rate`) tuned per tenant expectations
-- [ ] JSONL log path on a volume with appropriate retention/permissions
-- [ ] Audit pipeline (if enabled): Ed25519 private key stored outside the container; S3 bucket with Object Lock in compliance mode
-- [ ] Container run as non-root (`docker run --user 1000:1000 ...` or pod `securityContext`)
-- [ ] Body-size limit enforced at the LB (e.g. 1–10 MB depending on max context)
+- [ ] Rate limits and budgets tuned per tenant expectations
+- [ ] JSONL log path on a volume with retention/permissions
+- [ ] Cost + budget stores on durable volumes with backup (prefer sqlite in prod)
+- [ ] Audit pipeline (if enabled): Ed25519 private key outside the container; WORM storage as required
+- [ ] Published image scanned (trivy/grype) before production promote — see [`docs/V1_GATE.md`](docs/V1_GATE.md)
+
+## Related
+
+- Design-partner PoC: [`docs/POC_REPORT.md`](docs/POC_REPORT.md)
+- Ops runbook: [`docs/OPS_RUNBOOK.md`](docs/OPS_RUNBOOK.md)
+- Known residual issues: [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md)
