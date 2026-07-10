@@ -147,7 +147,8 @@ For production-shaped config (sqlite paths, keys_file, PII on), start from
 | Role | Name | Date | Notes |
 |------|------|------|-------|
 | Maintainer (lab run) | — | 2026-07-10 | Sections 1–3 executed; results above |
-| Design partner | | | Fill after joint re-run |
-| Security review | | | See SECURITY checklist in `V1_GATE.md` |
+| Maintainer (re-run) | — | 2026-07-10 | Full recipe re-run: version 0.9.3, unauth 401, smoke + budget headers pass, usage 200/403/admin 200 → **RERUN_POC_OK** |
+| Design partner / cofounder | | | **Open** — fill after joint re-run and product/refine chat |
+| Security review | — | 2026-07-10 | Image scan recorded: [`scans/IMAGE_SCAN_0.9.3.md`](./scans/IMAGE_SCAN_0.9.3.md). **4 CRITICAL** on base image (no FixedVersion) — **gate not clean** |
 
-**v1.0 tag rule:** only after [`V1_GATE.md`](./V1_GATE.md) is fully checked and pitch claims match this report.
+**v1.0 tag rule:** only after [`V1_GATE.md`](./V1_GATE.md) is fully checked, pitch claims match this report, **and** leadership accepts scan/exceptions. **Do not tag v1.0.0 until then.**

@@ -47,6 +47,6 @@ Also: tamper-evident audit pipeline (optional); Ollama real-path numbers in
 | **0.9.1–0.9.3** | **shipped** | Product-complete 0.9.x track |
 | **Ollama load proof** | **done** | Real-path overhead in `LOAD.md` |
 | **Design-partner PoC** | **done (lab)** | [`POC_REPORT.md`](./POC_REPORT.md) |
-| **v1.0 gate** | **in progress** | [`V1_GATE.md`](./V1_GATE.md) — remaining: image scan + partner sign-off → then tag **v1.0.0** |
+| **v1.0 gate** | **hold** | Scan: [`scans/IMAGE_SCAN_0.9.3.md`](./scans/IMAGE_SCAN_0.9.3.md) (4 CRITICAL OS). PoC re-run OK; cofounder sign-off open. **No v1.0.0 tag yet.** |
 
 See [`ROADMAP.md`](./ROADMAP.md) and [`MILESTONES.md`](./MILESTONES.md).

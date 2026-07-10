@@ -7,7 +7,8 @@ All notable changes to this project will be documented in this file.
 ### Docs
 
 - **Ollama real-path load proof** — published numbers in [`docs/LOAD.md`](docs/LOAD.md) for Meridian **v0.9.3** + Ollama `qwen2.5:0.5b` (RTX 4060 Laptop): ~**1.9 ms** serial p50 overhead vs ~151 ms engine p50 (~1.3%). Recipe + smoke validation recorded.
-- **v1.0 design-partner gate** — [`docs/POC_REPORT.md`](docs/POC_REPORT.md) (lab run: auth, budgets, cost, stream, JSONL hygiene on Ollama), [`docs/V1_GATE.md`](docs/V1_GATE.md), `configs/poc_design_partner.yaml`. Pitch + SECURITY synced to **v0.9.3** truth. **v1.0.0 not tagged** until image scan + partner sign-off.
+- **v1.0 design-partner gate** — [`docs/POC_REPORT.md`](docs/POC_REPORT.md) (lab run + re-run on Ollama), [`docs/V1_GATE.md`](docs/V1_GATE.md), `configs/poc_design_partner.yaml`. Pitch + SECURITY synced to **v0.9.3**.
+- **Image scan (v0.9.3)** — Trivy report [`docs/scans/IMAGE_SCAN_0.9.3.md`](docs/scans/IMAGE_SCAN_0.9.3.md): 4 CRITICAL / 19 HIGH on base slim image; **v1.0.0 hold**. Cofounder / partner sign-off still open.
 
 ## [0.9.3] - 2026-07-10
 

@@ -44,3 +44,6 @@ config_real.yaml
 
 # local PoC artifacts
 poc_meridian_requests.jsonl
+
+# large scan dumps
+docs/scans/*.json

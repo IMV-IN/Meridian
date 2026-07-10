@@ -51,9 +51,9 @@ Verification only (no new product features):
 | Pitch = code | **Done** — [`PITCH.md`](./PITCH.md) |
 | SECURITY current | **Done** — root `SECURITY.md` |
 | Load + Ollama proof | **Done** — [`LOAD.md`](./LOAD.md) |
-| Image scan (Critical clean) | **Open** before tag |
-| Partner sign-off | **Open** before tag |
-| Tag **v1.0.0** | **Not yet** — see [`V1_GATE.md`](./V1_GATE.md) |
+| Image scan | **Recorded** — 4 CRITICAL base OS (no FixedVersion); not “clean” — [`scans/IMAGE_SCAN_0.9.3.md`](./scans/IMAGE_SCAN_0.9.3.md) |
+| Partner / cofounder sign-off | **Open** |
+| Tag **v1.0.0** | **Hold** until scan policy + cofounder chat — see [`V1_GATE.md`](./V1_GATE.md) |
 
 ### Phase 3 — Data-plane (mostly independent)
 
