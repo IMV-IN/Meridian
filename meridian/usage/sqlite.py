@@ -42,6 +42,15 @@ ON CONFLICT(scope_level, scope_id, period_bucket, metric)
 DO UPDATE SET consumed = consumed + excluded.consumed
 """
 
+# Insert path: consumed = max(0, delta). Update path: max(0, old + delta).
+# Sixth bind is the raw delta for the ON CONFLICT branch only.
+_ADJUST = """
+INSERT INTO usage (scope_level, scope_id, period_bucket, metric, consumed)
+VALUES (?, ?, ?, ?, ?)
+ON CONFLICT(scope_level, scope_id, period_bucket, metric)
+DO UPDATE SET consumed = MAX(0.0, usage.consumed + ?)
+"""
+
 
 class SqliteUsageMeter(UsageMeter):
     def __init__(self, path: str) -> None:
@@ -97,6 +106,36 @@ class SqliteUsageMeter(UsageMeter):
 
             self._conn.commit()
             return Decision(allowed=True)
+        except Exception:
+            self._conn.rollback()
+            raise
+
+    def adjust(
+        self,
+        keys: List[MeterKey],
+        token_delta: float,
+    ) -> None:
+        if token_delta == 0.0:
+            return
+        insert_val = token_delta if token_delta > 0.0 else 0.0
+        cur = self._conn.cursor()
+        try:
+            cur.execute("BEGIN IMMEDIATE")
+            for key in keys:
+                if key.metric != "tokens":
+                    continue
+                cur.execute(
+                    _ADJUST,
+                    (
+                        key.scope_level,
+                        key.scope_id,
+                        key.period_bucket,
+                        key.metric,
+                        insert_val,
+                        token_delta,
+                    ),
+                )
+            self._conn.commit()
         except Exception:
             self._conn.rollback()
             raise

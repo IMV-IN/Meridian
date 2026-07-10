@@ -7,19 +7,19 @@ from __future__ import annotations
 
 import json
 import logging
-from dataclasses import dataclass
-from typing import Any, Dict, Optional
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
 
 from fastapi import Request
 
 from meridian.api.errors import GatewayError
 from meridian.api.state import AppState
 from meridian.auth import IdentityContext
-from meridian.metrics.collectors import BUDGET_REJECTIONS, PII_DETECTIONS
+from meridian.metrics.collectors import BUDGET_RECONCILES, BUDGET_REJECTIONS, PII_DETECTIONS
 from meridian.pii import apply_pii_policy, resolve_policy
 from meridian.router.strategies import RequestContext
 from meridian.router.token_estimator import estimate_prompt_tokens, extract_max_tokens
-from meridian.usage import build_meter_keys
+from meridian.usage import MeterKey, build_meter_keys
 
 logger = logging.getLogger("meridian")
 
@@ -38,6 +38,8 @@ class ChatRequest:
     pii_counts: Optional[Dict[str, int]] = None
     request_id: str = ""
     start_ms: float = 0.0
+    # Snapshot of meter keys reserved pre-flight (for post-response reconcile).
+    meter_keys: List[MeterKey] = field(default_factory=list)
 
 
 async def read_json_body(request: Request, max_body: int) -> Dict[str, Any]:
@@ -148,18 +150,22 @@ def apply_budgets(
     request_id: str,
     org_id: Optional[str],
     team_id: Optional[str],
-) -> None:
-    """Pre-flight reserve. No automatic refund on upstream failure (by design)."""
+) -> List[MeterKey]:
+    """Pre-flight reserve. Returns keys reserved (empty if budgets off).
+
+    No automatic refund on upstream failure (by design). Successful responses
+    with backend ``usage`` are reconciled via :func:`reconcile_budget_usage`.
+    """
     if state.usage_meter is None or identity is None or not state.config.budgets.enabled:
-        return
+        return []
     meter_keys = build_meter_keys(identity, state.config.budgets)
     if not meter_keys:
-        return
+        return []
     decision = state.usage_meter.check_and_increment(
         meter_keys, cost=request_ctx.cost, requests=1
     )
     if decision.allowed:
-        return
+        return meter_keys
     blocked = decision.blocked_key
     level = blocked.scope_level if blocked else "unknown"
     period = blocked.period if blocked else "unknown"
@@ -175,6 +181,41 @@ def apply_budgets(
         f"Budget exceeded at {level} ({period})" if blocked else "Budget exceeded"
     )
     raise GatewayError(msg, "rate_limit_exceeded", 429, headers=headers)
+
+
+def reconcile_budget_usage(
+    state: AppState,
+    *,
+    meter_keys: List[MeterKey],
+    estimated_cost: float,
+    prompt_tokens: int,
+    completion_tokens: int,
+) -> None:
+    """Adjust token meters so consumption matches actual backend usage.
+
+    Actual cost uses the same weights as pre-flight estimate:
+    ``prompt * prefill_weight + completion * decode_weight``.
+    Request counters are never adjusted. Cap is not re-checked (request already
+    completed); over-cap after reconcile blocks subsequent requests.
+    """
+    if (
+        state.usage_meter is None
+        or not meter_keys
+        or not state.config.budgets.enabled
+    ):
+        return
+    gw = state.config.gateway
+    actual_cost = (
+        float(prompt_tokens) * gw.prefill_weight
+        + float(completion_tokens) * gw.decode_weight
+    )
+    delta = actual_cost - estimated_cost
+    if delta == 0.0:
+        BUDGET_RECONCILES.labels(direction="equal").inc()
+        return
+    state.usage_meter.adjust(meter_keys, token_delta=delta)
+    direction = "over" if delta > 0.0 else "under"
+    BUDGET_RECONCILES.labels(direction=direction).inc()
 
 
 def apply_rate_limit(
@@ -231,7 +272,9 @@ async def prepare_chat_request(
         )
     body, pii_counts = apply_pii(state, body, identity, request_id, org_id)
     request_ctx = build_request_context(state, body)
-    apply_budgets(state, identity, request_ctx, request_id, org_id, team_id)
+    meter_keys = apply_budgets(
+        state, identity, request_ctx, request_id, org_id, team_id
+    )
     apply_rate_limit(state, request, org_id)
 
     return ChatRequest(
@@ -245,4 +288,5 @@ async def prepare_chat_request(
         pii_counts=pii_counts,
         request_id=request_id,
         start_ms=start_ms,
+        meter_keys=meter_keys,
     )

@@ -44,9 +44,12 @@ Meridian is **not** an inference engine — it does not manage KV cache, batchin
 - Key hot-reload: `auth.keys_file` + SIGHUP or `POST /meridian/reload` (`ops_admin`)
 - Enterprise config template: `configs/enterprise_example.yaml`
 
+### Budget ↔ actual (0.9.2)
+- Pre-flight budgets reserve on estimated cost; after a successful response with backend `usage`, **token** meters adjust to actual (`prompt * prefill_weight + completion * decode_weight`). Request counters and failed requests are not refunded.
+
 ### Coming later (not product-complete / not 1.0 yet)
 - **Multi-provider routing**, **semantic caching**, **batch inference**
-- Budget ↔ actual reconcile; design-partner v1.0 gate
+- Load numbers / broader e2e; design-partner v1.0 gate
 
 ## 10-Minute Quickstart
 

@@ -40,16 +40,16 @@ the CFO pitch ("track every rupee") is real.
 Shipped
 - Pluggable `UsageMeter`: `SqliteUsageMeter` (default) + `InMemoryUsageMeter`.
 - Caps: tokens + requests, daily/monthly, org→team→user cascade.
-- Pre-flight metering on `request_ctx.cost` (no response-body parse; streaming
-  stays zero-copy). Future: reconcile against upstream `usage` field.
+- Pre-flight metering on `request_ctx.cost`. **0.9.2** reconciles token meters
+  against upstream `usage` after success (stream tail / non-stream JSON).
 - 429 `"rate_limit_exceeded"` + `Retry-After`; Prometheus
   `meridian_budget_rejections_total{level,period}`.
 - Chat path order: access → budget → rate-limit → route (403/budget 429 do
   not spend rate tokens).
 - Per-org rate-limit overrides on `budgets.orgs.<id>.token_capacity|refill`.
 
-Deferred (not required for J DoD)
-- Actual-token reconciliation from backend response.
+Deferred (not required for J DoD; partial later)
+- Actual-token reconciliation → **shipped in 0.9.2**.
 - `x-meridian-budget-remaining` response headers.
 
 Compute: none (mock backends).

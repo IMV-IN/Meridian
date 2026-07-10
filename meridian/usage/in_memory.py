@@ -47,6 +47,21 @@ class InMemoryUsageMeter(UsageMeter):
                 self._store[self._store_key(key)] += amount
             return Decision(allowed=True)
 
+    def adjust(
+        self,
+        keys: List[MeterKey],
+        token_delta: float,
+    ) -> None:
+        if token_delta == 0.0:
+            return
+        with self._lock:
+            for key in keys:
+                if key.metric != "tokens":
+                    continue
+                sk = self._store_key(key)
+                new_val = self._store[sk] + token_delta
+                self._store[sk] = new_val if new_val > 0.0 else 0.0
+
     def usage(self, key: MeterKey) -> Usage:
         with self._lock:
             consumed = self._store[self._store_key(key)]
