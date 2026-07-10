@@ -12,7 +12,7 @@ shipped, **why it mattered**, and how pieces fit together.
 | [`V1_ROADMAP.md`](./V1_ROADMAP.md) | Detailed plans / DoD for remaining work |
 | [`PITCH.md`](./PITCH.md) | What sales can claim (must match **tagged** releases) |
 
-_Last updated: 2026-07-10. Latest tagged: **v0.9.1**. Next: **0.9.2** budget↔actual reconcile (v1.0 deferred)._
+_Last updated: 2026-07-10. Latest tagged: **v0.9.2**. Next: **0.9.3** load/e2e/ops (v1.0 deferred)._
 
 ---
 
@@ -321,8 +321,8 @@ use (including the ~1000-user class deployment). Continue patch/minor 0.9.x:
 | Version | Intent |
 |---------|--------|
 | **0.9.1** | **Shipped** — enterprise template, `/meridian/version`, hard `cost`↔`auth` gate, Helm CI |
-| **0.9.2** | Budget↔actual token-meter reconcile after backend `usage` |
-| **0.9.3+** | Load/overhead numbers, deeper e2e, remaining ops gaps |
+| **0.9.2** | **Shipped** — budget↔actual token-meter reconcile after backend `usage` |
+| **0.9.3** | Load/overhead numbers, deeper e2e + CI smoke, ops polish |
 | **v1.0** | Later: design-partner PoC evidence + pitch honesty gate only |
 
 ---
@@ -344,6 +344,22 @@ use (including the ~1000-user class deployment). Continue patch/minor 0.9.x:
 Estimate-only budgets drift under real mixed traffic (short vs long generation).
 Reconcile keeps enforcement honest without parsing the full stream body
 (still tail-scrape / non-stream JSON only).
+
+---
+
+## 0.9.3 — Load numbers, richer e2e, ops polish
+
+### What
+- **Load**: `scripts/bench_overhead.py` + [`LOAD.md`](./LOAD.md) — ~0.7 ms p50
+  serial overhead on mock path; sizing guidance for concurrent streams
+- **E2E**: enterprise suite (auth, budgets, cost, stream, failover) + CI
+  `gateway-smoke` (live mock + Meridian + smoke script)
+- **Ops**: `x-meridian-budget-remaining-tokens|requests`; [`OPS_RUNBOOK.md`](./OPS_RUNBOOK.md);
+  retention/headers in [`DEPLOY.md`](./DEPLOY.md)
+
+### Why
+Operators sizing a ~1k-user fleet need published overhead, a CI-backed smoke
+path that exercises multi-tenant features, and day-2 runbook defaults.
 
 ---
 
@@ -383,7 +399,8 @@ Core + A (run anywhere)
 | `v0.8.0` | M |
 | `v0.9.0` | N |
 | `v0.9.1` | Product-complete polish |
-| `v0.9.2` | Budget↔actual reconcile (when tagged) |
+| `v0.9.2` | Budget↔actual reconcile |
+| `v0.9.3` | Load numbers, e2e, ops polish (when tagged) |
 
 Always prefer **git tags + CHANGELOG** over `pyproject` alone for “what is
 in production.”

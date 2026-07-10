@@ -138,7 +138,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await shutdown_app()
 
 
-app = FastAPI(title="Meridian", version="0.9.1", lifespan=lifespan)
+app = FastAPI(title="Meridian", version="0.9.3", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -250,6 +250,8 @@ async def chat_completions(request: Request) -> Response:
                 backend=backend.name,
                 tier_name=tier_name,
                 session_route=session_route,
+                budget_remaining_tokens=chat.budget_remaining_tokens,
+                budget_remaining_requests=chat.budget_remaining_requests,
             )
             return resp
 
@@ -272,6 +274,8 @@ async def chat_completions(request: Request) -> Response:
             backend=backend.name,
             tier_name=tier_name,
             session_route=session_route,
+            budget_remaining_tokens=chat.budget_remaining_tokens,
+            budget_remaining_requests=chat.budget_remaining_requests,
         )
         return non_stream_resp
 

@@ -36,8 +36,8 @@ block OSS progress on multi-node or deep-engine work.**
 | Item | Notes |
 |---|---|
 | **0.9.1** | **shipped** — enterprise template, `/meridian/version`, cost requires auth at boot, Helm CI |
-| **0.9.2** | Budget↔actual token-meter reconcile (this track) |
-| **0.9.3+** | Published load numbers; richer e2e; ops polish for 1k-user fleets |
+| **0.9.2** | **shipped** — budget↔actual token-meter reconcile |
+| **0.9.3** | Load numbers (`LOAD.md` + bench); richer e2e + CI smoke; ops polish (budget headers, runbook) |
 | **Multi-provider / semantic cache / batch** | After product-complete 0.9.x, or never if out of niche |
 
 ### Phase 2 — v1.0 gate (later, not next)

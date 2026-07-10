@@ -37,3 +37,21 @@ class UsageMeter(abc.ABC):
     @abc.abstractmethod
     def usage(self, key: MeterKey) -> Usage:
         """Current consumption for a single key."""
+
+    def remaining_headroom(
+        self, keys: List[MeterKey]
+    ) -> tuple[Optional[float], Optional[float]]:
+        """Tightest remaining capacity after current consumption.
+
+        Returns ``(min_token_remaining, min_request_remaining)``. Either side
+        is ``None`` when no keys of that metric are present.
+        """
+        tok: Optional[float] = None
+        req: Optional[float] = None
+        for key in keys:
+            rem = key.cap - self.usage(key).consumed
+            if key.metric == "tokens":
+                tok = rem if tok is None else min(tok, rem)
+            elif key.metric == "requests":
+                req = rem if req is None else min(req, rem)
+        return tok, req

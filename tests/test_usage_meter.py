@@ -212,6 +212,34 @@ class TestUsageObservability:
         assert meter.usage(key).consumed == pytest.approx(3.0)
 
 
+class TestRemainingHeadroom:
+    def test_min_across_token_keys(self, meter: UsageMeter) -> None:
+        a = daily_key("head-a", cap=100.0, now=NOW)
+        b = daily_key("head-b", cap=50.0, now=NOW)
+        # rename scope so keys don't collide
+        b = MeterKey(
+            scope_level="org",
+            scope_id="head-b",
+            period="daily",
+            period_bucket=a.period_bucket,
+            metric="tokens",
+            cap=50.0,
+        )
+        meter.check_and_increment([a], cost=10.0, now=NOW)
+        meter.check_and_increment([b], cost=40.0, now=NOW)
+        tok, req = meter.remaining_headroom([a, b])
+        assert tok == pytest.approx(10.0)  # b: 50-40
+        assert req is None
+
+    def test_request_and_token(self, meter: UsageMeter) -> None:
+        tok = daily_key("both-t", cap=100.0, now=NOW)
+        req = req_key("both-r", cap=10.0, now=NOW)
+        meter.check_and_increment([tok, req], cost=25.0, requests=1, now=NOW)
+        t, r = meter.remaining_headroom([tok, req])
+        assert t == pytest.approx(75.0)
+        assert r == pytest.approx(9.0)
+
+
 class TestAdjust:
     """Post-hoc token reconcile: charge more / refund / clamp / ignore requests."""
 

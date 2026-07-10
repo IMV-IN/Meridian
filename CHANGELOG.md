@@ -2,7 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.9.2] - Unreleased
+## [0.9.3] - Unreleased
+
+### Added
+
+- **Load / overhead harness** — `scripts/bench_overhead.py` (direct mock vs via Meridian) + [`docs/LOAD.md`](docs/LOAD.md) with reference numbers (~0.7 ms p50 serial overhead on mock path).
+- **Richer e2e** — `tests/test_enterprise_e2e.py` (auth, budgets, cost, stream/non-stream, failover); CI `gateway-smoke` job (live mock + Meridian + `scripts/smoke_test.py`); bench harness step on py3.11.
+- **Ops polish** — response headers `x-meridian-budget-remaining-tokens` / `x-meridian-budget-remaining-requests` after pre-flight debit; [`docs/OPS_RUNBOOK.md`](docs/OPS_RUNBOOK.md); expanded retention/sizing/headers in [`docs/DEPLOY.md`](docs/DEPLOY.md).
+- Smoke flags: `--auth`, `--check-budget-headers`; always checks `/meridian/status` (+ version when present).
+
+## [0.9.2] - 2026-07-10
 
 ### Added
 

@@ -40,6 +40,9 @@ class ChatRequest:
     start_ms: float = 0.0
     # Snapshot of meter keys reserved pre-flight (for post-response reconcile).
     meter_keys: List[MeterKey] = field(default_factory=list)
+    # Tightest remaining headroom after pre-flight debit (for response headers).
+    budget_remaining_tokens: Optional[float] = None
+    budget_remaining_requests: Optional[float] = None
 
 
 async def read_json_body(request: Request, max_body: int) -> Dict[str, Any]:
@@ -275,6 +278,10 @@ async def prepare_chat_request(
     meter_keys = apply_budgets(
         state, identity, request_ctx, request_id, org_id, team_id
     )
+    rem_tok: Optional[float] = None
+    rem_req: Optional[float] = None
+    if meter_keys and state.usage_meter is not None:
+        rem_tok, rem_req = state.usage_meter.remaining_headroom(meter_keys)
     apply_rate_limit(state, request, org_id)
 
     return ChatRequest(
@@ -289,4 +296,6 @@ async def prepare_chat_request(
         request_id=request_id,
         start_ms=start_ms,
         meter_keys=meter_keys,
+        budget_remaining_tokens=rem_tok,
+        budget_remaining_requests=rem_req,
     )
