@@ -2,7 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.8.0] - Unreleased
+## [0.9.0] - Unreleased
+
+### Added
+
+- **Deployment packaging (Milestone N)** — Helm chart (`deploy/helm/meridian/`), air-gap bundle script (`scripts/package_airgap.sh`), ops docs (`docs/DEPLOY.md`, `docs/AIRGAP.md`).
+- **Key hot-reload** — `auth.keys_file` YAML; merge with inline keys; `SIGHUP` or `POST /meridian/reload` (requires `ops_admin` key). Atomic `key_index` swap.
+
+## [0.8.0] - 2026-07-10
 
 ### Added
 

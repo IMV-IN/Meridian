@@ -1,0 +1,98 @@
+# Default values for Meridian (Milestone N).
+# Override image, config, and secrets per environment.
+
+replicaCount: 1
+
+image:
+  # Prefer pinned version in production, e.g. ghcr.io/imv-in/meridian:0.9.0
+  repository: ghcr.io/imv-in/meridian
+  tag: "0.9.0"
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+service:
+  type: ClusterIP
+  port: 8080
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 256Mi
+  limits:
+    cpu: "1"
+    memory: 1Gi
+
+# Gateway YAML (backends, strategy, etc). Secrets (API keys) should use keysSecret.
+config: |
+  gateway:
+    host: "0.0.0.0"
+    port: 8080
+    strategy: least_inflight
+  health:
+    interval_s: 5
+    timeout_s: 2
+    fail_threshold: 2
+    success_threshold: 1
+  logging:
+    level: INFO
+    jsonl_path: /var/lib/meridian/meridian_requests.jsonl
+  rate_limit:
+    enabled: false
+  auth:
+    enabled: false
+    keys: []
+    # keys_file: /secrets/keys.yaml
+  backends: []
+  # cost:
+  #   enabled: true
+  #   store: sqlite
+  #   sqlite_path: /var/lib/meridian/meridian_cost.db
+
+# Optional Secret with keys.yaml for auth.keys_file (never put keys in config).
+keysSecret:
+  create: false
+  # name: meridian-keys
+  # stringData:
+  #   keys.yaml: |
+  #     keys:
+  #       - key: "mrdn_..."
+  #         org_id: "acme"
+
+persistence:
+  enabled: true
+  size: 5Gi
+  # storageClass: ""
+  mountPath: /var/lib/meridian
+
+# Optional: run as non-root (matches image USER 10001)
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  fsGroup: 10001
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false
+  capabilities:
+    drop: ["ALL"]
+
+livenessProbe:
+  httpGet:
+    path: /meridian/status
+    port: http
+  initialDelaySeconds: 15
+  periodSeconds: 20
+
+readinessProbe:
+  httpGet:
+    path: /meridian/status
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 10
+
+nodeSelector: {}
+tolerations: []
+affinity: {}

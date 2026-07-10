@@ -7,6 +7,8 @@ Policy logic lives in ``pipeline``; routing in ``routing``; teardown in
 from __future__ import annotations
 
 import asyncio
+import logging
+import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable, Optional
@@ -19,6 +21,7 @@ from prometheus_client import generate_latest
 from meridian.api.errors import GatewayError
 from meridian.api.finalize import finalize_request, stamp_meridian_headers
 from meridian.api.pipeline import prepare_chat_request
+from meridian.api.reload import reload_keys
 from meridian.api.routing import route
 from meridian.api.state import AppState, build_app_state, shutdown_app_state
 from meridian.auth import AuthError, authenticate
@@ -29,6 +32,8 @@ from meridian.cost.record import record_actual_usage
 from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
 from meridian.proxy.forward import close_client, forward_get, forward_non_stream, forward_stream
 from meridian.util.helpers import generate_request_id, now_ms
+
+logger = logging.getLogger("meridian")
 
 _state: Optional[AppState] = None
 
@@ -60,6 +65,20 @@ async def shutdown_app() -> None:
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     state = await init_app()
+    loop = asyncio.get_running_loop()
+
+    def _on_sighup() -> None:
+        try:
+            n = reload_keys(state)
+            logger.info("SIGHUP: reloaded %d API key(s)", n)
+        except Exception:
+            logger.exception("SIGHUP: key reload failed (index unchanged)")
+
+    try:
+        loop.add_signal_handler(signal.SIGHUP, _on_sighup)
+    except (NotImplementedError, RuntimeError):
+        # Windows / restricted environments — POST /meridian/reload still works.
+        logger.debug("SIGHUP handler not available on this platform")
 
     sweep_tasks: list[asyncio.Task[None]] = []
     if state.session_store is not None:
@@ -78,6 +97,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     yield
 
+    try:
+        loop.remove_signal_handler(signal.SIGHUP)
+    except (NotImplementedError, RuntimeError):
+        pass
     for task in sweep_tasks:
         task.cancel()
         try:
@@ -87,7 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await shutdown_app()
 
 
-app = FastAPI(title="Meridian", version="0.8.0", lifespan=lifespan)
+app = FastAPI(title="Meridian", version="0.9.0", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -299,6 +322,44 @@ async def status() -> JSONResponse:
 @app.get("/meridian/requests")
 async def recent_requests() -> JSONResponse:
     return JSONResponse({"requests": list(get_state().recent_requests)})
+
+
+@app.post("/meridian/reload")
+async def reload_auth_keys(request: Request) -> Response:
+    """Hot-reload API keys from auth.keys + auth.keys_file.
+
+    Requires auth.enabled and a key with ops_admin: true. In-flight requests
+    keep their already-resolved identity; new requests use the new index.
+    """
+    state = get_state()
+    if not state.config.auth.enabled:
+        return GatewayError(
+            "Key reload requires auth.enabled",
+            "authentication_error",
+            401,
+        ).to_response()
+    try:
+        identity = authenticate(
+            request.headers.get("authorization"), state.key_index
+        )
+    except AuthError as exc:
+        return GatewayError(exc.message, exc.error_type, 401).to_response()
+    if not identity.ops_admin:
+        return GatewayError(
+            "ops_admin key required for reload",
+            "permission_error",
+            403,
+        ).to_response()
+    try:
+        n = reload_keys(state)
+    except Exception as exc:
+        logger.exception("Key reload failed")
+        return GatewayError(
+            f"Key reload failed: {exc}",
+            "invalid_request_error",
+            400,
+        ).to_response()
+    return JSONResponse({"reloaded": True, "keys": n})
 
 
 @app.get("/meridian/usage")
