@@ -2,7 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.9.3] - Unreleased
+## [Unreleased]
+
+### Docs
+
+- **Ollama real-path load proof** — published numbers in [`docs/LOAD.md`](docs/LOAD.md) for Meridian **v0.9.3** + Ollama `qwen2.5:0.5b` (RTX 4060 Laptop): ~**1.9 ms** serial p50 overhead vs ~151 ms engine p50 (~1.3%). Recipe + smoke validation recorded.
+
+## [0.9.3] - 2026-07-10
 
 ### Added
 

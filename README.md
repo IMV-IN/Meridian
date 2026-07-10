@@ -49,6 +49,7 @@ Meridian is **not** an inference engine — it does not manage KV cache, batchin
 
 ### Load, e2e, ops (0.9.3)
 - Overhead bench: `python scripts/bench_overhead.py` + [`docs/LOAD.md`](docs/LOAD.md)
+  (mock **and** Ollama real-path numbers — ~2 ms gateway overhead on `qwen2.5:0.5b`)
 - Enterprise e2e tests + CI gateway smoke; budget remaining response headers
 - Day-2 ops: [`docs/OPS_RUNBOOK.md`](docs/OPS_RUNBOOK.md)
 

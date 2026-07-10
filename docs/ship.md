@@ -9,7 +9,7 @@ A scannable record of **what's shipped** and **what's next**.
 | Release-note detail | [`../CHANGELOG.md`](../CHANGELOG.md) |
 | Pitchable claims only | [`PITCH.md`](./PITCH.md) |
 
-_Last updated: 2026-07-10 — **v0.9.2 tagged**; **0.9.3** load / e2e / ops polish (v1.0 later)._
+_Last updated: 2026-07-10 — **v0.9.3 tagged**; Ollama real-path load proof in `LOAD.md` (v1.0 later)._
 
 ---
 
@@ -30,21 +30,22 @@ _Last updated: 2026-07-10 — **v0.9.2 tagged**; **0.9.3** load / e2e / ops poli
 | **M** — Cost | `v0.8.0` | Actual usage, usage API + authz |
 | **N** — Packaging | `v0.9.0` | Helm, air-gap, keys_file + reload |
 | **0.9.1** | `v0.9.1` | Version endpoint, enterprise template, cost↔auth gate |
-| **0.9.2** | **`v0.9.2`** | Budget ↔ actual token-meter reconcile |
+| **0.9.2** | `v0.9.2` | Budget ↔ actual token-meter reconcile |
+| **0.9.3** | **`v0.9.3`** | Load harness, enterprise e2e, ops polish |
 
-Also: tamper-evident audit pipeline (optional).
+Also: tamper-evident audit pipeline (optional); Ollama real-path numbers in
+[`LOAD.md`](./LOAD.md).
 
-**Latest release:** `v0.9.2` — `ghcr.io/imv-in/meridian:0.9.2`
+**Latest release:** `v0.9.3` — `ghcr.io/imv-in/meridian:0.9.3`
 
 ---
 
-## Next: 0.9.x product completion (not 1.0 yet)
+## Next (features paused)
 
 | Track | Status | Focus |
 |---|---|---|
-| **0.9.1** | **shipped** | Enterprise template, version endpoint, cost+auth hard gate |
-| **0.9.2** | **shipped** | Budget↔actual token-meter reconcile |
-| **0.9.3** | in progress | Load numbers, richer e2e, ops polish |
-| **v1.0** | deferred | Design-partner PoC done; every pitch claim on a tagged image |
+| **0.9.1–0.9.3** | **shipped** | Product-complete 0.9.x track |
+| **Ollama load proof** | **done** | Real-path overhead in `LOAD.md` |
+| **v1.0 gate** | next | Design-partner PoC + pitch honesty (verification, not features) |
 
 See [`ROADMAP.md`](./ROADMAP.md) and [`MILESTONES.md`](./MILESTONES.md).

@@ -12,7 +12,7 @@ shipped, **why it mattered**, and how pieces fit together.
 | [`V1_ROADMAP.md`](./V1_ROADMAP.md) | Detailed plans / DoD for remaining work |
 | [`PITCH.md`](./PITCH.md) | What sales can claim (must match **tagged** releases) |
 
-_Last updated: 2026-07-10. Latest tagged: **v0.9.2**. Next: **0.9.3** load/e2e/ops (v1.0 deferred)._
+_Last updated: 2026-07-10. Latest tagged: **v0.9.3**. Next: **v1.0 design-partner gate** (features paused)._
 
 ---
 
@@ -322,8 +322,9 @@ use (including the ~1000-user class deployment). Continue patch/minor 0.9.x:
 |---------|--------|
 | **0.9.1** | **Shipped** — enterprise template, `/meridian/version`, hard `cost`↔`auth` gate, Helm CI |
 | **0.9.2** | **Shipped** — budget↔actual token-meter reconcile after backend `usage` |
-| **0.9.3** | Load/overhead numbers, deeper e2e + CI smoke, ops polish |
-| **v1.0** | Later: design-partner PoC evidence + pitch honesty gate only |
+| **0.9.3** | **Shipped** — load/overhead, deeper e2e + CI smoke, ops polish |
+| **Ollama proof** | Real-path numbers in `LOAD.md` (post-0.9.3 docs) |
+| **v1.0** | **Next** — design-partner PoC evidence + pitch honesty gate only |
 
 ---
 
@@ -400,7 +401,8 @@ Core + A (run anywhere)
 | `v0.9.0` | N |
 | `v0.9.1` | Product-complete polish |
 | `v0.9.2` | Budget↔actual reconcile |
-| `v0.9.3` | Load numbers, e2e, ops polish (when tagged) |
+| `v0.9.3` | Load numbers, e2e, ops polish |
+
 
 Always prefer **git tags + CHANGELOG** over `pyproject` alone for “what is
 in production.”

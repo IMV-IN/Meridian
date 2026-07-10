@@ -19,21 +19,42 @@ The script:
 3. Bursts non-stream `POST /v1/chat/completions` **direct** vs **via Meridian**
 4. Reports p50 / p95 / p99 / mean / RPS and overhead (via − direct)
 
-## Real backend path
+## Real backend path (Ollama)
 
-With Ollama (or any OpenAI-compatible server) and Meridian already running:
+### Recipe
 
 ```bash
+# 1) Backend
+ollama pull qwen2.5:0.5b
+ollama serve   # default http://127.0.0.1:11434
+
+# 2) Meridian (config already points at Ollama)
+MERIDIAN_CONFIG=configs/local_gpu.yaml \
+  uvicorn meridian.api.main:app --host 127.0.0.1 --port 18080
+
+# 3) Smoke (stream + non-stream + headers)
+python scripts/smoke_test.py --url http://127.0.0.1:18080 --model qwen2.5:0.5b
+
+# 4) Overhead (direct Ollama vs via Meridian)
 python scripts/bench_overhead.py \
   --backend-url http://127.0.0.1:11434 \
-  --gateway-url http://127.0.0.1:8080 \
+  --gateway-url http://127.0.0.1:18080 \
   --model qwen2.5:0.5b \
-  --auth mrdn_... \   # if auth.enabled
-  --requests 50 --concurrency 5
+  --requests 30 --concurrency 1 --warmup 3
+
+# Optional light concurrency:
+python scripts/bench_overhead.py \
+  --backend-url http://127.0.0.1:11434 \
+  --gateway-url http://127.0.0.1:18080 \
+  --model qwen2.5:0.5b \
+  --requests 20 --concurrency 4 --warmup 2
 ```
 
-> Real-model numbers are dominated by the engine. Use them to confirm gateway
-> overhead stays small relative to generation time, not to size GPUs.
+If `auth.enabled`, add `--auth mrdn_...` to the bench and smoke commands.
+
+> Real-model **absolute** latency is dominated by the engine. Use these numbers
+> to confirm **gateway overhead stays small relative to generation time**, not
+> to size GPUs.
 
 ## Reference numbers (mock, single host)
 
@@ -68,6 +89,43 @@ python scripts/bench_overhead.py --requests 200 --concurrency 20
 
 CI runs the harness (`--requests 40`) to ensure it stays green; it does **not**
 assert absolute ms (hardware variance).
+
+## Reference numbers (Ollama, real path)
+
+Recorded **2026-07-10** on the same Linux host:
+
+| Host detail | Value |
+|-------------|--------|
+| GPU | NVIDIA GeForce RTX 4060 Laptop (8 GiB) |
+| Backend | Ollama `qwen2.5:0.5b` on `127.0.0.1:11434` |
+| Meridian | **v0.9.3**, `configs/local_gpu.yaml`, port **18080** (no auth/budgets/cost) |
+| Request shape | non-stream chat, `max_tokens=8`, message `"bench"` |
+
+### Serial isolation (`n=30`, `concurrency=1`)
+
+| Path | p50 (ms) | p95 (ms) | mean (ms) | RPS | errors |
+|------|----------|----------|-----------|-----|--------|
+| Direct → Ollama | 151.0 | 153.2 | 151.2 | 6.6 | 0 |
+| Via Meridian | 153.0 | 155.3 | 153.3 | 6.5 | 0 |
+| **Overhead** | **~1.9 ms** | **~2.1 ms** | **~2.1 ms** | — | — |
+
+**Takeaway:** gateway adds ~**2 ms** (~**1.3%** of end-to-end p50). Engine time is the budget.
+
+### Light concurrent (`n=20`, `concurrency=4`)
+
+| Path | p50 (ms) | p95 (ms) | mean (ms) | RPS | errors |
+|------|----------|----------|-----------|-----|--------|
+| Direct → Ollama | 180.7 | 243.1 | 189.1 | 20.2 | 0 |
+| Via Meridian | 186.7 | 235.5 | 192.8 | 19.9 | 0 |
+| **Delta p50** | **~5.9 ms** | (noisy) | — | ~same RPS | — |
+
+Under concurrency, engine queueing dominates; Meridian RPS tracks direct within ~2%.
+
+### Functional proof (same stack)
+
+`scripts/smoke_test.py --url http://127.0.0.1:18080 --model qwen2.5:0.5b` — pass
+(`/meridian/status`, `/meridian/version` **0.9.3**, non-stream + stream/`[DONE]`,
+`x-meridian-backend=ollama-4070`).
 
 ### How to interpret for ~1000 users
 
