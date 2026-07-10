@@ -12,7 +12,7 @@ shipped, **why it mattered**, and how pieces fit together.
 | [`V1_ROADMAP.md`](./V1_ROADMAP.md) | Detailed plans / DoD for remaining work |
 | [`PITCH.md`](./PITCH.md) | What sales can claim (must match **tagged** releases) |
 
-_Last updated: 2026-07-10. Latest tagged: **v0.9.3**. Next: **v1.0 design-partner gate** (features paused)._
+_Last updated: 2026-07-10. Latest tagged: **v0.9.3**. v1.0 gate **in progress** ([POC_REPORT](./POC_REPORT.md), [V1_GATE](./V1_GATE.md)); features paused._
 
 ---
 

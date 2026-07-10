@@ -6,10 +6,11 @@ this file is what you actually say, show, and send. Keep it synced with
 [`ship.md`](./ship.md) — **never pitch a feature that isn't in a tagged
 release** (that's a v1.0 gate rule).
 
-_Last updated: 2026-07-09. Shipped basis: Milestones **A–L** on tag **v0.7.0**
-(routing, identity, budgets, hardening, **India PII pack**). See
-[`ship.md`](./ship.md). Do not pitch **cost attribution** or multi-provider
-until those milestones are tagged._
+_Last updated: 2026-07-10. Shipped basis: **v0.9.3** (milestones A–N + 0.9.x
+polish). Evidence: [`POC_REPORT.md`](./POC_REPORT.md), [`LOAD.md`](./LOAD.md),
+[`ship.md`](./ship.md). **Do not pitch** multi-provider routing, semantic
+cache, batch APIs, SSO, or true KV disaggregation — not on this tag. **v1.0**
+is a verification gate, not a feature release ([`V1_GATE.md`](./V1_GATE.md))._
 
 ---
 
@@ -72,9 +73,12 @@ LiteLLM/Portkey territory — walk away or park them for post-v1.0).
   dashboard.
 
 ### CFO / finance — *attribution & control*
-- "Every request carries an org/team identity. Rate limits per tenant today;
-  token budgets and per-team cost reports are the current milestone." *(Check
-  ship.md — once J and M ship, upgrade this to present tense.)*
+- "Every request carries an org/team identity. You get **token/request budgets**
+  (org→team→user) and a **cost ledger** from actual backend `usage`, exportable
+  as JSON/CSV with org-scoped access for finance keys."
+- "Gateway overhead on a real small model is ~**2 ms** vs ~150 ms generation —
+  you are not buying latency; you are buying control and proof."
+  ([`LOAD.md`](./LOAD.md))
 - "License cost is ~20–25% on top of your bare-metal GPU spend, versus the
   regulatory liability of public APIs at the same volume — and versus 6–9
   months of platform-team time building this in-house."

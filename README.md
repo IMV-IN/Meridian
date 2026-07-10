@@ -53,9 +53,12 @@ Meridian is **not** an inference engine — it does not manage KV cache, batchin
 - Enterprise e2e tests + CI gateway smoke; budget remaining response headers
 - Day-2 ops: [`docs/OPS_RUNBOOK.md`](docs/OPS_RUNBOOK.md)
 
-### Coming later (not product-complete / not 1.0 yet)
+### Design-partner / v1.0 gate
+- PoC report: [`docs/POC_REPORT.md`](docs/POC_REPORT.md) · Gate checklist: [`docs/V1_GATE.md`](docs/V1_GATE.md)
+- Install **v0.9.3** until v1.0.0 is tagged (verification only — no feature dump)
+
+### Coming later (optional features, not required for v1.0)
 - **Multi-provider routing**, **semantic caching**, **batch inference**
-- Design-partner v1.0 gate
 
 ## 10-Minute Quickstart
 
