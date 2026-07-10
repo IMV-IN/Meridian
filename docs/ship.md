@@ -1,8 +1,15 @@
 # Meridian — Ship Log
 
-A scannable record of **what's shipped** and **what's next**. For the full
-strategic picture see [`ROADMAP.md`](./ROADMAP.md); for per-change detail see
-[`../CHANGELOG.md`](../CHANGELOG.md). Keep this file updated as milestones land.
+A scannable record of **what's shipped** and **what's next**.
+
+| Want | Read |
+|------|------|
+| **Full story (what + why for every milestone)** | **[`MILESTONES.md`](./MILESTONES.md)** |
+| Backlog order | [`ROADMAP.md`](./ROADMAP.md) |
+| Release-note detail | [`../CHANGELOG.md`](../CHANGELOG.md) |
+| Pitchable claims only | [`PITCH.md`](./PITCH.md) |
+
+Keep this table updated as milestones land.
 
 _Last updated: 2026-07-10 — **v0.8.0 tagged** (Milestone M); N in progress._
 

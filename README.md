@@ -1,6 +1,8 @@
 # Meridian
 
-**Latest release: [v0.8.0](https://github.com/IMV-IN/Meridian/releases/tag/v0.8.0)** · Ship log: [`docs/ship.md`](docs/ship.md) · Deploy: [`docs/DEPLOY.md`](docs/DEPLOY.md)
+**Latest release: [v0.8.0](https://github.com/IMV-IN/Meridian/releases/tag/v0.8.0)** ·  
+**Full milestone history (what + why):** [`docs/MILESTONES.md`](docs/MILESTONES.md) ·  
+Ship log: [`docs/ship.md`](docs/ship.md) · Deploy: [`docs/DEPLOY.md`](docs/DEPLOY.md)
 
 Meridian is an **L7 inference gateway** for on-soil / self-hosted LLM fleets. It sits between your applications and multiple inference backends (vLLM, SGLang, TensorRT-LLM, Ollama, or any OpenAI-compatible server) and adds **routing, reliability, multi-tenant controls, and compliance hooks** without changing application code.
 
