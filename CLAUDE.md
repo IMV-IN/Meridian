@@ -59,14 +59,14 @@ Key modules
 - Config schema: `meridian/config/models.py`
 - UI: `meridian/ui/index.html`
 
-**Milestone status:** A–L shipped and tagged through **v0.7.0** (see `docs/ship.md`). Next: **M — cost attribution** in `docs/V1_ROADMAP.md`.
+**Milestone status:** A–L shipped and tagged through **v0.7.0** (see `docs/ship.md`). Next: **M — cost attribution** in `docs/internal/V1_ROADMAP.md`.
 
 ---
 
 ## 3) Short-term goals (ship one milestone at a time)
 
 > Historical plan for the A–E reliability track. Status of each is in
-> [`docs/ship.md`](docs/ship.md). Prefer that file and `docs/V1_ROADMAP.md` for
+> [`docs/ship.md`](docs/ship.md). Prefer that file and `docs/internal/V1_ROADMAP.md` for
 > what to build next.
 
 The immediate plan is to add inference-aware value without tight coupling to any single engine.
@@ -285,7 +285,7 @@ Real backend (example with Ollama)
 ```bash
 ollama pull qwen2.5:0.5b
 ollama serve
-meridian_CONFIG=configs/local_gpu.yaml uvicorn meridian.api.main:app --host 0.0.0.0 --port 8080
+MERIDIAN_CONFIG=configs/local_gpu.yaml uvicorn meridian.api.main:app --host 0.0.0.0 --port 8080
 ```
 
 ---

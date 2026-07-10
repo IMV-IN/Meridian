@@ -3,12 +3,12 @@
 A field playbook for selling Meridian into regulated enterprises. The
 strategy behind it lives in [`ENTERPRISE_PROPOSAL.md`](./ENTERPRISE_PROPOSAL.md);
 this file is what you actually say, show, and send. Keep it synced with
-[`ship.md`](./ship.md) — **never pitch a feature that isn't in a tagged
+[`ship.md`](../ship.md) — **never pitch a feature that isn't in a tagged
 release** (that's a v1.0 gate rule).
 
 _Last updated: 2026-07-10. Shipped basis: **v0.9.3** (milestones A–N + 0.9.x
-polish). Evidence: [`POC_REPORT.md`](./POC_REPORT.md), [`LOAD.md`](./LOAD.md),
-[`ship.md`](./ship.md). **Do not pitch** multi-provider routing, semantic
+polish). Evidence: [`POC_REPORT.md`](./POC_REPORT.md), [`LOAD.md`](../LOAD.md),
+[`ship.md`](../ship.md). **Do not pitch** multi-provider routing, semantic
 cache, batch APIs, SSO, or true KV disaggregation — not on this tag. **v1.0**
 is a verification gate, not a feature release ([`V1_GATE.md`](./V1_GATE.md))._
 
@@ -78,7 +78,7 @@ LiteLLM/Portkey territory — walk away or park them for post-v1.0).
   as JSON/CSV with org-scoped access for finance keys."
 - "Gateway overhead on a real small model is ~**2 ms** vs ~150 ms generation —
   you are not buying latency; you are buying control and proof."
-  ([`LOAD.md`](./LOAD.md))
+  ([`LOAD.md`](../LOAD.md))
 - "License cost is ~20–25% on top of your bare-metal GPU spend, versus the
   regulatory liability of public APIs at the same volume — and versus 6–9
   months of platform-team time building this in-house."

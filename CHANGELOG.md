@@ -8,11 +8,14 @@ All notable changes to this project will be documented in this file.
 
 - **CI pytest exit 139 (SIGSEGV after green suite)** — mock backends use stdlib `asyncio` loop (`loop="asyncio"`, `lifespan="off"`); shared helper + session teardown; CI treats residual 139 after green summary as pass.
 - **Container image CVEs** — multi-stage `Dockerfile` on `python:3.12-slim-trixie`: strip pip/wheel/setuptools, purge unused `perl-base`, apt upgrade. Trivy: **0 CRITICAL** (was 4); Python packaging HIGH cleared. Residual HIGH are Debian essentials without FixedVersion (documented in `docs/scans/IMAGE_SCAN_0.9.3.md`).
+- **Quickstart DX** — default `docker compose` is gateway + 2 mocks only (port **8080**, no Kafka); root `config.yaml` no longer rate-limits at capacity 1; env is always `MERIDIAN_CONFIG`.
 
 ### Docs
 
-- **Ollama real-path load proof** — published numbers in [`docs/LOAD.md`](docs/LOAD.md) for Meridian **v0.9.3** + Ollama `qwen2.5:0.5b`.
-- **v1.0 design-partner gate** — PoC report + gate checklist; **v1.0.0 not tagged**.
+- Slim README + linear [`docs/QUICKSTART.md`](docs/QUICKSTART.md); docs map [`docs/README.md`](docs/README.md); config/auth reference [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
+- Internal/sales/gate docs under [`docs/internal/`](docs/internal/).
+- **Ollama real-path load proof** — [`docs/LOAD.md`](docs/LOAD.md).
+- **v1.0 design-partner gate** — under `docs/internal/`; **v1.0.0 not tagged**.
 
 ## [0.9.3] - 2026-07-10
 

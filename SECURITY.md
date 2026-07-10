@@ -72,10 +72,10 @@ within 14 days for confirmed high-severity issues.
 - [ ] JSONL log path on a volume with retention/permissions
 - [ ] Cost + budget stores on durable volumes with backup (prefer sqlite in prod)
 - [ ] Audit pipeline (if enabled): Ed25519 private key outside the container; WORM storage as required
-- [ ] Published image scanned (trivy/grype) before production promote — see [`docs/V1_GATE.md`](docs/V1_GATE.md)
+- [ ] Published image scanned (trivy/grype) before production promote — see [`docs/internal/V1_GATE.md`](docs/internal/V1_GATE.md)
 
 ## Related
 
-- Design-partner PoC: [`docs/POC_REPORT.md`](docs/POC_REPORT.md)
+- Design-partner PoC: [`docs/internal/POC_REPORT.md`](docs/internal/POC_REPORT.md)
 - Ops runbook: [`docs/OPS_RUNBOOK.md`](docs/OPS_RUNBOOK.md)
 - Known residual issues: [`docs/KNOWN_ISSUES.md`](docs/KNOWN_ISSUES.md)

@@ -2,7 +2,7 @@
 
 Single source of truth for **ordering**. Narrative history (what + why) lives in
 [`MILESTONES.md`](./MILESTONES.md); one-line status in [`ship.md`](./ship.md);
-remaining plans in [`V1_ROADMAP.md`](./V1_ROADMAP.md). When ordering conflicts,
+remaining plans in [`V1_ROADMAP.md`](./internal/V1_ROADMAP.md). When ordering conflicts,
 this file wins.
 
 _Last reconciled: 2026-07-10._
@@ -47,13 +47,14 @@ Verification only (no new product features):
 
 | Item | Status |
 |------|--------|
-| PoC report on tagged image | **Done** — [`POC_REPORT.md`](./POC_REPORT.md) |
-| Pitch = code | **Done** — [`PITCH.md`](./PITCH.md) |
+| PoC report on tagged image | **Done** — [`POC_REPORT.md`](./internal/POC_REPORT.md) |
+| Pitch = code | **Done** — [`PITCH.md`](./internal/PITCH.md) |
 | SECURITY current | **Done** — root `SECURITY.md` |
 | Load + Ollama proof | **Done** — [`LOAD.md`](./LOAD.md) |
-| Image scan (Critical clean) | **Open** before tag |
-| Partner sign-off | **Open** before tag |
-| Tag **v1.0.0** | **Not yet** — see [`V1_GATE.md`](./V1_GATE.md) |
+| Image scan | **Done** — 0 CRITICAL (hardened image) — [`scans/IMAGE_SCAN_0.9.3.md`](./scans/IMAGE_SCAN_0.9.3.md) |
+| Partner / cofounder sign-off | **Open** |
+| Tag **v1.0.0** | **Hold** — see [`internal/V1_GATE.md`](./internal/V1_GATE.md) |
+| Quickstart DX | **Done** — compose on :8080, no Kafka by default, docs index |
 
 ### Phase 3 — Data-plane (mostly independent)
 

@@ -11,7 +11,7 @@ _Last updated: 2026-07-10._
 |---|-----------|----------|--------|
 | 1 | Tagged release exists | `v0.9.3` on GitHub + package version | **Done** |
 | 2 | Design-partner PoC report | [`POC_REPORT.md`](./POC_REPORT.md) lab run | **Done** (maintainer); partner sign-off open |
-| 3 | Real backend proof | Ollama path in [`LOAD.md`](./LOAD.md) + PoC | **Done** |
+| 3 | Real backend proof | Ollama path in [`LOAD.md`](../LOAD.md) + PoC | **Done** |
 | 4 | Pitch = code | [`PITCH.md`](./PITCH.md) synced to v0.9.3 claims | **Done** (this gate PR) |
 | 5 | SECURITY policy current | [`SECURITY.md`](../SECURITY.md) threat model + checklist | **Done** (this gate PR) |
 | 6 | Quality gates green on tag | ruff / mypy / pytest + CI on `main` | **Done** (0.9.3 ship) |
@@ -57,7 +57,7 @@ git checkout main && git pull
 # or tag v1.0.0 on the commit that freezes docs without code churn
 git tag -a v1.0.0 -m "v1.0.0 — design-partner verified product"
 git push origin v1.0.0
-gh release create v1.0.0 --notes-file docs/POC_REPORT.md
+gh release create v1.0.0 --notes-file docs/internal/POC_REPORT.md
 ```
 
 Until then, **ship and install `v0.9.3`**.
