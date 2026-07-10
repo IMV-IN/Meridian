@@ -48,3 +48,14 @@ jobs:
 
       - name: Run tests
         run: pytest -q
+
+  helm-template:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: v3.14.4
+      - name: helm template (chart must render)
+        run: helm template meridian ./deploy/helm/meridian >/dev/null

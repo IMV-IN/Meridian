@@ -109,10 +109,11 @@ async def build_app_state(
 
     cost_ledger: Optional[CostLedger] = None
     if cfg.cost.enabled:
+        # Refuse misconfig that would strand finance data or invite open export.
         if not cfg.auth.enabled:
-            logger.warning(
-                "cost.enabled=true but auth.enabled=false — /meridian/usage* "
-                "will refuse until auth is enabled (enterprise safety)"
+            raise ValueError(
+                "cost.enabled requires auth.enabled "
+                "(enterprise: usage APIs must not run without identity)"
             )
         if cfg.cost.store == "memory":
             cost_ledger = InMemoryCostLedger()

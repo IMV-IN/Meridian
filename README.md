@@ -1,6 +1,6 @@
 # Meridian
 
-**Latest release: [v0.8.0](https://github.com/IMV-IN/Meridian/releases/tag/v0.8.0)** ·  
+**Latest release: [v0.9.0](https://github.com/IMV-IN/Meridian/releases/tag/v0.9.0)** ·  
 **Full milestone history (what + why):** [`docs/MILESTONES.md`](docs/MILESTONES.md) ·  
 Ship log: [`docs/ship.md`](docs/ship.md) · Deploy: [`docs/DEPLOY.md`](docs/DEPLOY.md)
 
@@ -31,21 +31,22 @@ Meridian is **not** an inference engine — it does not manage KV cache, batchin
 - **PII (India pack)** — Aadhaar (Verhoeff), PAN, GSTIN, IFSC, UPI, mobile; policies `block` / `redact_and_replace` / `audit_only`; **matched values never logged**
 - **Pilot hardening** — bounded rate-limit store, stream-disconnect-safe cleanup, body size cap, non-root container + `HEALTHCHECK`
 
-### Cost attribution (Milestone M — unreleased until tagged v0.8.0)
+### Cost attribution (Milestone M — `v0.8.0`)
 - Opt-in `cost.enabled`; prices per model (per 1M prompt/completion tokens)
 - Scrapes backend `usage` on non-stream responses and stream SSE tails (last usage wins)
-- `GET /meridian/usage` + `GET /meridian/usage.csv` — **auth required** when cost is on; org-scoped unless `cost_admin: true`
-- `meridian_tokens_total{model,kind}` (no org labels)
+- `GET /meridian/usage` + `GET /meridian/usage.csv` — **auth required**; org-scoped unless `cost_admin: true`
+- `cost.enabled` **requires** `auth.enabled` at startup
 - Enterprise checklist: [`docs/ENTERPRISE_COST.md`](docs/ENTERPRISE_COST.md)
 
-### Deploy / packaging (Milestone N — unreleased until v0.9.0 tag)
+### Deploy / packaging (Milestone N — `v0.9.0`)
 - Helm chart: `deploy/helm/meridian/`
 - Air-gap bundle: `scripts/package_airgap.sh` + `docs/AIRGAP.md`
 - Key hot-reload: `auth.keys_file` + SIGHUP or `POST /meridian/reload` (`ops_admin`)
+- Enterprise config template: `configs/enterprise_example.yaml`
 
-### Coming soon (not tagged yet — do not pitch as shipped)
-- **Multi-provider routing** — OpenAI/Anthropic/Google + self-hosted
-- **Semantic caching**, **batch inference**
+### Coming later (not product-complete / not 1.0 yet)
+- **Multi-provider routing**, **semantic caching**, **batch inference**
+- Budget ↔ actual reconcile; design-partner v1.0 gate
 
 ## 10-Minute Quickstart
 
@@ -452,8 +453,12 @@ curl -i http://localhost:8080/v1/chat/completions \
 |---|---|---|
 | `/v1/chat/completions` | POST | OpenAI-compatible chat completions (stream + non-stream) |
 | `/v1/models` | GET | List available models |
-| `/meridian/status` | GET | Backend health, inflight counts, EWMA latency |
-| `/meridian/requests` | GET | Recent requests (in-memory ring buffer, last 100) |
+| `/meridian/status` | GET | Backend health, inflight, EWMA latency |
+| `/meridian/version` | GET | Package version (ops smoke) |
+| `/meridian/requests` | GET | Recent requests (ring buffer, last 100) |
+| `/meridian/reload` | POST | Hot-reload API keys (`ops_admin` Bearer) |
+| `/meridian/usage` | GET | Cost/token report (auth when cost on) |
+| `/meridian/usage.csv` | GET | CSV export (auth when cost on) |
 | `/metrics` | GET | Prometheus metrics |
 | `/ui` | GET | Live dashboard |
 

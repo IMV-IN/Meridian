@@ -2,12 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
-## [0.9.0] - Unreleased
+## [0.9.1] - Unreleased
+
+### Added
+
+- **`GET /meridian/version`** — package version for ops smoke checks.
+- **`configs/enterprise_example.yaml`** — production-oriented template (auth, budgets, PII, cost sqlite, keys_file).
+- **CI helm template** — validates Helm chart renders on every PR.
+
+### Changed
+
+- **`cost.enabled` requires `auth.enabled` at startup** (hard fail; safer than open export + late 401).
+- Roadmap: **0.9.x product completion** continues; **v1.0 deferred** until the product is complete for design partners (not the next tag).
+
+## [0.9.0] - 2026-07-10
 
 ### Added
 
 - **Deployment packaging (Milestone N)** — Helm chart (`deploy/helm/meridian/`), air-gap bundle script (`scripts/package_airgap.sh`), ops docs (`docs/DEPLOY.md`, `docs/AIRGAP.md`).
 - **Key hot-reload** — `auth.keys_file` YAML; merge with inline keys; `SIGHUP` or `POST /meridian/reload` (requires `ops_admin` key). Atomic `key_index` swap.
+- **`docs/MILESTONES.md`** — full what/why history for all milestones.
 
 ## [0.8.0] - 2026-07-10
 

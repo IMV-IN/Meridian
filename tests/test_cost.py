@@ -143,23 +143,15 @@ async def test_usage_requires_auth_when_cost_on():
 
 
 @pytest.mark.asyncio
-async def test_usage_requires_auth_even_if_auth_config_off():
-    """cost on + auth off → still 401 (refuse open export)."""
+async def test_cost_requires_auth_at_startup():
+    """cost.enabled without auth.enabled must fail fast (enterprise misconfig)."""
     cfg = MeridianConfig.from_dict({
         "auth": {"enabled": False},
         "cost": {"enabled": True, "store": "memory"},
-        "backends": [{
-            "name": "dead", "url": f"http://127.0.0.1:{_port()}",
-            "engine": "mock", "model": "demo", "weight": 1,
-            "health_endpoint": "/v1/models",
-        }],
+        "backends": [],
     })
-    await init_app(cfg, start_health=False)
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=meridian_app), base_url="http://test"
-    ) as c:
-        r = await c.get("/meridian/usage")
-    assert r.status_code == 401
+    with pytest.raises(ValueError, match="cost.enabled requires auth.enabled"):
+        await init_app(cfg, start_health=False)
 
 
 @pytest.mark.asyncio

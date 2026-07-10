@@ -12,7 +12,7 @@ shipped, **why it mattered**, and how pieces fit together.
 | [`V1_ROADMAP.md`](./V1_ROADMAP.md) | Detailed plans / DoD for remaining work |
 | [`PITCH.md`](./PITCH.md) | What sales can claim (must match **tagged** releases) |
 
-_Last updated: 2026-07-10. Latest tagged: **v0.8.0**. Milestone N (packaging) on branch / PR as **v0.9.0** unreleased._
+_Last updated: 2026-07-10. Latest tagged: **v0.9.0**. Next: **0.9.1** product completion (v1.0 deferred)._
 
 ---
 
@@ -295,20 +295,34 @@ without putting tenant IDs on high-cardinality metrics.
 
 ---
 
-## Milestone N — Deployment packaging — `v0.9.0` (when merged/tagged)
+## Milestone N — Deployment packaging — `v0.9.0` (tagged)
 
-### What (implemented on `milestone/N-deployment-packaging`)
+### What
 - **Helm chart** `deploy/helm/meridian/` (Deployment, Service, ConfigMap, PVC,
   optional keys Secret, non-root security context)
 - **Air-gap** `scripts/package_airgap.sh` + [`AIRGAP.md`](./AIRGAP.md)
 - **Ops** [`DEPLOY.md`](./DEPLOY.md): TLS edge, backup/retention, sizing, rotation
 - **Key hot-reload**: `auth.keys_file`; **SIGHUP** or `POST /meridian/reload`
   with `ops_admin` key; atomic `key_index` swap
+- **`docs/MILESTONES.md`** narrative history
 
 ### Why
 A 1-hour PoC / air-gapped bank install cannot depend on “clone and hope.”
 Packaging + key rotation without full restarts are table stakes once real
 users are on the gateway.
+
+---
+
+## After N — 0.9.x product completion (not v1.0 yet)
+
+**v1.0 is deferred** until the product is complete for multi-tenant enterprise
+use (including the ~1000-user class deployment). Continue patch/minor 0.9.x:
+
+| Version | Intent |
+|---------|--------|
+| **0.9.1** | Enterprise template config, `/meridian/version`, hard `cost`↔`auth` gate, API/docs completeness, Helm render in CI |
+| **0.9.2+** | Budget↔actual reconcile, load/overhead numbers, deeper e2e, remaining ops gaps |
+| **v1.0** | Later: design-partner PoC evidence + pitch honesty gate only |
 
 ---
 
@@ -346,7 +360,8 @@ Core + A (run anywhere)
 | `v0.6.0` | K |
 | `v0.7.0` | L |
 | `v0.8.0` | M |
-| `v0.9.0` | N (after packaging PR merge + tag) |
+| `v0.9.0` | N |
+| `v0.9.1` | Product-complete polish (when tagged) |
 
 Always prefer **git tags + CHANGELOG** over `pyproject` alone for “what is
 in production.”
