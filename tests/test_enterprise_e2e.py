@@ -8,13 +8,10 @@ from __future__ import annotations
 import os
 import socket
 import sys
-import threading
-import time
 from typing import Any, Dict, List, Optional
 
 import httpx
 import pytest
-import uvicorn
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -22,6 +19,7 @@ from meridian.api.main import app as meridian_app
 from meridian.api.main import get_state, init_app
 from meridian.config.models import MeridianConfig
 from mock_backend.server import app as mock_app
+from tests._mock_uvicorn import start_mock_server
 
 KEY_APP = "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ"
 KEY_ADMIN = "mrdn_1Aa2Bb3Cc4Dd5Ee6Ff7Gg8Hh"
@@ -34,21 +32,8 @@ def _port() -> int:
         return int(s.getsockname()[1])
 
 
-def _start_mock(port: int) -> None:
-    cfg = uvicorn.Config(mock_app, host="127.0.0.1", port=port, log_level="error")
-    server = uvicorn.Server(cfg)
-    threading.Thread(target=server.run, daemon=True).start()
-    for _ in range(50):
-        try:
-            httpx.get(f"http://127.0.0.1:{port}/v1/models", timeout=0.5)
-            return
-        except Exception:
-            time.sleep(0.05)
-    raise RuntimeError(f"mock not up on {port}")
-
-
 _MOCK_PORT = _port()
-_start_mock(_MOCK_PORT)
+_MOCK_SERVER = start_mock_server(mock_app, "127.0.0.1", _MOCK_PORT)
 _MOCK = f"http://127.0.0.1:{_MOCK_PORT}"
 
 
