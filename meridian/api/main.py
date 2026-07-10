@@ -110,7 +110,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await shutdown_app()
 
 
-app = FastAPI(title="Meridian", version="0.9.0", lifespan=lifespan)
+app = FastAPI(title="Meridian", version="0.9.1", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -316,6 +316,18 @@ async def status() -> JSONResponse:
     return JSONResponse({
         "strategy": state.config.gateway.strategy,
         "backends": [b.to_status_dict() for b in state.registry.all_backends()],
+    })
+
+
+@app.get("/meridian/version")
+async def version() -> JSONResponse:
+    """Package / API version for ops smoke checks (no secrets)."""
+    from meridian import __version__ as pkg_version
+
+    return JSONResponse({
+        "name": "meridian",
+        "version": pkg_version,
+        "api": "0.9.1",
     })
 
 

@@ -3,6 +3,12 @@
 Use this before enabling cost tracking for a multi-tenant production gateway
 (~hundreds–thousands of users).
 
+## Hard requirements (enforced)
+
+- **`cost.enabled` requires `auth.enabled`** — Meridian refuses to start otherwise.
+- **Usage APIs require a valid Bearer key** — no anonymous export.
+- Prefer **`store: sqlite`** in production (memory is lost on restart).
+
 ## Required config
 
 ```yaml

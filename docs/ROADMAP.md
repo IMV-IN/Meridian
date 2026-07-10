@@ -31,19 +31,18 @@ Through **v0.8.0** (see [`MILESTONES.md`](./MILESTONES.md) for detail):
 Ordering principle: **ship backend-agnostic, single-node features first; do not
 block OSS progress on multi-node or deep-engine work.**
 
-### Phase 1 — Finish packaging + v1.0 gate
+### Phase 1 — Complete the 0.9.x product (before any 1.0 talk)
 
-| Item | Depends on |
+| Item | Notes |
 |---|---|
-| **N** tag `v0.9.0` | merge packaging PR |
-| **v1.0** verification | design-partner PoC; pitch = tagged code only |
+| **0.9.1** | Enterprise config template, `/meridian/version`, cost requires auth at boot, API docs, Helm CI |
+| **0.9.2+** | Budget↔actual reconcile; published load numbers; richer e2e; ops polish for 1k-user fleets |
+| **Multi-provider / semantic cache / batch** | After product-complete 0.9.x, or never if out of niche |
 
-### Phase 2 — Post-v1 product (optional)
+### Phase 2 — v1.0 gate (later, not next)
 
-| Item | Depends on |
-|---|---|
-| Budget ↔ actual reconcile / refunds | M ledger + J meter |
-| **Multi-provider routing** | provider adapters |
+Verification only once the product is complete: design-partner PoC, pitch =
+tagged code, SECURITY checklist, clean image scan.
 
 ### Phase 3 — Data-plane (mostly independent)
 

@@ -187,3 +187,14 @@ def test_rate_limit_org_overrides():
     })
     assert cfg.rate_limit.org_overrides["acme"].token_capacity == 20
     assert cfg.rate_limit.org_overrides["acme"].token_refill_rate == 5
+
+
+def test_enterprise_example_yaml_loads():
+    from pathlib import Path
+
+    path = Path(__file__).resolve().parents[1] / "configs" / "enterprise_example.yaml"
+    cfg = MeridianConfig.from_yaml(str(path))
+    assert cfg.auth.enabled is True
+    assert cfg.cost.enabled is True
+    assert cfg.cost.store == "sqlite"
+    assert cfg.budgets.enabled is True
