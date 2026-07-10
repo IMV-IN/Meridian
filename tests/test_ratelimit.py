@@ -5,17 +5,16 @@ from __future__ import annotations
 import os
 import sys
 import tempfile
-import threading
 import time
 
 import httpx
 import pytest
-import uvicorn
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from meridian.api.ratelimitter import TokenBucket
 from mock_backend.server import app as mock_app
+from tests._mock_uvicorn import start_mock_server
 
 # ── Find free port for mock backend ──────────────────────────────────────
 
@@ -29,18 +28,7 @@ def _find_free_port() -> int:
 
 
 _mock_port = _find_free_port()
-_config = uvicorn.Config(mock_app, host="127.0.0.1", port=_mock_port, log_level="error")
-_server = uvicorn.Server(_config)
-_thread = threading.Thread(target=_server.run, daemon=True)
-_thread.start()
-
-for _ in range(50):
-    try:
-        httpx.get(f"http://127.0.0.1:{_mock_port}/v1/models", timeout=0.5)
-        break
-    except Exception:
-        time.sleep(0.1)
-
+_server = start_mock_server(mock_app, "127.0.0.1", _mock_port)
 _mock_url = f"http://127.0.0.1:{_mock_port}"
 
 _tmpdir = tempfile.mkdtemp()

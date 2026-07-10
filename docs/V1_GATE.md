@@ -16,9 +16,9 @@ _Last updated: 2026-07-10._
 | 5 | SECURITY policy current | [`SECURITY.md`](../SECURITY.md) threat model + checklist | **Done** (this gate PR) |
 | 6 | Quality gates green on tag | ruff / mypy / pytest + CI on `main` | **Done** (0.9.3 ship) |
 | 7 | Deploy path documented | Helm + air-gap + runbook | **Done** (N / 0.9.3) |
-| 8 | Image scan | `trivy`/`grype` on published image — no Critical unfixed | **Open** (run before tag v1.0) |
-| 9 | Partner acknowledgement | Sign-off row in PoC report | **Open** |
-| 10 | Tag **v1.0.0** | Only when 1–9 satisfied | **Not yet** |
+| 8 | Image scan | Hardened Dockerfile + Trivy — **0 CRITICAL**; residual HIGH are Debian essentials with no FixedVersion — [`scans/IMAGE_SCAN_0.9.3.md`](./scans/IMAGE_SCAN_0.9.3.md) | **Done** (CRITICAL clean) |
+| 9 | Partner / cofounder acknowledgement | Sign-off row in PoC report | **Open** |
+| 10 | Tag **v1.0.0** | Only when 1–9 satisfied | **Hold** — no tag until cofounder chat |
 
 ## Security deploy checklist (operator)
 

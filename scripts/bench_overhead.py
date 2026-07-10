@@ -86,7 +86,9 @@ def _find_free_port() -> int:
 
 
 def _start_uvicorn(app, host: str, port: int) -> uvicorn.Server:
-    config = uvicorn.Config(app, host=host, port=port, log_level="error")
+    config = uvicorn.Config(
+        app, host=host, port=port, log_level="error", loop="asyncio", lifespan="off"
+    )
     server = uvicorn.Server(config)
     threading.Thread(target=server.run, daemon=True).start()
     return server

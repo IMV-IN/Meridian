@@ -5,13 +5,10 @@ from __future__ import annotations
 import os
 import socket
 import sys
-import threading
-import time
 from unittest.mock import MagicMock
 
 import httpx
 import pytest
-import uvicorn
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -22,26 +19,18 @@ from meridian.config.models import MeridianConfig
 from meridian.usage import InMemoryUsageMeter, MeterKey
 from meridian.usage.bucket import period_bucket
 from mock_backend.server import app as mock_app
+from tests._mock_uvicorn import start_mock_server
 
 
 def _free_port() -> int:
     with socket.socket() as s:
         s.bind(("127.0.0.1", 0))
-        return s.getsockname()[1]
+        return int(s.getsockname()[1])
 
 
 # Shared mock backend for e2e path
 _mock_port = _free_port()
-_cfg = uvicorn.Config(mock_app, host="127.0.0.1", port=_mock_port, log_level="error")
-_srv = uvicorn.Server(_cfg)
-threading.Thread(target=_srv.run, daemon=True).start()
-for _ in range(50):
-    try:
-        httpx.get(f"http://127.0.0.1:{_mock_port}/v1/models", timeout=0.5)
-        break
-    except Exception:
-        time.sleep(0.1)
-
+_srv = start_mock_server(mock_app, "127.0.0.1", _mock_port)
 _MOCK_URL = f"http://127.0.0.1:{_mock_port}"
 KEY = "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ"
 
