@@ -37,13 +37,14 @@ block OSS progress on multi-node or deep-engine work.**
 |---|---|
 | **0.9.1** | **shipped** — enterprise template, `/meridian/version`, cost requires auth at boot, Helm CI |
 | **0.9.2** | **shipped** — budget↔actual token-meter reconcile |
-| **0.9.3** | Load numbers (`LOAD.md` + bench); richer e2e + CI smoke; ops polish (budget headers, runbook) |
-| **Multi-provider / semantic cache / batch** | After product-complete 0.9.x, or never if out of niche |
+| **0.9.3** | **shipped** — load harness, enterprise e2e, ops polish |
+| **Ollama real-path proof** | **done** — `LOAD.md` section (~2 ms gateway overhead on qwen2.5:0.5b) |
+| **Multi-provider / semantic cache / batch** | Optional; features paused until after v1.0 gate decision |
 
-### Phase 2 — v1.0 gate (later, not next)
+### Phase 2 — v1.0 gate (**next**)
 
-Verification only once the product is complete: design-partner PoC, pitch =
-tagged code, SECURITY checklist, clean image scan.
+Verification only (no new product features): design-partner PoC report on a
+tagged image, pitch = code, SECURITY checklist, clean image scan.
 
 ### Phase 3 — Data-plane (mostly independent)
 
