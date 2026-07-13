@@ -44,6 +44,8 @@ Client → Meridian (FastAPI)
         Backend 1..N
 ```
 
+Detailed diagram: [`assets/architecture_diagram.png`](./assets/architecture_diagram.png)
+
 Post-refactor composition (before M/N landed on this shape):
 
 | Module | Role |

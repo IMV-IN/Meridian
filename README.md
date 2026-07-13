@@ -102,9 +102,13 @@ Proxied responses include `x-request-id` and `x-meridian-backend`.
 ## Architecture
 
 ```
-Client → Meridian (FastAPI): route · policy · proxy · metrics
-       → Backend 1…N (vLLM / Ollama / any OpenAI-compatible)
+Client → TLS edge → Meridian (auth · policy · route · proxy · finalize)
+                  → Backend 1…N (vLLM / SGLang / TensorRT-LLM / Ollama)
 ```
+
+Detailed diagram (pipeline, core components, policy, observability, audit):
+
+![Meridian L7 Inference Gateway architecture](docs/assets/architecture_diagram.png)
 
 ## Development
 
