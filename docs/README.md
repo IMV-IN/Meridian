@@ -8,7 +8,7 @@ Start here if you are not sure which file to open.
 |-----|----------------|
 | **[QUICKSTART.md](./QUICKSTART.md)** | First run — Docker Compose, one curl, expected headers |
 | **[../README.md](../README.md)** | Elevator pitch + short links (not a full manual) |
-| **[../diagrams/architecture_diagram.png](../diagrams/architecture_diagram.png)** | Full L7 gateway architecture (detailed) |
+| **[assets/architecture_diagram.png](./assets/architecture_diagram.png)** | Full L7 gateway architecture (detailed) |
 | **[CONFIGURATION.md](./CONFIGURATION.md)** | Config reference after the quickstart works |
 
 ## Operators

@@ -108,9 +108,7 @@ Client → TLS edge → Meridian (auth · policy · route · proxy · finalize)
 
 Detailed diagram (pipeline, core components, policy, observability, audit):
 
-![Meridian L7 Inference Gateway architecture](diagrams/architecture_diagram.png)
-
-More diagrams: [`diagrams/`](diagrams/) (routing, health, request flow).
+![Meridian L7 Inference Gateway architecture](docs/assets/architecture_diagram.png)
 
 ## Development
 
