@@ -14,6 +14,7 @@ All notable changes to this project will be documented in this file.
 
 - Slim README + linear [`docs/QUICKSTART.md`](docs/QUICKSTART.md); docs map [`docs/README.md`](docs/README.md); config/auth reference [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md).
 - Internal/sales/gate docs under [`docs/internal/`](docs/internal/).
+- **Architecture diagram** — detailed L7 gateway diagram at [`diagrams/architecture_diagram.png`](diagrams/architecture_diagram.png) (linked from README + docs index).
 - **Ollama real-path load proof** — [`docs/LOAD.md`](docs/LOAD.md).
 - **v1.0 design-partner gate** — under `docs/internal/`; **v1.0.0 not tagged**.
 
