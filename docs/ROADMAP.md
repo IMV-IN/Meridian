@@ -5,7 +5,7 @@ Single source of truth for **ordering**. Narrative history (what + why) lives in
 remaining plans in [`V1_ROADMAP.md`](./internal/V1_ROADMAP.md). When ordering conflicts,
 this file wins.
 
-_Last reconciled: 2026-07-10._
+_Last reconciled: 2026-07-24 (complete-product v1.0 sequencing; see [`FULL.md`](./FULL.md))._
 
 ---
 
@@ -31,43 +31,45 @@ Through **v0.8.0** (see [`MILESTONES.md`](./MILESTONES.md) for detail):
 Ordering principle: **ship backend-agnostic, single-node features first; do not
 block OSS progress on multi-node or deep-engine work.**
 
-### Phase 1 — Complete the 0.9.x product (before any 1.0 talk)
+### Phase 1 — Complete the 0.9.x product (**shipped**)
 
 | Item | Notes |
 |---|---|
 | **0.9.1** | **shipped** — enterprise template, `/meridian/version`, cost requires auth at boot, Helm CI |
 | **0.9.2** | **shipped** — budget↔actual token-meter reconcile |
 | **0.9.3** | **shipped** — load harness, enterprise e2e, ops polish |
+| **0.9.4** | **in tree** — RBAC roles, ops-endpoint auth, dashboard overhaul |
 | **Ollama real-path proof** | **done** — `LOAD.md` section (~2 ms gateway overhead on qwen2.5:0.5b) |
-| **Multi-provider / semantic cache / batch** | Optional; features paused until after v1.0 gate decision |
 
-### Phase 2 — v1.0 gate (**in progress**)
+### Phase 2 — Complete-product track `v0.10`–`v0.13` (**before v1.0**)
 
-Verification only (no new product features):
+Per the 2026-07-24 sequencing change, **v1.0 ships feature-complete**. Detail,
+per-track DoD, and acceptance criteria live in [`FULL.md`](./FULL.md). Summary:
+
+| Tag | Theme | Key items |
+|---|---|---|
+| `v0.10.0` | Code health + resilience | Test coverage for untested core paths; optional `[audit]` deps; logger fd fix; circuit breaker; retry with backoff; per-backend timeouts; full dynamic config reload; stream timeouts |
+| `v0.11.0` | Observability + elasticity | Grafana dashboards; Helm PDB/Ingress/TLS/RBAC; KEDA scaffolding; scale-to-zero idle signal |
+| `v0.12.0` | Platform depth | Tenant isolation modes; canary rollout; key lifecycle API; per-key usage; per-model + global rate limits |
+| `v0.13.0` | Optional revenue track | Pluggable billing adapter (cuttable for scope) |
+
+### Phase 3 — v1.0 seal (**runs last**)
 
 | Item | Status |
 |------|--------|
-| PoC report on tagged image | **Done** — [`POC_REPORT.md`](./internal/POC_REPORT.md) |
-| Pitch = code | **Done** — [`PITCH.md`](./internal/PITCH.md) |
-| SECURITY current | **Done** — root `SECURITY.md` |
-| Load + Ollama proof | **Done** — [`LOAD.md`](./LOAD.md) |
-| Image scan | **Done** — 0 CRITICAL (hardened image) — [`scans/IMAGE_SCAN_0.9.3.md`](./scans/IMAGE_SCAN_0.9.3.md) |
-| Partner / cofounder sign-off | **Open** |
+| Phase 2 tags shipped + green CI on each | **Open** |
+| RC partner PoC (complete product, 4 weeks) | **Open** |
+| Pitch / SECURITY / image scan re-verified on RC | **Open** |
+| Partner / cofounder sign-off on RC | **Open** |
 | Tag **v1.0.0** | **Hold** — see [`internal/V1_GATE.md`](./internal/V1_GATE.md) |
-| Quickstart DX | **Done** — compose on :8080, no Kafka by default, docs index |
 
-### Phase 3 — Data-plane (mostly independent)
+### Phase 4 — Data-plane (mostly independent, post-v1.0)
 
 | Item | Source |
 |---|---|
 | **Semantic caching** | README |
 | **Batch inference** — async bulk endpoint | README |
-
-### Phase 4 — Packaging
-
-| Item |
-|---|
-| **On-prem / air-gapped** — OCI + Helm, offline license keys |
+| **On-prem / air-gapped** — offline license keys (OCI + Helm already shipped in N) | README |
 
 ### Phase 5 — Advanced (deferred — compute / engine hooks)
 
@@ -90,9 +92,13 @@ A–E + audit (done)
       │
   L PII (done, v0.7.0)
       │
-  M cost attribution  →  multi-provider
-  semantic cache · batch  (independent)
-  On-prem packaging
+  M cost attribution (done, v0.8.0)
+      │
+  v0.10–v0.13 complete-product track (FULL.md)
+      │
+  v1.0.0 seal (partner RC sign-off, runs last)
+      │
+  semantic cache · batch · offline license keys · billing extras (post-v1.0)
   Edge / prefix-cache / KV-aware  (deferred)
 ```
 
