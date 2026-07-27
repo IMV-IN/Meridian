@@ -17,6 +17,12 @@ class RequestLogger:
         self._path.parent.mkdir(parents=True, exist_ok=True)
         self._file = open(self._path, "a", buffering=1)  # line-buffered
 
+    def __enter__(self) -> "RequestLogger":
+        return self
+
+    def __exit__(self, exc_type: object, exc_val: object, exc_tb: object) -> None:
+        self.close()
+
     def log(
         self,
         request_id: str,
@@ -54,4 +60,10 @@ class RequestLogger:
             logger.exception("Failed to write JSONL log")
 
     def close(self) -> None:
-        self._file.close()
+        """Flush and close; idempotent so double-shutdown paths are safe."""
+        if self._file.closed:
+            return
+        try:
+            self._file.flush()
+        finally:
+            self._file.close()
