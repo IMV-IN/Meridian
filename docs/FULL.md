@@ -24,7 +24,7 @@ This roadmap addresses all three.
 |-----------|--------|
 | Lint & types | ✅ Clean (ruff, mypy) |
 | Tests | ✅ 357/357 pass |
-| v0.10.0 | In tree (Phase 0 code health + Phase 1 resilience landed) |
+| v0.11.0 | In tree (Phase 0–2 landed; Phase 3 platform depth next) |
 | v1.0 | Blocked on cofounder/partner sign-off |
 | Docker image | Multi-arch, hardened, non-root |
 | Helm chart | Basic (137 lines, 8 templates) |
@@ -35,15 +35,15 @@ This roadmap addresses all three.
 | **Dependency hygiene** | ✅ Optional `[audit]` extra (0.10.0) |
 | **Circuit breaker / retry** | ✅ 0.10.0 (`resilience.circuit_breaker`, `max_retries` + backoff) |
 | **Dynamic config reload** | ✅ 0.10.0 — full atomic reload via `POST /meridian/reload` / SIGHUP |
-| **Autoscaling** | ❌ None |
-| **Scale-to-zero** | ❌ None |
+| **Autoscaling** | ✅ 0.11.0 scaffolding (KEDA ScaledObject on inflight; HPA doc) |
+| **Scale-to-zero** | ✅ 0.11.0 (`idle_timeout_min` + `meridian_backend_idle`; KEDA wiring in DEPLOY) |
 | **Traffic management** | ❌ No canary / blue-green / gradual rollout |
 | **Tenant isolation** | ❌ All tenants share same process / backend pool |
 | **Billing** | ❌ Cost tracking yes, no billing integration |
 | **Key lifecycle API** | ❌ Only config-file + SIGHUP |
 | **Per-key usage tracking** | ❌ Rate limiting and budgets are org-scoped only |
-| **Grafana dashboards** | ❌ None shipped |
-| **K8s Ingress / TLS / PDB** | ❌ Not in Helm chart |
+| **Grafana dashboards** | ✅ 0.11.0 (`deploy/grafana/` + Helm ConfigMap) |
+| **K8s Ingress / TLS / PDB** | ✅ 0.11.0 (+ ServiceAccount, topology spread) |
 
 ---
 

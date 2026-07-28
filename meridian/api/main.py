@@ -154,7 +154,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await shutdown_app()
 
 
-app = FastAPI(title="Meridian", version="0.10.0", lifespan=lifespan)
+app = FastAPI(title="Meridian", version="0.11.0", lifespan=lifespan)
 
 
 @app.middleware("http")

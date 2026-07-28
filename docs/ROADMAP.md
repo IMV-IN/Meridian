@@ -5,7 +5,7 @@ Single source of truth for **ordering**. Narrative history (what + why) lives in
 remaining plans in [`V1_ROADMAP.md`](./internal/V1_ROADMAP.md). When ordering conflicts,
 this file wins.
 
-_Last reconciled: 2026-07-28 (v0.10.0 in tree: Phase 0 code health + Phase 1 resilience; see [`FULL.md`](./FULL.md))._
+_Last reconciled: 2026-07-28 (v0.11.0 in tree: Phase 2 observability/elasticity; see [`FULL.md`](./FULL.md))._
 
 ---
 
@@ -49,8 +49,8 @@ per-track DoD, and acceptance criteria live in [`FULL.md`](./FULL.md). Summary:
 | Tag | Theme | Key items |
 |---|---|---|
 | `v0.10.0` | Code health + resilience (**in tree**) | ~~Test coverage for untested core paths; optional `[audit]` deps; logger fd fix~~; circuit breaker; retry with backoff; per-backend timeouts; full dynamic config reload; stream timeouts |
-| `v0.11.0` | Observability + elasticity (**next**) | Grafana dashboards; Helm PDB/Ingress/TLS/RBAC; KEDA scaffolding; scale-to-zero idle signal |
-| `v0.12.0` | Platform depth | Tenant isolation modes; canary rollout; key lifecycle API; per-key usage; per-model + global rate limits |
+| `v0.11.0` | Observability + elasticity (**in tree**) | Grafana dashboards; Helm PDB/Ingress/TLS/RBAC; KEDA scaffolding; scale-to-zero idle signal |
+| `v0.12.0` | Platform depth (**next**) | Tenant isolation modes; canary rollout; key lifecycle API; per-key usage; per-model + global rate limits |
 | `v0.13.0` | Optional revenue track | Pluggable billing adapter (cuttable for scope) |
 
 ### Phase 3 — v1.0 seal (**runs last**)
