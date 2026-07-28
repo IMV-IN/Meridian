@@ -1,0 +1,22 @@
+{{- if .Values.keda.enabled -}}
+# Requires KEDA (https://keda.sh) installed in the cluster. Scales the gateway
+# Deployment on a Prometheus trigger (default: total inflight requests).
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: {{ include "meridian.fullname" . }}
+  labels:
+    {{- include "meridian.labels" . | nindent 4 }}
+spec:
+  scaleTargetRef:
+    name: {{ include "meridian.fullname" . }}
+  minReplicaCount: {{ .Values.keda.minReplicas }}
+  maxReplicaCount: {{ .Values.keda.maxReplicas }}
+  cooldownPeriod: {{ .Values.keda.cooldownPeriod }}
+  triggers:
+    - type: prometheus
+      metadata:
+        serverAddress: {{ .Values.keda.prometheusAddress | quote }}
+        query: {{ .Values.keda.query | quote }}
+        threshold: {{ .Values.keda.threshold | quote }}
+{{- end }}

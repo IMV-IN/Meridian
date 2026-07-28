@@ -4,9 +4,9 @@
 replicaCount: 1
 
 image:
-  # Prefer pinned version in production, e.g. ghcr.io/imv-in/meridian:0.9.0
+  # Prefer pinned version in production, e.g. ghcr.io/imv-in/meridian:0.10.0
   repository: ghcr.io/imv-in/meridian
-  tag: "0.9.3"
+  tag: "0.10.0"
   pullPolicy: IfNotPresent
 
 imagePullSecrets: []
@@ -16,6 +16,68 @@ fullnameOverride: ""
 service:
   type: ClusterIP
   port: 8080
+
+# Least-privilege identity for the pods. Meridian needs NO Kubernetes API
+# access — token automount stays off unless you explicitly enable it and bind
+# your own roles for future integrations.
+serviceAccount:
+  create: true
+  # name: meridian
+  annotations: {}
+  automountServiceAccountToken: false
+
+# PodDisruptionBudget — keeps a replica alive during voluntary disruptions
+# (node drains, cluster upgrades). Only meaningful with replicaCount >= 2.
+podDisruptionBudget:
+  enabled: false
+  maxUnavailable: 1
+  # minAvailable: 1
+
+# Spread replicas across nodes/zones for HA.
+topologySpreadConstraints: []
+  # - maxSkew: 1
+  #   topologyKey: topology.kubernetes.io/zone
+  #   whenUnsatisfiable: ScheduleAnyway
+  #   labelSelector:
+  #     matchLabels:
+  #       app.kubernetes.io/name: meridian
+
+# Optional Ingress + TLS (off by default — gateway usually sits behind an
+# existing edge). cert-manager example in docs/DEPLOY.md.
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations: {}
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: meridian.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: meridian-tls
+    #   hosts: [meridian.example.com]
+
+# KEDA autoscaling (off by default; requires KEDA installed in-cluster).
+# Scales the GATEWAY on inflight load. For backend scale-to-zero (GPU pods),
+# see docs/DEPLOY.md — that rides meridian_backend_idle, not this object.
+keda:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  cooldownPeriod: 300
+  prometheusAddress: "http://prometheus-server.prometheus.svc:9090"
+  # Inflight requests across the gateway — upstream queue_depth is even better
+  # when telemetry adapters expose it.
+  query: "sum(meridian_backend_inflight)"
+  threshold: "50"
+
+# Ship bundled Grafana dashboards as a ConfigMap for sidecar dashboards
+# provisioning (grafana/k8s sidecar with dashboards label selector).
+grafana:
+  enabled: false
+  sidecarLabel: grafana_dashboard
+  sidecarLabelValue: "1"
 
 resources:
   requests:
