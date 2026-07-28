@@ -87,6 +87,18 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
 
         old_cfg = state.config
 
+        # Swap the stateless runtime objects.
+        state.config = new_cfg
+        state.registry = new_registry
+        state.strategy = new_strategy
+        state.key_index = new_index
+        state.health_checker.registry = new_registry
+        state.health_checker.update_config(new_cfg.health)
+
+        for b in new_registry.all_backends():
+            BACKEND_HEALTHY.labels(backend=b.name).set(1 if b.healthy else 0)
+            BACKEND_INFLIGHT.labels(backend=b.name).set(0)
+
         # Budgets: off→on spins up a fresh meter; any other change keeps the
         # running meter (data continuity) and asks for a restart.
         if new_cfg.budgets != old_cfg.budgets:
@@ -107,18 +119,6 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
         _warn_if_changed(old_cfg.audit_bus, new_cfg.audit_bus, "audit_bus", "publisher lifecycle")
         _warn_if_changed(old_cfg.logging, new_cfg.logging, "logging", "open JSONL handle")
 
-        # Swap the stateless runtime objects.
-        state.config = new_cfg
-        state.registry = new_registry
-        state.strategy = new_strategy
-        state.key_index = new_index
-        state.health_checker.registry = new_registry
-        state.health_checker.config = new_cfg.health
-
-        for b in new_registry.all_backends():
-            BACKEND_HEALTHY.labels(backend=b.name).set(1 if b.healthy else 0)
-            BACKEND_INFLIGHT.labels(backend=b.name).set(0)
-
         # Rebuild bounded stores whose configs changed (old buckets/pins dropped).
         if new_cfg.rate_limit != old_cfg.rate_limit:
             from meridian.api.ratelimitter import RateLimitStore
@@ -128,8 +128,22 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
                 idle_ttl_s=new_cfg.rate_limit.idle_ttl_s,
             )
             state.rate_limit = rl
+            logger.warning(
+                "Rate-limit store rebuilt on config reload — all per-key tokens reset"
+            )
 
         if new_cfg.session_affinity != old_cfg.session_affinity:
+            if old_cfg.session_affinity.enabled != new_cfg.session_affinity.enabled or (
+                new_cfg.session_affinity.enabled
+                and (
+                    new_cfg.session_affinity.ttl_s != old_cfg.session_affinity.ttl_s
+                    or new_cfg.session_affinity.max_sessions
+                    != old_cfg.session_affinity.max_sessions
+                )
+            ):
+                logger.warning(
+                    "Session affinity config changed — existing pinned sessions dropped"
+                )
             sa = new_cfg.session_affinity
             state.session_store = (
                 SessionStore(ttl_ms=sa.ttl_s * 1000, max_sessions=sa.max_sessions, clock=now_ms)
@@ -146,7 +160,14 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
         )
 
     # Telemetry poller restart is async — outside the lock.
-    await _sync_telemetry_poller(state)
+    # Roll back to the old poller if the new one fails to start.
+    old_poller = state.telemetry_poller
+    try:
+        await _sync_telemetry_poller(state)
+    except Exception:
+        state.telemetry_poller = old_poller
+        logger.exception("Telemetry poller rebuild failed — keeping previous poller")
+        raise
     return {"scope": "full", "keys": len(state.key_index)}
 
 

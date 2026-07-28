@@ -6,6 +6,7 @@ can only read inside the chart dir, so the two must stay byte-identical).
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -53,8 +54,6 @@ def test_dashboards_parse_and_have_panels() -> None:
 
 
 def test_dashboard_exprs_reference_known_metrics() -> None:
-    import re
-
     for name in DASHBOARDS:
         dash = json.loads((CANON / name).read_text())
         for expr in _walk_exprs(dash):

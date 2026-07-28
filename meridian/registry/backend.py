@@ -76,9 +76,14 @@ class Backend:
             self.last_activity_ms = now_ms
 
     def mark_idle_if_expired(self, now_ms: float) -> bool:
-        """Mark idle when the configured quiet period elapsed. True if newly idle."""
+        """Mark idle when the configured quiet period elapsed. True if newly idle.
+
+        A backend that has never received traffic (``touch()`` never called) is
+        never considered idle — ``last_activity_ms == 0`` acts as a sentinel for
+        "not yet tracked".
+        """
         with self._lock:
-            if self.idle or self.idle_timeout_ms is None:
+            if self.idle or self.idle_timeout_ms is None or self.last_activity_ms == 0.0:
                 return False
             if now_ms - self.last_activity_ms < self.idle_timeout_ms:
                 return False
@@ -86,10 +91,19 @@ class Backend:
             return True
 
     def wake(self, now_ms: float) -> None:
-        """Return an idle backend to active service (scale-to-zero wake-up)."""
+        """Return an idle backend to active service (scale-to-zero wake-up).
+
+        Also resets health-tracked failure counters so the backend gets a
+        clean slate instead of inheriting failures accumulated while it
+        was scaled to zero.
+        """
         with self._lock:
             self.idle = False
             self.last_activity_ms = now_ms
+            self.consecutive_failures = 0
+            self.consecutive_successes = 0
+            if self.circuit is not None:
+                self.circuit.reset()
 
     def add_inflight_cost(self, cost: float) -> None:
         with self._lock:

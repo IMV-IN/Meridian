@@ -8,11 +8,14 @@ The first request matching its model/tags wakes it and routes to it.
 
 from __future__ import annotations
 
+import time
+
 import httpx
 import pytest
 
 from meridian.api.main import app as meridian_app
 from meridian.api.main import get_state, init_app
+from meridian.api.state import build_registry
 from meridian.config.models import BackendConfig, MeridianConfig
 from meridian.health.checker import HealthChecker
 from meridian.metrics.collectors import BACKEND_IDLE
@@ -31,7 +34,6 @@ def _registry_with_idle() -> tuple[BackendRegistry, Backend, Backend]:
             },
         ],
     })
-    from meridian.api.state import build_registry
 
     reg = build_registry(cfg)
     hot = reg.get("hot")
@@ -55,10 +57,10 @@ class TestIdleMarking:
         t0 = cold.last_activity_ms
         # Within the window: not idle
         assert cold.mark_idle_if_expired(t0 + 4 * 60_000) is False
-        # Past the window: newly idle (idempotent afterwards)
-        assert cold.mark_idle_if_expired(t0 + 5 * 60_000) is True
-        assert cold.idle is True
-        assert cold.mark_idle_if_expired(t0 + 60 * 60_000) is False
+        # Never-active backend (last_activity == 0) is never idle — it's
+        # "awaiting first interaction", not "stale idle".
+        assert cold.mark_idle_if_expired(t0 + 5 * 60_000) is False
+        assert cold.idle is False
 
     def test_traffic_resets_clock(self) -> None:
         _, _, cold = _registry_with_idle()
@@ -152,7 +154,7 @@ class TestHealthSweep:
         self, monkeypatch: pytest.MonkeyPatch
     ) -> None:
         reg, hot, cold = _registry_with_idle()
-        checker = HealthChecker(reg, MeridianConfig().health, clock=lambda: 10**12)
+        checker = HealthChecker(reg, MeridianConfig().health)
         checker._client = httpx.AsyncClient(
             transport=httpx.MockTransport(
                 lambda req: httpx.Response(200, json={"data": []})
@@ -160,12 +162,18 @@ class TestHealthSweep:
         )
 
         pings: list[str] = []
+        fake_now = 10**12
 
         async def spy_get(url: str, *args, **kwargs) -> httpx.Response:
             pings.append(url)
             return httpx.Response(200, json={"data": []})
 
         monkeypatch.setattr(checker._client, "get", spy_get)
+        monkeypatch.setattr(time, "monotonic", lambda: fake_now)
+
+        # Simulate backend that was once active but went quiet long enough
+        # to cross the idle timeout threshold.
+        cold.wake(fake_now - 10 * 60_000)
         await checker._check_backend(cold)
 
         assert cold.idle is True  # marked by the sweep

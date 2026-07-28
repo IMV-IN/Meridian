@@ -316,7 +316,7 @@ async def chat_completions(request: Request) -> Response:
         error_type = type(exc).__name__
         status_code = 502
         return GatewayError(
-            f"Backend {backend.name!r} connection error: {exc}",
+            f"Backend {backend.name!r} connection error",
             "meridian_backend_error",
             502,
         ).to_response()

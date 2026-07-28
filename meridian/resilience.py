@@ -85,6 +85,16 @@ class CircuitBreaker:
                 self.state = self.OPEN
                 self._opened_at = self._clock()
 
+    def reset(self) -> None:
+        """Reset failure counters without changing state.
+
+        Used when waking an idle backend — failures accumulated while
+        the backend was scaled to zero are not meaningful for the new
+        instance.
+        """
+        with self._lock:
+            self.consecutive_failures = 0
+
     def status(self) -> dict:
         with self._lock:
             return {
