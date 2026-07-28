@@ -59,7 +59,7 @@ Key modules
 - Config schema: `meridian/config/models.py`
 - UI: `meridian/ui/index.html`
 
-**Milestone status:** A–L shipped and tagged through **v0.7.0** (see `docs/ship.md`). Next: **M — cost attribution** in `docs/internal/V1_ROADMAP.md`.
+**Milestone status:** A–N shipped and tagged through **v0.9.3** (see `docs/ship.md`). Next: **no new features** — the **v1.0 gate is on hold** pending cofounder / design-partner PoC sign-off (see `docs/internal/V1_GATE.md`).
 
 ---
 

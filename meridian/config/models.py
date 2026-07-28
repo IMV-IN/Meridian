@@ -157,6 +157,16 @@ class KeyConfig(BaseModel):
     cost_admin: bool = False
     # Ops keys may call POST /meridian/reload (Milestone N).
     ops_admin: bool = False
+    # Coarse RBAC tier (0.9.4): viewer | operator | admin. Optional; composes
+    # with cost_admin/ops_admin. None = no role (pre-0.9.4 behavior).
+    role: Optional[str] = None
+
+    @field_validator("role")
+    @classmethod
+    def _known_role(cls, v: Optional[str]) -> Optional[str]:
+        if v is not None and v not in ("viewer", "operator", "admin"):
+            raise ValueError("role must be one of: viewer, operator, admin")
+        return v
 
 
 class AuthConfig(BaseModel):

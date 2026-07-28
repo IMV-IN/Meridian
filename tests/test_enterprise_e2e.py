@@ -242,11 +242,25 @@ async def test_failover_to_healthy_backend():
 
 
 @pytest.mark.asyncio
-async def test_version_and_status_open():
+async def test_version_open_status_gated():
     async with await _client(_base_cfg()) as c:
+        # /meridian/version stays open for ops smoke checks.
         ver = await c.get("/meridian/version")
         assert ver.status_code == 200
         assert "version" in ver.json()
-        st = await c.get("/meridian/status")
+
+        # /meridian/status now requires a view-capable key when auth is on.
+        assert (await c.get("/meridian/status")).status_code == 401
+        assert (
+            await c.get(
+                "/meridian/status",
+                headers={"Authorization": f"Bearer {KEY_APP}"},
+            )
+        ).status_code == 403
+
+        # ops_admin implies view rights.
+        st = await c.get(
+            "/meridian/status", headers={"Authorization": f"Bearer {KEY_OPS}"}
+        )
         assert st.status_code == 200
         assert "backends" in st.json()

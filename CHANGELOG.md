@@ -2,6 +2,25 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.9.4] - 2026-07-18
+
+### Added
+
+- **RBAC roles** — optional `role: viewer | operator | admin` on API keys, composing with the legacy `cost_admin` / `ops_admin` bools (`role: null` = pre-0.9.4 behavior). Derived permissions on `IdentityContext`: `can_view_ops`, `can_reload`, `can_read_all_cost`. New `meridian/api/authz.py` gates the operator surface.
+- **Dashboard overhaul** (`/ui`) — aggregate stats bar (recent request count, error rate, p50/p95 latency, backends-up); org/team/tier columns on the recent-requests table; telemetry rendered as bars (queue depth, GPU mem, tok/s); auth-aware polling that prompts for and stores an API key and sends `Authorization` on `/meridian/status` + `/meridian/requests`.
+- **`configs/rbac_demo.yaml`** — auth + roles + small budget on the two mock backends, backing the new quickstart scenarios.
+- Recent-request records now carry `org_id` / `team_id` / `tier` (surfaced in the dashboard; JSONL/audit already had them).
+
+### Changed (security hardening)
+
+- **Operator endpoints now require auth when `auth.enabled`** — `GET /meridian/status` and `GET /meridian/requests` return **401** without a key and **403** for a key lacking view rights (viewer/operator/admin, or a `cost_admin`/`ops_admin` bool). Previously open even with auth on. When `auth.enabled` is false they stay open (unchanged). `/metrics`, `/meridian/version`, and the static `/ui` page remain open.
+- `POST /meridian/reload` accepts operator/admin roles in addition to `ops_admin`.
+- Cross-org `/meridian/usage*` now keys off `can_read_all_cost` (covers `role: admin` as well as `cost_admin`).
+
+### Docs
+
+- Rewrote [`docs/QUICKSTART.md`](docs/QUICKSTART.md) as a scenario matrix (mock, streaming, RBAC, budgets, cost export, telemetry/tiering headers, real Ollama) that doubles as the 0.9.4 manual-validation recipe.
+
 ## [Unreleased]
 
 ### Fixed

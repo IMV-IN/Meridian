@@ -18,6 +18,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from prometheus_client import generate_latest
 
+from meridian.api.authz import require_ops_view, require_reload
 from meridian.api.errors import GatewayError
 from meridian.api.finalize import finalize_request, stamp_meridian_headers
 from meridian.api.pipeline import ChatRequest, prepare_chat_request, reconcile_budget_usage
@@ -138,7 +139,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await shutdown_app()
 
 
-app = FastAPI(title="Meridian", version="0.9.3", lifespan=lifespan)
+app = FastAPI(title="Meridian", version="0.9.4", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -329,8 +330,16 @@ async def list_models() -> Response:
 
 
 @app.get("/meridian/status")
-async def status() -> JSONResponse:
+async def status(request: Request) -> Response:
     state = get_state()
+    try:
+        require_ops_view(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+    except GatewayError as exc:
+        return exc.to_response()
     return JSONResponse({
         "strategy": state.config.gateway.strategy,
         "backends": [b.to_status_dict() for b in state.registry.all_backends()],
@@ -350,36 +359,36 @@ async def version() -> JSONResponse:
 
 
 @app.get("/meridian/requests")
-async def recent_requests() -> JSONResponse:
-    return JSONResponse({"requests": list(get_state().recent_requests)})
+async def recent_requests(request: Request) -> Response:
+    state = get_state()
+    try:
+        require_ops_view(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+    except GatewayError as exc:
+        return exc.to_response()
+    return JSONResponse({"requests": list(state.recent_requests)})
 
 
 @app.post("/meridian/reload")
 async def reload_auth_keys(request: Request) -> Response:
     """Hot-reload API keys from auth.keys + auth.keys_file.
 
-    Requires auth.enabled and a key with ops_admin: true. In-flight requests
-    keep their already-resolved identity; new requests use the new index.
+    Requires auth.enabled and a key with reload rights (ops_admin, or role
+    operator/admin). In-flight requests keep their already-resolved identity;
+    new requests use the new index.
     """
     state = get_state()
-    if not state.config.auth.enabled:
-        return GatewayError(
-            "Key reload requires auth.enabled",
-            "authentication_error",
-            401,
-        ).to_response()
     try:
-        identity = authenticate(
-            request.headers.get("authorization"), state.key_index
+        require_reload(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
         )
-    except AuthError as exc:
-        return GatewayError(exc.message, exc.error_type, 401).to_response()
-    if not identity.ops_admin:
-        return GatewayError(
-            "ops_admin key required for reload",
-            "permission_error",
-            403,
-        ).to_response()
+    except GatewayError as exc:
+        return exc.to_response()
     try:
         n = reload_keys(state)
     except Exception as exc:
