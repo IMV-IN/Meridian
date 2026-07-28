@@ -56,6 +56,9 @@ class AppState:
         status_code: int,
         latency_ms: float,
         error_type: Optional[str],
+        org_id: Optional[str] = None,
+        team_id: Optional[str] = None,
+        tier: Optional[str] = None,
     ) -> None:
         self.recent_requests.appendleft({
             "request_id": request_id,
@@ -66,6 +69,9 @@ class AppState:
             "status_code": status_code,
             "latency_ms": round(latency_ms, 2),
             "error_type": error_type,
+            "org_id": org_id,
+            "team_id": team_id,
+            "tier": tier,
         })
 
 

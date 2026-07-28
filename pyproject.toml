@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "meridian"
-version = "0.9.3"
+version = "0.9.4"
 description = "On-soil AI inference gateway for Indian enterprises"
 license = {text = "MIT"}
 readme = "README.md"
@@ -17,12 +17,14 @@ dependencies = [
     "pydantic-settings",
     "pyyaml",
     "prometheus-client",
-    "aiokafka",
     "cryptography",
-    "boto3",
 ]
 
 [project.optional-dependencies]
+audit = [
+    "aiokafka",
+    "boto3",
+]
 dev = [
     "ruff",
     "mypy",
@@ -30,6 +32,10 @@ dev = [
     "pytest-asyncio",
     "types-PyYAML",
     "rich",
+    # Audit extras included so the full test suite (publisher/consumer paths)
+    # keeps working on a plain `[dev]` install.
+    "aiokafka",
+    "boto3",
 ]
 
 [project.scripts]
@@ -43,6 +49,8 @@ line-length = 120
 select = ["E", "F", "I", "W"]
 
 [tool.mypy]
+# Newer mypy no longer supports targeting 3.9. Ruff's py39 target keeps the code
+# 3.9-compatible at the syntax level; mypy checks against 3.10 semantics.
 python_version = "3.10"
 warn_return_any = true
 warn_unused_configs = true

@@ -37,6 +37,7 @@ def _identity_from_key(kc: KeyConfig) -> IdentityContext:
         pii_policy=kc.pii_policy,
         cost_admin=kc.cost_admin,
         ops_admin=kc.ops_admin,
+        role=kc.role,
     )
 
 

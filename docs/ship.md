@@ -11,7 +11,7 @@ A scannable record of **what's shipped** and **what's next**.
 | Release-note detail | [`../CHANGELOG.md`](../CHANGELOG.md) |
 | Pitchable claims only | [`internal/PITCH.md`](./internal/PITCH.md) |
 
-_Last updated: 2026-07-10 — **v0.9.3**; quickstart DX fixed; image scan **0 CRITICAL**; v1.0 hold for cofounder/partner._
+_Last updated: 2026-07-18 — **v0.9.4**; RBAC roles + ops-endpoint auth, dashboard overhaul, scenario quickstart; v1.0 hold for cofounder/partner._
 
 ---
 
@@ -33,11 +33,12 @@ _Last updated: 2026-07-10 — **v0.9.3**; quickstart DX fixed; image scan **0 CR
 | **N** — Packaging | `v0.9.0` | Helm, air-gap, keys_file + reload |
 | **0.9.1** | `v0.9.1` | Version endpoint, enterprise template, cost↔auth gate |
 | **0.9.2** | `v0.9.2` | Budget ↔ actual token-meter reconcile |
-| **0.9.3** | **`v0.9.3`** | Load harness, enterprise e2e, ops polish |
+| **0.9.3** | `v0.9.3` | Load harness, enterprise e2e, ops polish |
+| **0.9.4** | **`v0.9.4`** | RBAC roles, ops-endpoint auth, dashboard overhaul, scenario quickstart |
 
 Also: optional audit pipeline; Ollama load numbers ([`LOAD.md`](./LOAD.md)); hardened image scan ([`scans/IMAGE_SCAN_0.9.3.md`](./scans/IMAGE_SCAN_0.9.3.md)).
 
-**Latest release:** `v0.9.3` — `ghcr.io/imv-in/meridian:0.9.3`
+**Latest release:** `v0.9.4` — `ghcr.io/imv-in/meridian:0.9.4`
 
 ---
 

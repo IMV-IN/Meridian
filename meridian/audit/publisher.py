@@ -17,9 +17,15 @@ import json
 import logging
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Optional
 
-from aiokafka import AIOKafkaProducer  # type: ignore[import-untyped]
+if TYPE_CHECKING:
+    from aiokafka import AIOKafkaProducer  # type: ignore[import-untyped]
+else:
+    try:
+        from aiokafka import AIOKafkaProducer  # type: ignore[import-untyped]
+    except ImportError:  # pragma: no cover — only hit without the [audit] extra
+        AIOKafkaProducer = None  # type: ignore[assignment,misc]
 
 from meridian.config.models import AuditBusConfig
 
@@ -71,6 +77,11 @@ class AuditEventPublisher:
         if not self._config.enabled:
             logger.info("Audit bus disabled – skipping producer start.")
             return
+        if AIOKafkaProducer is None:
+            raise RuntimeError(
+                "audit_bus.enabled requires the audit extras. "
+                "Install them with: pip install 'meridian[audit]'"
+            )
         self._producer = AIOKafkaProducer(
             bootstrap_servers=self._config.bootstrap_servers,
             client_id=self._config.client_id,

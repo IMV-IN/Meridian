@@ -44,7 +44,7 @@ def resolve_usage_scope(
     Non-admin: always scoped to identity.org_id; team forced if key has team_id.
     Admin: query params pass through (None = all).
     """
-    if identity.cost_admin:
+    if identity.can_read_all_cost:
         return org, team
 
     if org is not None and org != identity.org_id:

@@ -65,7 +65,8 @@ def finalize_request(
         pii=pii_meta,
     )
     state.record_request(
-        request_id, model, stream, backend.name, status_code, latency, error_type
+        request_id, model, stream, backend.name, status_code, latency, error_type,
+        org_id=org_id, team_id=team_id, tier=tier_name,
     )
     extra: Dict[str, Any] = {
         "tier": tier_name,

@@ -1,0 +1,89 @@
+# RBAC demo (0.9.4) — auth + roles on top of the two mock backends.
+#
+# Same backends as mock_demo.yaml, but auth is ON with four demo keys that
+# exercise the role model. Mount it into the compose gateway in place of the
+# default config:
+#
+#   docker compose run --rm -p 8080:8080 \
+#     -v "$(pwd)/configs/rbac_demo.yaml:/app/config.yaml:ro" gateway
+#
+# or run locally against mock backends on localhost:9001/9002:
+#
+#   MERIDIAN_CONFIG=configs/rbac_demo.yaml uvicorn meridian.api.main:app --port 8080
+#
+# Demo keys (do NOT use in production — regenerate real random keys):
+#   viewer   -> read dashboard/status/requests only
+#   operator -> viewer + POST /meridian/reload
+#   admin    -> everything, incl. cross-org /meridian/usage
+#   finance  -> legacy cost_admin bool (reads all-org usage; no role needed)
+
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+  strategy: "least_inflight"
+
+health:
+  interval_s: 5
+  timeout_s: 2
+  fail_threshold: 2
+  success_threshold: 1
+
+logging:
+  level: "INFO"
+  jsonl_path: "./meridian_requests.jsonl"
+
+auth:
+  enabled: true
+  # Demo key strings are readable repeated words (24-25 chars after mrdn_) so
+  # they satisfy the ^mrdn_[A-Za-z0-9]{20,40}$ format. Regenerate for real use.
+  keys:
+    - key: "mrdn_viewerviewerviewerviewer"
+      org_id: "acme"
+      team_id: "eng"
+      role: "viewer"
+    - key: "mrdn_operatoroperatoroperator"
+      org_id: "acme"
+      role: "operator"
+    - key: "mrdn_adminadminadminadminadmin"
+      org_id: "acme"
+      role: "admin"
+    - key: "mrdn_financefinancefinance"
+      org_id: "finance"
+      cost_admin: true
+    - key: "mrdn_appkeyappkeyappkeyappkey"
+      org_id: "acme"
+      team_id: "eng"
+      # No role: a plain application key. Can call /v1/* but not ops endpoints.
+
+# Small daily budget so scenario D (429) is easy to trigger.
+budgets:
+  enabled: true
+  store: memory
+  orgs:
+    acme:
+      daily:
+        requests: 5
+
+cost:
+  enabled: true
+  store: memory
+  currency: "USD"
+  default_prompt_per_1m: 0.15
+  default_completion_per_1m: 0.60
+
+backends:
+  - name: "fast"
+    url: "http://backend-fast:9001"
+    engine: "mock"
+    model: "demo-model"
+    weight: 80
+    tags: ["fast"]
+    health_endpoint: "/v1/models"
+
+  - name: "slow"
+    url: "http://backend-slow:9002"
+    engine: "mock"
+    model: "demo-model"
+    weight: 20
+    tags: ["cheap"]
+    health_endpoint: "/v1/models"
