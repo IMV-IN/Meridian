@@ -10,27 +10,21 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Callable, Optional
+import time
+from typing import Optional
 
 import httpx
 
 from meridian.config.models import HealthConfig
 from meridian.registry.backend import Backend, BackendRegistry
-from meridian.util.helpers import now_ms
 
 logger = logging.getLogger("meridian.health")
 
 
 class HealthChecker:
-    def __init__(
-        self,
-        registry: BackendRegistry,
-        config: HealthConfig,
-        clock: Callable[[], float] = now_ms,
-    ) -> None:
+    def __init__(self, registry: BackendRegistry, config: HealthConfig) -> None:
         self.registry = registry
         self.config = config
-        self.clock = clock
         self._task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -51,6 +45,15 @@ class HealthChecker:
         if self._client:
             await self._client.aclose()
 
+    def update_config(self, new_config: HealthConfig) -> None:
+        """Update health check parameters. Recreates the HTTP client
+        if the timeout changed so that new requests use the new value."""
+        self.config = new_config
+        if self._client is not None:
+            self._client = httpx.AsyncClient(
+                timeout=httpx.Timeout(new_config.timeout_s),
+            )
+
     async def _loop(self) -> None:
         while True:
             await asyncio.sleep(self.config.interval_s)
@@ -59,7 +62,7 @@ class HealthChecker:
 
     async def _check_backend(self, backend: Backend) -> None:
         assert self._client is not None
-        if backend.mark_idle_if_expired(self.clock()):
+        if backend.mark_idle_if_expired(time.monotonic()):
             logger.info(
                 "Backend %s idle (no traffic for %.1f min) — excluded from routing",
                 backend.name, (backend.idle_timeout_ms or 0.0) / 60_000.0,
