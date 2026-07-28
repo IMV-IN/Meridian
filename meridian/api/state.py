@@ -12,12 +12,13 @@ from typing import Any, Deque, Dict, Optional
 from meridian.api.ratelimitter import RateLimitStore
 from meridian.audit.publisher import AuditEventPublisher
 from meridian.auth import IdentityContext, build_key_index
-from meridian.config.models import MeridianConfig
+from meridian.config.models import MeridianConfig, TimeoutConfig, TimeoutOverride
 from meridian.cost import CostLedger, InMemoryCostLedger, SqliteCostLedger
 from meridian.health.checker import HealthChecker
 from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
 from meridian.metrics.logger import RequestLogger
 from meridian.registry.backend import Backend, BackendRegistry
+from meridian.resilience import CircuitBreaker
 from meridian.router.affinity import SessionStore
 from meridian.router.strategies import RoutingStrategy, create_strategy
 from meridian.telemetry import JsonTelemetryAdapter, TelemetryAdapter, TelemetryPoller
@@ -43,6 +44,9 @@ class AppState:
     usage_meter: Optional[UsageMeter] = None
     cost_ledger: Optional[CostLedger] = None
     session_store: Optional[SessionStore] = None
+    # Source file the running config was loaded from (None for tests that pass
+    # a MeridianConfig directly). Full POST /meridian/reload re-reads this.
+    config_path: Optional[str] = None
     recent_requests: Deque[Dict[str, Any]] = field(
         default_factory=lambda: deque(maxlen=100)
     )
@@ -75,11 +79,41 @@ class AppState:
         })
 
 
-def load_config(path: Optional[str] = None) -> MeridianConfig:
+def resolve_config_path(path: Optional[str] = None) -> Optional[str]:
+    """Config file path in effect, or None when running on flags/defaults."""
     cfg_path = path or os.environ.get("MERIDIAN_CONFIG", "config.yaml")
-    if os.path.exists(cfg_path):
+    return cfg_path if os.path.exists(cfg_path) else None
+
+
+def load_config(path: Optional[str] = None) -> MeridianConfig:
+    cfg_path = resolve_config_path(path)
+    if cfg_path is not None:
         return MeridianConfig.from_yaml(cfg_path)
     return MeridianConfig()
+
+
+def resolve_timeouts(
+    global_cfg: TimeoutConfig, override: Optional[TimeoutOverride]
+) -> TimeoutConfig:
+    """Merge a per-backend override over the global ``timeouts`` block."""
+    if override is None:
+        return global_cfg
+    merged = {**global_cfg.model_dump(), **override.model_dump(exclude_none=True)}
+    return TimeoutConfig(**merged)
+
+
+def build_registry(cfg: MeridianConfig) -> BackendRegistry:
+    """Construct backends with effective timeouts + optional circuit breakers."""
+    cb_cfg = cfg.resilience.circuit_breaker
+    backends = [
+        Backend(
+            bc,
+            timeouts=resolve_timeouts(cfg.timeouts, bc.timeout),
+            circuit=CircuitBreaker(cb_cfg) if cb_cfg.enabled else None,
+        )
+        for bc in cfg.backends
+    ]
+    return BackendRegistry(backends)
 
 
 async def build_app_state(
@@ -88,7 +122,12 @@ async def build_app_state(
     start_background: bool = True,
 ) -> AppState:
     """Construct runtime state. ``start_background`` starts health/telemetry/audit."""
-    cfg = config or load_config()
+    config_path: Optional[str] = None
+    if config is None:
+        config_path = resolve_config_path()
+        cfg = load_config()
+    else:
+        cfg = config
 
     logging.basicConfig(
         level=getattr(logging, cfg.logging.level.upper(), logging.INFO),
@@ -131,8 +170,8 @@ async def build_app_state(
             cost_ledger = SqliteCostLedger(cfg.cost.sqlite_path)
             logger.info("Cost attribution enabled — sqlite at %s", cfg.cost.sqlite_path)
 
-    backends = [Backend(bc) for bc in cfg.backends]
-    registry = BackendRegistry(backends)
+    registry = build_registry(cfg)
+    backends = registry.all_backends()
     logger.info("Loaded %d backend(s): %s", len(backends), [b.name for b in backends])
 
     strategy = create_strategy(
@@ -202,6 +241,7 @@ async def build_app_state(
         usage_meter=usage_meter,
         cost_ledger=cost_ledger,
         session_store=session_store,
+        config_path=config_path,
     )
 
 

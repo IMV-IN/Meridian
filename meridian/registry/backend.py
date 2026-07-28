@@ -5,16 +5,23 @@ from __future__ import annotations
 import threading
 from typing import TYPE_CHECKING, List, Optional, Set
 
-from meridian.config.models import BackendConfig
+from meridian.config.models import BackendConfig, TimeoutConfig
 
 if TYPE_CHECKING:
+    from meridian.resilience import CircuitBreaker
     from meridian.telemetry.base import BackendTelemetry
 
 
 class Backend:
     """Runtime state for a single backend."""
 
-    def __init__(self, config: BackendConfig) -> None:
+    def __init__(
+        self,
+        config: BackendConfig,
+        *,
+        timeouts: Optional[TimeoutConfig] = None,
+        circuit: "Optional[CircuitBreaker]" = None,
+    ) -> None:
         self.name = config.name
         self.url = config.url.rstrip("/")
         self.engine = config.engine
@@ -24,6 +31,10 @@ class Backend:
         self.health_endpoint = config.health_endpoint
         # Upstream credential only — never a Meridian client API key.
         self.auth_header: Optional[str] = config.auth_header
+        # Effective upstream timeouts (global merged with per-backend override).
+        self.timeouts = timeouts or TimeoutConfig()
+        # Optional circuit breaker (None = resilience.circuit_breaker disabled).
+        self.circuit = circuit
 
         # Runtime state (thread-safe via lock)
         self._lock = threading.Lock()
@@ -111,6 +122,7 @@ class Backend:
             "queue_depth": self.queue_depth,
             "tokens_per_sec": self.tokens_per_sec,
             "gpu_mem_util": self.gpu_mem_util,
+            "circuit": self.circuit.status() if self.circuit is not None else None,
         }
 
 

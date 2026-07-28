@@ -74,6 +74,26 @@ auth:
 
 In-flight requests keep their already-resolved identity; new requests use the new index.
 
+## Config reload (no restart)
+
+`POST /meridian/reload` (or SIGHUP) re-reads the config file and applies it
+**atomically** — an invalid file is rejected (`400`) and the running state is
+kept. When the gateway was started from an in-memory config (tests), reload
+falls back to keys-only and reports `"scope": "keys"`.
+
+Applies without restart: routing strategy + weights, `backends` (list,
+weights, tags, timeouts), `tiering` rules, auth keys, `health` thresholds,
+`resilience` knobs, `session_affinity`, `rate_limit` store bounds, and
+telemetry adapters. Response:
+
+```json
+{"reloaded": true, "scope": "full", "keys": 3}
+```
+
+Budget/cost stores, the audit bus, and the JSONL log path keep their running
+objects (data continuity); changing those sections logs a "requires restart"
+warning. Full field reference: [`CONFIGURATION.md`](./CONFIGURATION.md).
+
 ## Backup / retention
 
 | Path | Content | Suggested retention |

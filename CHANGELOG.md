@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.10.0] - 2026-07-28
+
+Complete-product track: Phase 0 (code health) + Phase 1 (resilience & dynamic
+ops) from [`docs/FULL.md`](docs/FULL.md).
+
+### Added
+
+- **Per-backend circuit breaker** (`resilience.circuit_breaker`, off by default) — opens after `failure_threshold` consecutive upstream failures; while open, requests are rejected pre-flight with **503** `meridian_circuit_open` without touching the backend. After `open_seconds` a single half-open probe is admitted; success closes, failure re-opens. State visible in `/meridian/status` (`circuit` per backend) and via `meridian_backend_circuit_open{backend}`.
+- **Retry with exponential backoff** (`resilience.max_retries`, default 0 = off) — non-stream chat requests retry on transport errors (`httpx.RequestError`: no response received) with `retry_backoff_base * 2^n` backoff. Retried attempts counted in `meridian_upstream_retries_total{backend}`.
+- **Configurable upstream timeouts** — global `timeouts: {connect, read, write, pool, stream_read}` with per-backend `backends[].timeout` overrides (fields merge). Defaults preserve pre-0.10 behavior exactly.
+- **Graceful stream timeouts** — `timeouts.stream_read` applies to SSE reads; a stalled upstream now ends with a well-formed SSE error event + `data: [DONE]` and is accounted as **504** `stream_read_timeout` (previously the stream just broke).
+- **Full dynamic config reload** — `POST /meridian/reload` and SIGHUP now re-read the config file and apply strategy, backends, weights, tiering, health thresholds, resilience knobs, session affinity, rate-limit bounds, and telemetry adapters **without restart**. Atomic: an invalid file is rejected and the running state is kept (`{"reloaded": true, "scope": "full"|"keys"}`; keys-only fallback when no file backs the process). Budget/cost stores, audit bus, and the JSONL log path keep running objects (data continuity) and log a restart-required warning when changed.
+
+### Changed (code health, Phase 0)
+
+- Fixed the open file handle in `metrics/logger.py` (fd leak).
+- `aiokafka` + `boto3` moved to the optional `[audit]` extra — slimmer default install.
+- Test suite expanded to the previously untested core paths (proxy/forward, health/checker, PII, audit, cost, usage, errors, finalize, state): **406 tests, 87% coverage** on `meridian/`.
+- Reject config files whose `role`, timeouts, or resilience values fail validation **before** any state swap (reload atomicity).
+
 ## [0.9.4] - 2026-07-18
 
 ### Added

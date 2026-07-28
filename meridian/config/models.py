@@ -29,6 +29,55 @@ class GatewayConfig(BaseModel):
     max_body_bytes: int = Field(default=10 * 1024 * 1024, ge=1)
 
 
+class TimeoutConfig(BaseModel):
+    """Upstream HTTP timeouts (seconds). Defaults preserve pre-0.10 behavior.
+
+    ``stream_read`` only applies to streaming (SSE) requests; None means
+    "use ``read``" (long default, tolerant of slow token cadence).
+    """
+
+    connect: float = Field(default=5.0, gt=0.0)
+    read: float = Field(default=300.0, gt=0.0)
+    write: float = Field(default=5.0, gt=0.0)
+    pool: float = Field(default=5.0, gt=0.0)
+    stream_read: Optional[float] = Field(default=None, gt=0.0)
+
+
+class TimeoutOverride(BaseModel):
+    """Per-backend timeout override — any field set wins over the global
+    ``timeouts`` block; unset fields inherit the global values."""
+
+    connect: Optional[float] = Field(default=None, gt=0.0)
+    read: Optional[float] = Field(default=None, gt=0.0)
+    write: Optional[float] = Field(default=None, gt=0.0)
+    pool: Optional[float] = Field(default=None, gt=0.0)
+    stream_read: Optional[float] = Field(default=None, gt=0.0)
+
+
+class CircuitBreakerConfig(BaseModel):
+    """Per-backend circuit breaker. Disabled by default (pre-0.10 behavior).
+
+    Opens after ``failure_threshold`` consecutive upstream failures; while
+    open, requests are rejected with 503 without touching the backend. After
+    ``open_seconds`` a single half-open probe is admitted; success closes the
+    circuit, failure re-opens it.
+    """
+
+    enabled: bool = Field(default=False)
+    failure_threshold: int = Field(default=5, ge=1)
+    open_seconds: float = Field(default=30.0, gt=0.0)
+
+
+class ResilienceConfig(BaseModel):
+    """Request-path resilience knobs (Phase 1). All defaults = off/current."""
+
+    # Retries on upstream connection/timeout errors (httpx.RequestError) for
+    # non-stream chat requests. 0 = no retries (CLAUDE.md default-off rule).
+    max_retries: int = Field(default=0, ge=0)
+    retry_backoff_base: float = Field(default=0.1, gt=0.0)
+    circuit_breaker: CircuitBreakerConfig = Field(default_factory=CircuitBreakerConfig)
+
+
 class BackendTelemetryConfig(BaseModel):
     """Per-backend telemetry source configuration.
 
@@ -66,6 +115,8 @@ class BackendConfig(BaseModel):
     telemetry: Optional[BackendTelemetryConfig] = None
     # Optional upstream Authorization value (never the client Meridian key).
     auth_header: Optional[str] = None
+    # Per-backend timeout override — merges over the global `timeouts` block.
+    timeout: Optional[TimeoutOverride] = None
 
 
 class OrgRateLimitOverride(BaseModel):
@@ -304,6 +355,8 @@ class MeridianConfig(BaseModel):
     budgets: BudgetConfig = Field(default_factory=BudgetConfig)
     pii: PiiConfig = Field(default_factory=PiiConfig)
     cost: CostConfig = Field(default_factory=CostConfig)
+    timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
+    resilience: ResilienceConfig = Field(default_factory=ResilienceConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:
