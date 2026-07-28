@@ -10,8 +10,9 @@ backoff on transport errors, optional per-backend circuit breaker.
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
-from typing import Any, AsyncIterator, Dict, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 from fastapi.responses import JSONResponse, StreamingResponse
@@ -27,12 +28,19 @@ _client: Optional[httpx.AsyncClient] = None
 _client_loop: Optional[asyncio.AbstractEventLoop] = None
 
 
-class StreamReadTimeout(Exception):
-    """Upstream SSE read timed out mid-stream (resilience: timeout.stream_read).
+class StreamUpstreamError(Exception):
+    """Upstream transport failure on a streaming request.
 
     Raised after the client has already been sent a well-formed stream end
     (error event + ``data: [DONE]``); the API layer records it and ends quietly.
+    ``error_type`` is ``stream_read_timeout`` for a stalled SSE read (mapped to
+    504) or the original httpx exception name for other transport errors (502).
     """
+
+    def __init__(self, backend: str, error_type: str) -> None:
+        super().__init__(f"Stream upstream error on {backend!r}: {error_type}")
+        self.backend = backend
+        self.error_type = error_type
 
 
 def _get_or_create_client() -> httpx.AsyncClient:
@@ -139,19 +147,30 @@ async def forward_non_stream(
     raise AssertionError("unreachable")  # pragma: no cover
 
 
+def _stream_error_events(error_type: str, message: str) -> List[bytes]:
+    payload = json.dumps({"error": {"message": message, "type": error_type}})
+    return [f"data: {payload}\n\n".encode(), b"data: [DONE]\n\n"]
+
+
 async def forward_stream(
     backend: Backend,
     body: Dict[str, Any],
+    resilience: Optional[ResilienceConfig] = None,
 ) -> StreamingResponse:
     """Forward a streaming request and passthrough SSE bytes.
 
-    If the upstream read stalls past ``timeout.stream_read`` the client gets a
-    well-formed end (SSE error event + ``data: [DONE]``) and the generator
-    raises :class:`StreamReadTimeout` so the gateway can account for it.
+    Retrying a started stream is never safe (already-delivered tokens would
+    duplicate), so retries apply ONLY to the open phase (before the first
+    byte). Any transport failure — open or mid-stream — ends well-formed:
+    SSE error event + ``data: [DONE]``, then :class:`StreamUpstreamError` so
+    the gateway can account for it quietly.
     """
     url = f"{backend.url}/v1/chat/completions"
     client = _get_or_create_client()
     headers = _upstream_headers(backend)
+
+    max_retries = resilience.max_retries if resilience is not None else 0
+    backoff_base = resilience.retry_backoff_base if resilience is not None else 0.1
 
     _check_circuit(backend)
 
@@ -159,13 +178,36 @@ async def forward_stream(
         req = client.build_request("POST", url, json=body, headers=headers)
         # send() takes no timeout kwarg — per-request timeout rides on the request.
         req.extensions["timeout"] = _request_timeout(backend, stream=True).as_dict()
+
+        # (a) Open phase — retriable: no bytes have reached the client yet.
         resp: Optional[httpx.Response] = None
+        for attempt in range(1 + max_retries):
+            try:
+                resp = await client.send(req, stream=True)
+                break
+            except httpx.RequestError as exc:
+                _circuit_failure(backend)
+                if attempt >= max_retries:
+                    for event in _stream_error_events(
+                        "meridian_backend_error", "upstream connection error"
+                    ):
+                        yield event
+                    raise StreamUpstreamError(backend.name, type(exc).__name__) from exc
+                UPSTREAM_RETRIES.labels(backend=backend.name).inc()
+                delay = backoff_base * (2 ** attempt)
+                logger.info(
+                    "Retrying stream open on %s in %.2fs (attempt %d/%d)",
+                    backend.name, delay, attempt + 2, 1 + max_retries,
+                )
+                await asyncio.sleep(delay)
+
+        assert resp is not None  # the loop either breaks or raises
         try:
-            resp = await client.send(req, stream=True)
             if resp.status_code < 500:
                 _circuit_success(backend)
             else:
                 _circuit_failure(backend)
+            # (b) Stream phase — never retried.
             try:
                 async for chunk in resp.aiter_bytes():
                     yield chunk
@@ -174,16 +216,20 @@ async def forward_stream(
                 logger.warning(
                     "Stream read timeout from %s — closing with [DONE]", backend.name
                 )
-                yield b'data: {"error":{"message":"upstream read timeout",'
-                yield b'"type":"meridian_stream_timeout"}}\n\n'
-                yield b"data: [DONE]\n\n"
-                raise StreamReadTimeout(backend.name) from exc
-        except httpx.RequestError:
-            _circuit_failure(backend)
-            raise
+                for event in _stream_error_events(
+                    "meridian_stream_timeout", "upstream read timeout"
+                ):
+                    yield event
+                raise StreamUpstreamError(backend.name, "stream_read_timeout") from exc
+            except httpx.RequestError as exc:
+                _circuit_failure(backend)
+                for event in _stream_error_events(
+                    "meridian_backend_error", "upstream connection error"
+                ):
+                    yield event
+                raise StreamUpstreamError(backend.name, type(exc).__name__) from exc
         finally:
-            if resp is not None:
-                await resp.aclose()
+            await resp.aclose()
 
     async def cancelling_generator() -> AsyncIterator[bytes]:
         try:

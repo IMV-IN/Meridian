@@ -36,7 +36,7 @@ from meridian.metrics.collectors import (
     BACKEND_INFLIGHT,
 )
 from meridian.proxy.forward import (
-    StreamReadTimeout,
+    StreamUpstreamError,
     close_client,
     forward_get,
     forward_non_stream,
@@ -208,7 +208,7 @@ async def chat_completions(request: Request) -> Response:
 
     try:
         if is_stream:
-            resp = await forward_stream(backend, chat.body)
+            resp = await forward_stream(backend, chat.body, state.config.resilience)
             original_body_iterator = resp.body_iterator
 
             async def tracked_stream() -> AsyncIterator[bytes]:
@@ -227,10 +227,10 @@ async def chat_completions(request: Request) -> Response:
                         if len(tail) > 65536:
                             del tail[: len(tail) - 65536]
                         yield raw
-                except StreamReadTimeout:
+                except StreamUpstreamError as exc:
                     # Client already got error event + [DONE]; account + end quietly.
-                    error_type = "stream_read_timeout"
-                    status_code = 504
+                    error_type = exc.error_type
+                    status_code = 504 if exc.error_type == "stream_read_timeout" else 502
                 except httpx.RequestError as exc:
                     state.health_checker.check_passive_failure(backend)
                     error_type = type(exc).__name__

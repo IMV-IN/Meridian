@@ -101,7 +101,10 @@ timeouts:
 
 # Resilience (optional, all off by default = historical behavior).
 # - max_retries: retry transport errors (connection/timeout — no response was
-#   received) on non-stream chat requests. Backoff = retry_backoff_base * 2^n.
+#   received). Safe window only: non-stream requests, and the OPEN phase of
+#   streams (before the first byte). A stream that has started NEVER retries —
+#   delivered tokens can't be un-sent; stalled/broken streams end gracefully
+#   (SSE error event + [DONE]) instead. Backoff = retry_backoff_base * 2^n.
 #   Retried attempts are counted in meridian_upstream_retries_total{backend}.
 # - circuit_breaker: per backend. Opens after failure_threshold consecutive
 #   upstream failures; while open, requests are rejected pre-flight with 503

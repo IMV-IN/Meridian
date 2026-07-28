@@ -343,7 +343,7 @@ class TestStreamReadTimeout:
 
         resp = await forward.forward_stream(backend, {"model": "m", "stream": True})
         received = bytearray()
-        with pytest.raises(forward.StreamReadTimeout):
+        with pytest.raises(forward.StreamUpstreamError):
             async for chunk in resp.body_iterator:
                 received.extend(chunk)
 
@@ -372,10 +372,130 @@ class TestStreamReadTimeout:
         )
 
         resp = await forward.forward_stream(backend, {"model": "m", "stream": True})
-        with pytest.raises(forward.StreamReadTimeout):
+        with pytest.raises(forward.StreamUpstreamError):
             async for _ in resp.body_iterator:
                 pass
         assert backend.circuit.state == "open"
+
+    async def test_midstream_protocol_error_ends_gracefully(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        async def flaky():
+            yield b'data: {"choices":[{"delta":{"content":"partial"}}]}\n\n'
+            raise httpx.RemoteProtocolError("peer closed")
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=flaky(),
+            )
+
+        _install_mock_client(monkeypatch, httpx.MockTransport(handler))
+        resp = await forward.forward_stream(_backend(), {"model": "m", "stream": True})
+        received = bytearray()
+        with pytest.raises(forward.StreamUpstreamError) as exc_info:
+            async for chunk in resp.body_iterator:
+                received.extend(chunk)
+        assert exc_info.value.error_type == "RemoteProtocolError"
+        body = bytes(received)
+        assert b'"partial"' in body
+        assert body.rstrip().endswith(b"data: [DONE]")
+
+
+class TestStreamOpenRetry:
+    """Retries apply ONLY before the first byte; a started stream never retries."""
+
+    async def test_open_phase_retried_until_success(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts = 0
+        delays: List[float] = []
+
+        async def ok_body():
+            yield b"data: [DONE]\n\n"
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            if attempts < 3:
+                raise httpx.ConnectError("refused")
+            return httpx.Response(
+                200,
+                headers={"content-type": "text/event-stream"},
+                content=ok_body(),
+            )
+
+        async def fake_sleep(s: float) -> None:
+            delays.append(s)
+
+        monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+        _install_mock_client(monkeypatch, httpx.MockTransport(handler))
+
+        before = UPSTREAM_RETRIES.labels(backend="b1")._value.get()
+        resp = await forward.forward_stream(
+            _backend(),
+            {"model": "m", "stream": True},
+            ResilienceConfig(max_retries=3, retry_backoff_base=0.1),
+        )
+        received = bytearray()
+        async for chunk in resp.body_iterator:
+            received.extend(chunk)
+        assert bytes(received).rstrip().endswith(b"data: [DONE]")
+        assert attempts == 3
+        assert delays == [0.1, 0.2]
+        assert UPSTREAM_RETRIES.labels(backend="b1")._value.get() == before + 2
+
+    async def test_open_phase_exhausted_ends_gracefully(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts = 0
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            raise httpx.ConnectError("refused")
+
+        async def fake_sleep(s: float) -> None:
+            pass
+
+        monkeypatch.setattr(asyncio, "sleep", fake_sleep)
+        _install_mock_client(monkeypatch, httpx.MockTransport(handler))
+
+        resp = await forward.forward_stream(
+            _backend(),
+            {"model": "m", "stream": True},
+            ResilienceConfig(max_retries=1, retry_backoff_base=0.01),
+        )
+        received = bytearray()
+        with pytest.raises(forward.StreamUpstreamError) as exc_info:
+            async for chunk in resp.body_iterator:
+                received.extend(chunk)
+        body = bytes(received)
+        assert exc_info.value.error_type == "ConnectError"
+        assert attempts == 2  # initial + 1 retry, then graceful end
+        assert b"meridian_backend_error" in body
+        assert body.rstrip().endswith(b"data: [DONE]")
+
+    async def test_open_failure_default_single_attempt_graceful(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        attempts = 0
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            raise httpx.ConnectError("refused")
+
+        _install_mock_client(monkeypatch, httpx.MockTransport(handler))
+        resp = await forward.forward_stream(_backend(), {"model": "m", "stream": True})
+        received = bytearray()
+        with pytest.raises(forward.StreamUpstreamError) as exc_info:
+            async for chunk in resp.body_iterator:
+                received.extend(chunk)
+        assert attempts == 1  # no resilience config → no retry
+        assert exc_info.value.error_type == "ConnectError"
+        assert bytes(received).rstrip().endswith(b"data: [DONE]")
 
 
 # ── Gateway-level: 503 on open circuit ──────────────────────────────────
