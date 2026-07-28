@@ -33,6 +33,7 @@ from meridian.cost.record import record_actual_usage
 from meridian.metrics.collectors import (
     BACKEND_CIRCUIT_OPEN,
     BACKEND_HEALTHY,
+    BACKEND_IDLE,
     BACKEND_INFLIGHT,
 )
 from meridian.proxy.forward import (
@@ -200,6 +201,7 @@ async def chat_completions(request: Request) -> Response:
 
     backend.increment_inflight()
     backend.add_inflight_cost(chat.request_ctx.cost)
+    backend.touch(start)
     BACKEND_INFLIGHT.labels(backend=backend.name).inc()
 
     status_code = 200
@@ -522,6 +524,7 @@ async def metrics() -> Response:
     if state is not None:
         for b in state.registry.all_backends():
             BACKEND_HEALTHY.labels(backend=b.name).set(1 if b.healthy else 0)
+            BACKEND_IDLE.labels(backend=b.name).set(1 if b.idle else 0)
             if b.circuit is not None:
                 BACKEND_CIRCUIT_OPEN.labels(backend=b.name).set(
                     1 if b.circuit.state == "open" else 0

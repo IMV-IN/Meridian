@@ -117,6 +117,12 @@ class BackendConfig(BaseModel):
     auth_header: Optional[str] = None
     # Per-backend timeout override — merges over the global `timeouts` block.
     timeout: Optional[TimeoutOverride] = None
+    # Scale-to-zero (Phase 2). After this many minutes without request traffic
+    # the backend is marked `idle`: excluded from routing, health checks paused
+    # (a scaled-to-zero pod should fail them), and `meridian_backend_idle` = 1
+    # so external scalers (KEDA) can drive replicas to zero. The first request
+    # matching its model/tags wakes it. None = feature off (default).
+    idle_timeout_min: Optional[float] = Field(default=None, gt=0.0)
 
 
 class OrgRateLimitOverride(BaseModel):
