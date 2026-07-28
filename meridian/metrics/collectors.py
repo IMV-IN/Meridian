@@ -70,3 +70,10 @@ BACKEND_CIRCUIT_OPEN = Gauge(
     "Backend circuit breaker state (1=open, 0=closed/half-open)",
     ["backend"],
 )
+
+# Scale-to-zero (1 = past backends[].idle_timeout_min, excluded from routing).
+BACKEND_IDLE = Gauge(
+    "meridian_backend_idle",
+    "Backend idle marker for external scalers (1=idle, 0=active)",
+    ["backend"],
+)

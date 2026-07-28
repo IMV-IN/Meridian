@@ -1,0 +1,16 @@
+{{- if .Values.grafana.enabled -}}
+# Bundled Grafana dashboards, picked up by the Grafana sidecar
+# (dashboards.provider.foldersFromFilesStructure or label-watched ConfigMaps).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "meridian.fullname" . }}-grafana-dashboards
+  labels:
+    {{- include "meridian.labels" . | nindent 4 }}
+    {{ .Values.grafana.sidecarLabel }}: {{ .Values.grafana.sidecarLabelValue | quote }}
+data:
+  dashboard-overview.json: |
+    {{- .Files.Get "dashboard-overview.json" | nindent 4 }}
+  dashboard-governance.json: |
+    {{- .Files.Get "dashboard-governance.json" | nindent 4 }}
+{{- end }}

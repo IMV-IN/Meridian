@@ -2,6 +2,23 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.11.0] - 2026-07-28
+
+Complete-product track: Phase 2 (observability, packaging & elasticity) from
+[`docs/FULL.md`](docs/FULL.md).
+
+### Added
+
+- **Scale-to-zero idle marker** (`backends[].idle_timeout_min`, off by default) — a backend with no request traffic for N minutes is marked `idle` by the health sweep: excluded from routing, health checks paused (a scaled-to-zero pod SHOULD fail them), `meridian_backend_idle{backend}` = 1 on `/metrics`, surfaced as `idle` in `/meridian/status`. The first request matching its model/tags **wakes** it (strategy picks among idle candidates; active backends always win while they exist). DEPLOY.md documents the KEDA `ScaledObject` wiring that drives backend replicas to zero off the gauge.
+- **Grafana dashboards** (`deploy/grafana/`) — *Gateway Overview* (request rate, p50/p95, inflight, error rate, retries/circuits/idle) and *Governance & Cost* (budget rejections/reconciles, PII detections, attributed tokens). Importable as JSON with a `DS_PROMETHEUS` datasource variable; `helm -set grafana.enabled=true` ships them as a sidecar-watched ConfigMap.
+- **Helm hardening** — `podDisruptionBudget`, `topologySpreadConstraints`, least-privilege `serviceAccount` (token automount **off** — Meridian needs no K8s API), optional `ingress` with `tls` + cert-manager annotations.
+- **KEDA scaffolding** — optional `keda.enabled` `ScaledObject` (Prometheus trigger on gateway inflight) + plain-HPA equivalent documented in DEPLOY.md.
+
+### Tests & validation
+
+- +15 tests (idle marking/wake/routing-preference/health-skip/gauge/status; dashboard parse + metric-reference + chart-drift guards).
+- `helm template` validated across feature combinations (v3.14.4): default render + all options on (PDB, Ingress+TLS, KEDA, Grafana, topology spread).
+
 ## [0.10.0] - 2026-07-28
 
 Complete-product track: Phase 0 (code health) + Phase 1 (resilience & dynamic

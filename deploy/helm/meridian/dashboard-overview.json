@@ -1,0 +1,130 @@
+{
+  "uid": "meridian-overview",
+  "title": "Meridian — Gateway Overview",
+  "description": "Routing, latency, backend health, resilience, and scale-to-zero signal for the Meridian inference gateway.",
+  "tags": ["meridian", "llm", "inference"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-6h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Backends up",
+      "gridPos": {"h": 4, "w": 4, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "red", "value": null}, {"color": "green", "value": 1}]}}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "targets": [{"refId": "A", "expr": "sum(meridian_backend_healthy)", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Circuits open",
+      "gridPos": {"h": 4, "w": 4, "x": 4, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "red", "value": 1}]}}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "targets": [{"refId": "A", "expr": "sum(meridian_backend_circuit_open)", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}]
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "Idle backends (scale-to-zero)",
+      "gridPos": {"h": 4, "w": 4, "x": 8, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 1}]}}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "targets": [{"refId": "A", "expr": "sum(meridian_backend_idle)", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}]
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "Error rate (5m, 5xx)",
+      "gridPos": {"h": 4, "w": 4, "x": 12, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"color": {"mode": "thresholds"}, "unit": "percentunit", "thresholds": {"steps": [{"color": "green", "value": null}, {"color": "orange", "value": 0.01}, {"color": "red", "value": 0.05}]}}, "overrides": []},
+      "options": {"colorMode": "background", "graphMode": "area", "justifyMode": "auto", "orientation": "auto", "reduceOptions": {"calcs": ["lastNotNull"], "fields": "", "values": false}, "textMode": "auto"},
+      "targets": [{"refId": "A", "expr": "sum(rate(meridian_requests_total{status=~\"5..\"}[5m])) / sum(rate(meridian_requests_total[5m]))", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Request rate by backend",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (backend) (rate(meridian_requests_total[5m]))", "legendFormat": "{{backend}}", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Request rate by model + stream",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (model, stream) (rate(meridian_requests_total[5m]))", "legendFormat": "{{model}} stream={{stream}}", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Inflight by backend",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 4},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 20, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (backend) (meridian_backend_inflight)", "legendFormat": "{{backend}}", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Latency p50 / p95 (ms)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}, "unit": "ms"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "histogram_quantile(0.5, sum by (le) (rate(meridian_request_latency_ms_bucket[5m])))", "legendFormat": "p50", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}},
+        {"refId": "B", "expr": "histogram_quantile(0.95, sum by (le) (rate(meridian_request_latency_ms_bucket[5m])))", "legendFormat": "p95", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}},
+        {"refId": "C", "expr": "histogram_quantile(0.95, sum by (le, backend) (rate(meridian_request_latency_ms_bucket[5m])))", "legendFormat": "p95 {{backend}}", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}
+      ]
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "Resilience: retries + circuit + idle",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 10, "showPoints": "never"}}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (backend) (rate(meridian_upstream_retries_total[5m]))", "legendFormat": "retries/s {{backend}}", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}},
+        {"refId": "B", "expr": "meridian_backend_circuit_open", "legendFormat": "circuit open {{backend}}", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}},
+        {"refId": "C", "expr": "meridian_backend_idle", "legendFormat": "idle {{backend}}", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}
+      ]
+    }
+  ]
+}

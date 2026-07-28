@@ -1,23 +1,36 @@
-"""Active health checker — background task that pings backends periodically."""
+"""Active health checker — background task that pings backends periodically.
+
+Also drives scale-to-zero: each loop, backends past their
+``idle_timeout_min`` quiet period are marked idle (excluded from routing,
+health checks paused — a scaled-to-zero pod SHOULD fail them), and
+``meridian_backend_idle`` flips to 1 for external scalers.
+"""
 
 from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Optional
+from typing import Callable, Optional
 
 import httpx
 
 from meridian.config.models import HealthConfig
 from meridian.registry.backend import Backend, BackendRegistry
+from meridian.util.helpers import now_ms
 
 logger = logging.getLogger("meridian.health")
 
 
 class HealthChecker:
-    def __init__(self, registry: BackendRegistry, config: HealthConfig) -> None:
+    def __init__(
+        self,
+        registry: BackendRegistry,
+        config: HealthConfig,
+        clock: Callable[[], float] = now_ms,
+    ) -> None:
         self.registry = registry
         self.config = config
+        self.clock = clock
         self._task: Optional[asyncio.Task] = None  # type: ignore[type-arg]
         self._client: Optional[httpx.AsyncClient] = None
 
@@ -46,6 +59,15 @@ class HealthChecker:
 
     async def _check_backend(self, backend: Backend) -> None:
         assert self._client is not None
+        if backend.mark_idle_if_expired(self.clock()):
+            logger.info(
+                "Backend %s idle (no traffic for %.1f min) — excluded from routing",
+                backend.name, (backend.idle_timeout_ms or 0.0) / 60_000.0,
+            )
+        if backend.idle:
+            # Expected to be scaled to zero; health pings must not flap
+            # consecutive_failures while it sleeps.
+            return
         url = f"{backend.url}{backend.health_endpoint}"
         try:
             resp = await self._client.get(url)

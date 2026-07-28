@@ -35,6 +35,14 @@ class Backend:
         self.timeouts = timeouts or TimeoutConfig()
         # Optional circuit breaker (None = resilience.circuit_breaker disabled).
         self.circuit = circuit
+        # Scale-to-zero: None = never idle. ms values; activity stamped on admit.
+        self.idle_timeout_ms: Optional[float] = (
+            config.idle_timeout_min * 60_000.0
+            if config.idle_timeout_min is not None
+            else None
+        )
+        self.idle: bool = False
+        self.last_activity_ms: float = 0.0
 
         # Runtime state (thread-safe via lock)
         self._lock = threading.Lock()
@@ -61,6 +69,27 @@ class Backend:
     def decrement_inflight(self) -> None:
         with self._lock:
             self.inflight = max(0, self.inflight - 1)
+
+    def touch(self, now_ms: float) -> None:
+        """Record request traffic (drives scale-to-zero idle detection)."""
+        with self._lock:
+            self.last_activity_ms = now_ms
+
+    def mark_idle_if_expired(self, now_ms: float) -> bool:
+        """Mark idle when the configured quiet period elapsed. True if newly idle."""
+        with self._lock:
+            if self.idle or self.idle_timeout_ms is None:
+                return False
+            if now_ms - self.last_activity_ms < self.idle_timeout_ms:
+                return False
+            self.idle = True
+            return True
+
+    def wake(self, now_ms: float) -> None:
+        """Return an idle backend to active service (scale-to-zero wake-up)."""
+        with self._lock:
+            self.idle = False
+            self.last_activity_ms = now_ms
 
     def add_inflight_cost(self, cost: float) -> None:
         with self._lock:
@@ -116,6 +145,7 @@ class Backend:
             "weight": self.weight,
             "tags": sorted(self.tags),
             "healthy": self.healthy,
+            "idle": self.idle,
             "inflight": self.inflight,
             "inflight_cost": round(self.inflight_cost, 2),
             "ewma_latency_ms": round(self.ewma_latency_ms, 2),
@@ -137,10 +167,23 @@ class BackendRegistry:
         return self._by_name.get(name)
 
     def eligible(self, model: str, tags: Optional[Set[str]] = None) -> List[Backend]:
-        """Return healthy backends matching model and tags."""
+        """Return active (healthy, non-idle) backends matching model and tags."""
         result = []
         for b in self.backends:
-            if not b.healthy:
+            if not b.healthy or b.idle:
+                continue
+            if b.model and b.model != model:
+                continue
+            if tags and not tags.issubset(b.tags):
+                continue
+            result.append(b)
+        return result
+
+    def idle_eligible(self, model: str, tags: Optional[Set[str]] = None) -> List[Backend]:
+        """Return idle (but healthy) backends matching model and tags — wake pool."""
+        result = []
+        for b in self.backends:
+            if not b.idle or not b.healthy:
                 continue
             if b.model and b.model != model:
                 continue

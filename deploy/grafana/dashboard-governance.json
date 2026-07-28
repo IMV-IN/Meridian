@@ -1,0 +1,86 @@
+{
+  "uid": "meridian-governance",
+  "title": "Meridian — Governance & Cost",
+  "description": "Budget rejections/reconciles, PII detections, and token usage attributed by the Meridian gateway.",
+  "tags": ["meridian", "llm", "budgets", "pii", "cost"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": {"from": "now-24h", "to": "now"},
+  "templating": {
+    "list": [
+      {
+        "name": "DS_PROMETHEUS",
+        "label": "Prometheus",
+        "type": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "regex": "",
+        "current": {}
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "timeseries",
+      "title": "Budget rejections (429s)",
+      "gridPos": {"h": 8, "w": 8, "x": 0, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "bars", "fillOpacity": 60}, "unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (level, period) (increase(meridian_budget_rejections_total[5m]))", "legendFormat": "{{level}}/{{period}}", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}
+      ]
+    },
+    {
+      "id": 2,
+      "type": "timeseries",
+      "title": "Budget reconciles (estimate → actual)",
+      "gridPos": {"h": 8, "w": 8, "x": 8, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "bars", "fillOpacity": 60}, "unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (direction) (increase(meridian_budget_reconciles_total[5m]))", "legendFormat": "{{direction}}", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}
+      ]
+    },
+    {
+      "id": 3,
+      "type": "timeseries",
+      "title": "PII detections by entity + policy",
+      "gridPos": {"h": 8, "w": 8, "x": 16, "y": 0},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "bars", "fillOpacity": 60}, "unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (entity, policy) (increase(meridian_pii_detections_total[5m]))", "legendFormat": "{{entity}} ({{policy}})", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Tokens by model (attributed)",
+      "gridPos": {"h": 8, "w": 12, "x": 0, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 20, "showPoints": "never"}, "unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (model, kind) (rate(meridian_tokens_total[5m]))", "legendFormat": "{{model}} {{kind}}", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Tokens cumulative (attributed)",
+      "gridPos": {"h": 8, "w": 12, "x": 12, "y": 8},
+      "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+      "fieldConfig": {"defaults": {"custom": {"drawStyle": "line", "fillOpacity": 20, "showPoints": "never"}, "unit": "short"}, "overrides": []},
+      "options": {"legend": {"displayMode": "table", "placement": "bottom", "showLegend": true, "calcs": ["lastNotNull"]}, "tooltip": {"mode": "multi", "sort": "desc"}},
+      "targets": [
+        {"refId": "A", "expr": "sum by (model, kind) (increase(meridian_tokens_total[1h]))", "legendFormat": "{{model}} {{kind}} /h", "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"}}
+      ]
+    }
+  ]
+}

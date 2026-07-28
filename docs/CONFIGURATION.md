@@ -136,6 +136,13 @@ backends:
     timeout:
       read: 60.0
       stream_read: 10.0
+    # Scale-to-zero (optional, off by default). After N minutes without request
+    # traffic the backend is marked idle: excluded from routing, health checks
+    # paused (a scaled-to-zero pod SHOULD fail them), and meridian_backend_idle
+    # = 1 on /metrics so external scalers (KEDA) can drive replicas to zero.
+    # The first request matching this backend's model/tags wakes it (and may
+    # see 502s while the engine cold-starts — see resilience.max_retries).
+    idle_timeout_min: 30
     # Optional: tell Meridian to scrape capacity signals from the backend.
     # Failures here NEVER mark the backend unhealthy — telemetry is purely a
     # routing-preference signal and falls back safely when missing.
