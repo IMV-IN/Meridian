@@ -22,7 +22,7 @@ from meridian.api.authz import require_ops_view, require_reload
 from meridian.api.errors import GatewayError
 from meridian.api.finalize import finalize_request, stamp_meridian_headers
 from meridian.api.pipeline import ChatRequest, prepare_chat_request, reconcile_budget_usage
-from meridian.api.reload import reload_keys
+from meridian.api.reload import reload_config
 from meridian.api.routing import route
 from meridian.api.state import AppState, build_app_state, shutdown_app_state
 from meridian.auth import AuthError, authenticate
@@ -30,8 +30,19 @@ from meridian.config.models import MeridianConfig
 from meridian.cost.authz import clamp_window_days, require_usage_identity, resolve_usage_scope
 from meridian.cost.extract import usage_from_dict, usage_from_sse_bytes
 from meridian.cost.record import record_actual_usage
-from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
-from meridian.proxy.forward import close_client, forward_get, forward_non_stream, forward_stream
+from meridian.metrics.collectors import (
+    BACKEND_CIRCUIT_OPEN,
+    BACKEND_HEALTHY,
+    BACKEND_INFLIGHT,
+)
+from meridian.proxy.forward import (
+    StreamUpstreamError,
+    close_client,
+    forward_get,
+    forward_non_stream,
+    forward_stream,
+)
+from meridian.resilience import CircuitOpenError
 from meridian.util.helpers import generate_request_id, now_ms
 
 
@@ -97,11 +108,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     loop = asyncio.get_running_loop()
 
     def _on_sighup() -> None:
-        try:
-            n = reload_keys(state)
-            logger.info("SIGHUP: reloaded %d API key(s)", n)
-        except Exception:
-            logger.exception("SIGHUP: key reload failed (index unchanged)")
+        async def _do_reload() -> None:
+            try:
+                report = await reload_config(state)
+                logger.info("SIGHUP: reload complete (%s)", report)
+            except Exception:
+                logger.exception("SIGHUP: config reload failed (state unchanged)")
+
+        loop.create_task(_do_reload())
 
     try:
         loop.add_signal_handler(signal.SIGHUP, _on_sighup)
@@ -139,7 +153,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await shutdown_app()
 
 
-app = FastAPI(title="Meridian", version="0.9.4", lifespan=lifespan)
+app = FastAPI(title="Meridian", version="0.10.0", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -194,7 +208,7 @@ async def chat_completions(request: Request) -> Response:
 
     try:
         if is_stream:
-            resp = await forward_stream(backend, chat.body)
+            resp = await forward_stream(backend, chat.body, state.config.resilience)
             original_body_iterator = resp.body_iterator
 
             async def tracked_stream() -> AsyncIterator[bytes]:
@@ -213,6 +227,10 @@ async def chat_completions(request: Request) -> Response:
                         if len(tail) > 65536:
                             del tail[: len(tail) - 65536]
                         yield raw
+                except StreamUpstreamError as exc:
+                    # Client already got error event + [DONE]; account + end quietly.
+                    error_type = exc.error_type
+                    status_code = 504 if exc.error_type == "stream_read_timeout" else 502
                 except httpx.RequestError as exc:
                     state.health_checker.check_passive_failure(backend)
                     error_type = type(exc).__name__
@@ -256,7 +274,9 @@ async def chat_completions(request: Request) -> Response:
             )
             return resp
 
-        non_stream_resp = await forward_non_stream(backend, chat.body)
+        non_stream_resp = await forward_non_stream(
+            backend, chat.body, state.config.resilience
+        )
         status_code = non_stream_resp.status_code
         if status_code >= 500:
             state.health_checker.check_passive_failure(backend)
@@ -280,6 +300,15 @@ async def chat_completions(request: Request) -> Response:
         )
         return non_stream_resp
 
+    except CircuitOpenError:
+        # Circuit breaker rejected pre-flight — no upstream call was made.
+        error_type = "circuit_open"
+        status_code = 503
+        return GatewayError(
+            f"Backend {backend.name!r} circuit is open",
+            "meridian_circuit_open",
+            503,
+        ).to_response()
     except httpx.RequestError as exc:
         state.health_checker.check_passive_failure(backend)
         error_type = type(exc).__name__
@@ -374,11 +403,11 @@ async def recent_requests(request: Request) -> Response:
 
 @app.post("/meridian/reload")
 async def reload_auth_keys(request: Request) -> Response:
-    """Hot-reload API keys from auth.keys + auth.keys_file.
+    """Hot-reload config (full when a config file is known, else keys only).
 
     Requires auth.enabled and a key with reload rights (ops_admin, or role
-    operator/admin). In-flight requests keep their already-resolved identity;
-    new requests use the new index.
+    operator/admin). Atomic: an invalid new config is rejected and the running
+    state is kept. In-flight requests keep their already-resolved objects.
     """
     state = get_state()
     try:
@@ -390,15 +419,15 @@ async def reload_auth_keys(request: Request) -> Response:
     except GatewayError as exc:
         return exc.to_response()
     try:
-        n = reload_keys(state)
+        report = await reload_config(state)
     except Exception as exc:
-        logger.exception("Key reload failed")
+        logger.exception("Config reload failed")
         return GatewayError(
-            f"Key reload failed: {exc}",
+            f"Config reload failed: {exc}",
             "invalid_request_error",
             400,
         ).to_response()
-    return JSONResponse({"reloaded": True, "keys": n})
+    return JSONResponse({"reloaded": True, **report})
 
 
 @app.get("/meridian/usage")
@@ -493,6 +522,10 @@ async def metrics() -> Response:
     if state is not None:
         for b in state.registry.all_backends():
             BACKEND_HEALTHY.labels(backend=b.name).set(1 if b.healthy else 0)
+            if b.circuit is not None:
+                BACKEND_CIRCUIT_OPEN.labels(backend=b.name).set(
+                    1 if b.circuit.state == "open" else 0
+                )
     return Response(content=generate_latest(), media_type="text/plain; version=0.0.4")
 
 

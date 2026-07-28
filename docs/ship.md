@@ -11,7 +11,7 @@ A scannable record of **what's shipped** and **what's next**.
 | Release-note detail | [`../CHANGELOG.md`](../CHANGELOG.md) |
 | Pitchable claims only | [`internal/PITCH.md`](./internal/PITCH.md) |
 
-_Last updated: 2026-07-18 — **v0.9.4**; RBAC roles + ops-endpoint auth, dashboard overhaul, scenario quickstart; v1.0 hold for cofounder/partner._
+_Last updated: 2026-07-28 — **v0.10.0 in tree**; resilience (circuit breaker, retry+backoff, timeouts, stream timeouts) + full config reload + Phase 0 code health; next: Phase 2 observability/elasticity (v0.11.0)._
 
 ---
 
@@ -35,10 +35,11 @@ _Last updated: 2026-07-18 — **v0.9.4**; RBAC roles + ops-endpoint auth, dashbo
 | **0.9.2** | `v0.9.2` | Budget ↔ actual token-meter reconcile |
 | **0.9.3** | `v0.9.3` | Load harness, enterprise e2e, ops polish |
 | **0.9.4** | **`v0.9.4`** | RBAC roles, ops-endpoint auth, dashboard overhaul, scenario quickstart |
+| **0.10.0** | **`v0.10.0`** | Circuit breaker, retry+backoff, upstream/stream timeouts, full config reload; Phase 0 code health (fd fix, `[audit]` extra, 87% cov) |
 
 Also: optional audit pipeline; Ollama load numbers ([`LOAD.md`](./LOAD.md)); hardened image scan ([`scans/IMAGE_SCAN_0.9.3.md`](./scans/IMAGE_SCAN_0.9.3.md)).
 
-**Latest release:** `v0.9.4` — `ghcr.io/imv-in/meridian:0.9.4`
+**Latest release:** `v0.10.0` — `ghcr.io/imv-in/meridian:0.10.0`
 
 ---
 

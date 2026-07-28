@@ -86,6 +86,40 @@ health:
   fail_threshold: 2
   success_threshold: 1
 
+# Upstream HTTP timeouts (seconds). Global defaults below preserve historical
+# behavior; every key is optional and can also be overridden per backend under
+# `backends[].timeout` (a backend key wins; unset keys inherit the global).
+# `stream_read` only applies to streaming (SSE) requests and defaults to
+# `read` — set it to close stalled streams gracefully (client gets an SSE
+# error event + [DONE], and the request is recorded as 504 stream_read_timeout).
+timeouts:
+  connect: 5.0
+  read: 300.0
+  write: 5.0
+  pool: 5.0
+  stream_read: null    # null = use `read` for streams
+
+# Resilience (optional, all off by default = historical behavior).
+# - max_retries: retry transport errors (connection/timeout — no response was
+#   received). Safe window only: non-stream requests, and the OPEN phase of
+#   streams (before the first byte). A stream that has started NEVER retries —
+#   delivered tokens can't be un-sent; stalled/broken streams end gracefully
+#   (SSE error event + [DONE]) instead. Backoff = retry_backoff_base * 2^n.
+#   Retried attempts are counted in meridian_upstream_retries_total{backend}.
+# - circuit_breaker: per backend. Opens after failure_threshold consecutive
+#   upstream failures; while open, requests are rejected pre-flight with 503
+#   ({"error":{"type":"meridian_circuit_open"}}) without touching the backend.
+#   After open_seconds a single half-open probe is admitted; success closes
+#   the circuit, failure re-opens it. State is visible in /meridian/status
+#   and via meridian_backend_circuit_open{backend}.
+resilience:
+  max_retries: 0
+  retry_backoff_base: 0.1
+  circuit_breaker:
+    enabled: false
+    failure_threshold: 5
+    open_seconds: 30.0
+
 logging:
   level: "INFO"
   jsonl_path: "./meridian_requests.jsonl"
@@ -98,6 +132,10 @@ backends:
     weight: 80
     tags: ["fast"]
     health_endpoint: "/v1/models"
+    # Optional per-backend timeout override (fields merge over `timeouts:`).
+    timeout:
+      read: 60.0
+      stream_read: 10.0
     # Optional: tell Meridian to scrape capacity signals from the backend.
     # Failures here NEVER mark the backend unhealthy — telemetry is purely a
     # routing-preference signal and falls back safely when missing.

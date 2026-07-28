@@ -24,17 +24,17 @@ This roadmap addresses all three.
 |-----------|--------|
 | Lint & types | ✅ Clean (ruff, mypy) |
 | Tests | ✅ 357/357 pass |
-| v0.9.4 | In progress (HEAD) |
+| v0.10.0 | In tree (Phase 0 code health + Phase 1 resilience landed) |
 | v1.0 | Blocked on cofounder/partner sign-off |
 | Docker image | Multi-arch, hardened, non-root |
 | Helm chart | Basic (137 lines, 8 templates) |
 | Docs | Comprehensive (DEPLOY, OPS_RUNBOOK, AIRGAP, CONFIGURATION) |
 | CI/CD | Robust with retries + version validation |
-| **Test coverage** | ⚠️ ~25 modules untested (audit, PII, cost, health, proxy, metrics, usage) |
-| **Resource leaks** | ⚠️ Open file handle in `metrics/logger.py:18` |
-| **Dependency hygiene** | ⚠️ `aiokafka` + `boto3` as hard deps for audit-only code |
-| **Circuit breaker / retry** | ❌ None |
-| **Dynamic config reload** | ❌ Auth keys only; full config requires restart |
+| **Test coverage** | ✅ 87% on `meridian/` (406 tests, 2026-07-28) |
+| **Resource leaks** | ✅ Fixed (0.10.0) |
+| **Dependency hygiene** | ✅ Optional `[audit]` extra (0.10.0) |
+| **Circuit breaker / retry** | ✅ 0.10.0 (`resilience.circuit_breaker`, `max_retries` + backoff) |
+| **Dynamic config reload** | ✅ 0.10.0 — full atomic reload via `POST /meridian/reload` / SIGHUP |
 | **Autoscaling** | ❌ None |
 | **Scale-to-zero** | ❌ None |
 | **Traffic management** | ❌ No canary / blue-green / gradual rollout |
@@ -51,13 +51,13 @@ This roadmap addresses all three.
 
 ### P0 — Must land before v1.0 (per the "complete product" strategy)
 
-| # | Issue | Impact |
-|---|-------|--------|
-| P0-1 | No circuit breaker or retry on upstream failures | Transient backend blips → immediate 502s to clients |
-| P0-2 | No dynamic config reload (auth keys only) | Strategy, backend, and scaling rule changes require full restart |
-| P0-3 | Open file handle in `metrics/logger.py:18` | File descriptor leak; unacceptable in a "finished" product |
-| P0-4 | ~25 modules with zero test coverage | A complete product tag cannot ship with untested core paths |
-| P0-5 | Audit deps (`aiokafka`, `boto3`) hard-required | Bloated install surface; trivial fix |
+| # | Issue | Impact | Status |
+|---|-------|--------|--------|
+| P0-1 | No circuit breaker or retry on upstream failures | Transient backend blips → immediate 502s to clients | ✅ **0.10.0** |
+| P0-2 | No dynamic config reload (auth keys only) | Strategy, backend, and scaling rule changes require full restart | ✅ **0.10.0** |
+| P0-3 | Open file handle in `metrics/logger.py:18` | File descriptor leak; unacceptable in a "finished" product | ✅ **0.10.0** |
+| P0-4 | ~25 modules with zero test coverage | A complete product tag cannot ship with untested core paths | ✅ **87% cov** |
+| P0-5 | Audit deps (`aiokafka`, `boto3`) hard-required | Bloated install surface; trivial fix | ✅ **0.10.0** |
 
 _(With the new sequencing, partner sign-off is no longer a "blocker" — it's the final verification step in Phase 4.)_
 

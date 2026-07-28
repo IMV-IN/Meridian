@@ -56,3 +56,17 @@ TOKENS_TOTAL = Counter(
     "Actual tokens attributed from backend usage fields",
     ["model", "kind"],
 )
+
+# Retries on upstream connection/timeout errors (resilience.max_retries).
+UPSTREAM_RETRIES = Counter(
+    "meridian_upstream_retries_total",
+    "Retried upstream attempts (connection/timeout errors)",
+    ["backend"],
+)
+
+# Circuit breaker visibility (1 = circuit open, requests rejected pre-flight).
+BACKEND_CIRCUIT_OPEN = Gauge(
+    "meridian_backend_circuit_open",
+    "Backend circuit breaker state (1=open, 0=closed/half-open)",
+    ["backend"],
+)
