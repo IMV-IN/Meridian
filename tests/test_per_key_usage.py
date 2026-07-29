@@ -131,6 +131,121 @@ class TestLedgerKeyDimension:
         all_rows = led.query(org_id="acme", window_days=10_000)
         assert len(all_rows) == 2
 
+    # ── H5 regressions: the migration is atomic and crash-resumable ─────
+
+    def _make_legacy_db(self, db: Path, rows: int = 2) -> None:
+        """Build a pre-0.12 shaped cost_ledger table."""
+        conn = sqlite3.connect(str(db))
+        conn.execute(
+            """
+            CREATE TABLE cost_ledger (
+                org_id TEXT NOT NULL, team_id TEXT NOT NULL,
+                model TEXT NOT NULL, day TEXT NOT NULL,
+                prompt_tokens REAL NOT NULL DEFAULT 0,
+                completion_tokens REAL NOT NULL DEFAULT 0,
+                requests REAL NOT NULL DEFAULT 0,
+                cost REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (org_id, team_id, model, day)
+            )
+            """
+        )
+        for i in range(rows):
+            conn.execute(
+                "INSERT INTO cost_ledger VALUES (?, '', 'm', ?, ?, ?, ?, ?)",
+                ("acme", f"2026-07-0{i + 1}", 10 * (i + 1), 5, 1, 0.1),
+            )
+        conn.commit()
+        conn.close()
+
+    def test_migration_resume_from_leftover_staging_table(self, tmp_path: Path) -> None:
+        """Crash right after RENAME: only cost_ledger_v1 exists. Boot must
+        recreate the modern table, copy every legacy row, and drop staging."""
+        db = tmp_path / "cost.db"
+        self._make_legacy_db(db, rows=3)
+        conn = sqlite3.connect(str(db))
+        conn.execute("ALTER TABLE cost_ledger RENAME TO cost_ledger_v1")  # simulated crash point
+        conn.commit()
+        conn.close()
+
+        led = SqliteCostLedger(str(db))
+        rows = led.query(org_id="acme", window_days=10_000)
+        assert len(rows) == 3
+        assert all(r.key_id == "" for r in rows)
+        assert sum(r.prompt_tokens for r in rows) == 10 + 20 + 30
+        conn = sqlite3.connect(str(db))
+        staged = conn.execute(
+            "SELECT name FROM sqlite_master WHERE name='cost_ledger_v1'"
+        ).fetchall()
+        conn.close()
+        assert staged == []
+
+    def test_migration_resume_deduplicates_partial_copy(self, tmp_path: Path) -> None:
+        """Crash after a partial copy (modern table exists with SOME rows plus
+        the full legacy staging table): resume must not duplicate or fail on
+        PK conflicts."""
+        db = tmp_path / "cost.db"
+        self._make_legacy_db(db, rows=2)
+        conn = sqlite3.connect(str(db))
+        conn.execute("ALTER TABLE cost_ledger RENAME TO cost_ledger_v1")
+        # Recreate the modern table and copy only ONE row before 'dying'.
+        conn.execute(
+            """
+            CREATE TABLE cost_ledger (
+                org_id TEXT NOT NULL, team_id TEXT NOT NULL,
+                model TEXT NOT NULL, day TEXT NOT NULL,
+                key_id TEXT NOT NULL DEFAULT '',
+                prompt_tokens REAL NOT NULL DEFAULT 0,
+                completion_tokens REAL NOT NULL DEFAULT 0,
+                requests REAL NOT NULL DEFAULT 0,
+                cost REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (org_id, team_id, model, day, key_id)
+            )
+            """
+        )
+        conn.execute(
+            """
+            INSERT INTO cost_ledger
+            SELECT org_id, team_id, model, day, '',
+                   prompt_tokens, completion_tokens, requests, cost
+            FROM cost_ledger_v1 WHERE day = '2026-07-01'
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        led = SqliteCostLedger(str(db))
+        rows = led.query(org_id="acme", window_days=10_000)
+        assert len(rows) == 2  # not 3 — INSERT OR IGNORE skipped the dup
+        assert sum(r.prompt_tokens for r in rows) == 10 + 20
+
+    def test_migration_refuses_corrupt_double_legacy(self, tmp_path: Path) -> None:
+        """Both a legacy-shaped cost_ledger AND a staging table present: no
+        guessing — fail loudly so an operator merges by hand."""
+        db = tmp_path / "cost.db"
+        self._make_legacy_db(db, rows=1)
+        conn = sqlite3.connect(str(db))
+        conn.execute("ALTER TABLE cost_ledger RENAME TO cost_ledger_v1")
+        conn.execute(  # recreate the legacy-shaped table on top of both
+            """
+            CREATE TABLE cost_ledger (
+                org_id TEXT NOT NULL, team_id TEXT NOT NULL,
+                model TEXT NOT NULL, day TEXT NOT NULL,
+                prompt_tokens REAL NOT NULL DEFAULT 0,
+                completion_tokens REAL NOT NULL DEFAULT 0,
+                requests REAL NOT NULL DEFAULT 0,
+                cost REAL NOT NULL DEFAULT 0,
+                PRIMARY KEY (org_id, team_id, model, day)
+            )
+            """
+        )
+        conn.commit()
+        conn.close()
+
+        import pytest
+
+        with pytest.raises(RuntimeError, match="inconsistent state"):
+            SqliteCostLedger(str(db))
+
 
 # ── /meridian/usage?key= — end to end ──────────────────────────────────────
 

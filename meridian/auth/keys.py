@@ -107,6 +107,13 @@ def save_keys_to_file(path: str, keys: List[KeyConfig]) -> None:
         yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False)
         f.flush()
         os.fsync(f.fileno())
+    # The file stores plaintext API keys — never let a rewrite widen its
+    # permissions. Preserve the existing mode (operators may restrict
+    # further); default to 0600 for a fresh file.
+    if os.path.exists(path):
+        os.chmod(tmp, os.stat(path).st_mode & 0o777)
+    else:
+        os.chmod(tmp, 0o600)
     os.replace(tmp, path)
 
 

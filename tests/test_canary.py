@@ -553,7 +553,7 @@ class TestPinnedSessionAcrossRollback:
         )
 
     def test_pin_remaps_after_rollback(self) -> None:
-        from meridian.api.routing import route
+        from meridian.api.routing import _session_key, route
 
         st = self._state()
         b, _, r1 = route(st, "m", _ctx(), session_id="s1")
@@ -573,7 +573,7 @@ class TestPinnedSessionAcrossRollback:
         assert b2 is not None
         assert "stable" in b2.tags
         assert r2 == "remapped"
-        assert st.session_store.get("s1") == "sb"
+        assert st.session_store.get(_session_key("s1", None)) == "sb"
 
     def test_pin_survives_weight_changes_when_not_rolled_back(self) -> None:
         """Weight tuning alone must not churn existing pins (locality is a

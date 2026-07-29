@@ -119,6 +119,58 @@ def build_registry(cfg: MeridianConfig) -> BackendRegistry:
     return BackendRegistry(backends)
 
 
+def warn_pool_tag_coverage(cfg: MeridianConfig, registry: BackendRegistry) -> None:
+    """Operator signal: pool tag sets matching zero configured backends.
+
+    A misconfigured isolation pool silently 503s its tenant; misconfigured
+    canary pools silently degrade the rollout to fallback routing. Neither
+    is a config *error* (backends may be tagged later), so warn — loudly.
+    """
+    backends = registry.all_backends()
+
+    def _matching(tags: list[str]) -> list[str]:
+        ts = set(tags)
+        return [b.name for b in backends if ts.issubset(b.tags)]
+
+    iso = cfg.isolation
+    if iso.mode == "dedicated":
+        for org, tags in iso.pools.items():
+            if not _matching(tags):
+                logger.warning(
+                    "Isolation pool for org %r (tags=%s) matches NO configured "
+                    "backend — that org will 503 until backends are tagged",
+                    org, sorted(tags),
+                )
+        if not iso.pools:
+            logger.warning(
+                "Isolation mode is 'dedicated' but no pools are configured — "
+                "every org is unlisted; nothing is isolated"
+            )
+        reserved = [set(t) for t in iso.pools.values() if t]
+        if reserved:
+            visible = [
+                b.name for b in backends
+                if not any(rs.issubset(b.tags) for rs in reserved)
+            ]
+            if backends and not visible:
+                logger.warning(
+                    "Isolation reserved pools cover ALL backends — unlisted "
+                    "orgs and anonymous traffic will 503 for every model"
+                )
+
+    if cfg.canary.enabled:
+        for name, tags in (
+            ("stable_tags", cfg.canary.stable_tags),
+            ("canary_tags", cfg.canary.canary_tags),
+        ):
+            if not _matching(tags):
+                logger.warning(
+                    "Canary pool %s=%s matches NO configured backend — "
+                    "traffic uses fallback routing until backends are tagged",
+                    name, sorted(tags),
+                )
+
+
 async def build_app_state(
     config: Optional[MeridianConfig] = None,
     *,
@@ -176,6 +228,7 @@ async def build_app_state(
     registry = build_registry(cfg)
     backends = registry.all_backends()
     logger.info("Loaded %d backend(s): %s", len(backends), [b.name for b in backends])
+    warn_pool_tag_coverage(cfg, registry)
 
     strategy = create_strategy(
         cfg.gateway.strategy,

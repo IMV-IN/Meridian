@@ -149,17 +149,52 @@ class SqliteCostLedger(CostLedger):
         Pre-0.12 tables have PK (org, team, model, day) and no key_id. The
         rebuild carries old rows over with key_id = '' so historical sums are
         preserved while new rows split per key.
+
+        The rebuild runs as ONE transaction (BEGIN IMMEDIATE … COMMIT): a
+        crash mid-copy rolls everything back to the pre-0.12 table instead of
+        stranding rows in an orphaned staging table. It is also resumable —
+        a leftover ``cost_ledger_v1`` (from an older non-transactional run)
+        means a prior migration died partway; INSERT OR IGNORE restarts the
+        copy idempotently (PK collisions skip already-copied rows).
         """
-        cols = {
-            r[1] for r in self._conn.execute("PRAGMA table_info(cost_ledger)")
-        }
-        if cols and "key_id" not in cols:
-            with self._lock:
-                self._conn.execute("ALTER TABLE cost_ledger RENAME TO cost_ledger_v1")
+        with self._lock:
+            tables = {
+                r[0]
+                for r in self._conn.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                )
+            }
+            has_ledger = "cost_ledger" in tables
+            has_v1 = "cost_ledger_v1" in tables
+            cols = (
+                {r[1] for r in self._conn.execute("PRAGMA table_info(cost_ledger)")}
+                if has_ledger
+                else set()
+            )
+            modern = has_ledger and "key_id" in cols
+
+            if has_ledger and not modern and has_v1:
+                raise RuntimeError(
+                    "cost_ledger schema is in an inconsistent state: both the "
+                    "legacy table and a cost_ledger_v1 staging table exist. "
+                    "Merge them manually (or drop cost_ledger_v1) and restart."
+                )
+
+            if not has_v1 and (not has_ledger or modern):
+                self._create_table()
+                self._conn.commit()
+                return
+
+            try:
+                self._conn.execute("BEGIN IMMEDIATE")
+                if has_ledger and not modern:
+                    self._conn.execute(
+                        "ALTER TABLE cost_ledger RENAME TO cost_ledger_v1"
+                    )
                 self._create_table()
                 self._conn.execute(
                     """
-                    INSERT INTO cost_ledger
+                    INSERT OR IGNORE INTO cost_ledger
                     (org_id, team_id, model, day, key_id,
                      prompt_tokens, completion_tokens, requests, cost)
                     SELECT org_id, team_id, model, day, '',
@@ -169,9 +204,9 @@ class SqliteCostLedger(CostLedger):
                 )
                 self._conn.execute("DROP TABLE cost_ledger_v1")
                 self._conn.commit()
-            return
-        self._create_table()
-        self._conn.commit()
+            except Exception:
+                self._conn.rollback()
+                raise
 
     def _create_table(self) -> None:
         self._conn.execute(

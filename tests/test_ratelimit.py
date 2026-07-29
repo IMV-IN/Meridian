@@ -95,6 +95,81 @@ def test_bucket_does_not_overfill(monkeypatch):
     assert remaining == 2.0
 
 
+# ── RateLimitStore.check_multi (M4: multi-scope atomicity) ──────────────
+
+
+def test_check_multi_all_admit_consumes_each_scope():
+    from meridian.api.ratelimitter import RateLimitStore
+
+    store = RateLimitStore()
+    scopes = [("global", 5.0, 1.0, "global"), ("model:x", 5.0, 1.0, "model")]
+    assert store.check_multi(scopes) is None
+    # Wall-clock refill drifts by ~microseconds between calls — compare with
+    # tolerance rather than exact floats.
+    assert store.get_or_create("global", 5.0, 1.0).get_remaining() == pytest.approx(4.0, abs=0.01)
+    assert store.get_or_create("model:x", 5.0, 1.0).get_remaining() == pytest.approx(4.0, abs=0.01)
+
+
+def test_check_multi_middle_scope_failure_consumes_nothing():
+    """A model-scope rejection must leave the global and org buckets untouched
+    (no burn, no partial consumption)."""
+    from meridian.api.ratelimitter import RateLimitStore
+
+    store = RateLimitStore()
+    scopes = [
+        ("global", 5.0, 1.0, "global"),
+        ("model:x", 1.0, 0.000001, "model"),
+        ("org:acme", 5.0, 1.0, "org"),
+    ]
+    assert store.check_multi(scopes) is None  # burn the single model token
+    rejected = store.check_multi(scopes)
+    assert rejected is not None
+    assert rejected[0] == "model"
+    # Global and org did not lose a token to the failed request — they still
+    # hold exactly the 4 remaining from the one admitted call (3-scope consume).
+    assert store.get_or_create("global", 5.0, 1.0).get_remaining() == pytest.approx(4.0, abs=0.01)
+    assert store.get_or_create("org:acme", 5.0, 1.0).get_remaining() == pytest.approx(4.0, abs=0.01)
+
+
+def test_check_multi_first_scope_failure_consumes_nothing():
+    from meridian.api.ratelimitter import RateLimitStore
+
+    store = RateLimitStore()
+    scopes = [
+        ("global", 1.0, 0.000001, "global"),
+        ("org:acme", 5.0, 1.0, "org"),
+    ]
+    assert store.check_multi(scopes) is None
+    rejected = store.check_multi(scopes)
+    assert rejected is not None and rejected[0] == "global"
+    # Org still holds the 4 left by the single admitted call — the global
+    # rejection consumed nothing.
+    assert store.get_or_create("org:acme", 5.0, 1.0).get_remaining() == pytest.approx(4.0, abs=0.01)
+
+
+def test_check_multi_no_over_admission_under_threads():
+    """50 threads racing a capacity-5 window must yield exactly 5 admissions:
+    check+consume runs in one exclusive store-locked window, so the classic
+    check-then-consumed-by-racer over-admission is impossible."""
+    import threading
+
+    from meridian.api.ratelimitter import RateLimitStore
+
+    store = RateLimitStore()
+    scopes = [("global", 5.0, 1e-9, "global")]
+    results: list[bool] = []
+
+    def worker() -> None:
+        results.append(store.check_multi(scopes) is None)
+
+    threads = [threading.Thread(target=worker) for _ in range(50)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert sum(results) == 5
+
+
 # ── Integration tests ───────────────────────────────────────────────────
 
 

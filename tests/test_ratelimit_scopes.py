@@ -142,6 +142,40 @@ async def test_model_does_not_block_other_orgs_org_scope():
 
 
 @pytest.mark.asyncio
+async def test_model_rejection_spares_global_bucket():
+    """M4: a request rejected at the model scope must not burn the global or
+    org tokens — check-then-consume holds for the MIDDLE scope too."""
+    cfg = MeridianConfig.from_dict({
+        "rate_limit": {
+            "enabled": True,
+            "token_capacity": 2, "token_refill_rate": 0.001,
+            "global_limit": {"token_capacity": 2, "token_refill_rate": 0.001},
+            "models": {"demo": {"token_capacity": 1, "token_refill_rate": 0.001}},
+        },
+        "auth": {"enabled": True, "keys": [{"key": KEY_ACME, "org_id": "acme"}]},
+        "backends": [{
+            # Empty model string: serves any request model — lets us exercise
+            # an unmetered model id without another backend.
+            "name": "dead", "url": f"http://127.0.0.1:{_closed_port()}",
+            "engine": "mock", "model": "", "weight": 1,
+            "health_endpoint": "/v1/models",
+        }],
+    })
+    async with await _client(cfg) as c:
+        ha = {"Authorization": f"Bearer {KEY_ACME}"}
+        a1 = await c.post("/v1/chat/completions", headers=ha, json=_body())
+        # demo model bucket now empty — global and org must NOT be touched
+        # by this rejection for the reachability check below to work.
+        a2 = await c.post("/v1/chat/completions", headers=ha, json=_body())
+        # Org+global each spent exactly 1 (the admitted request) so acme can
+        # still pass both on a different (unmetered) model.
+        a3 = await c.post("/v1/chat/completions", headers=ha, json=_body("other-model"))
+    assert a1.status_code == 502
+    assert a2.status_code == 429          # model scope rejects
+    assert a3.status_code == 502          # global+org tokens survived the rejection
+
+
+@pytest.mark.asyncio
 async def test_org_rejection_spares_global_bucket():
     """Org hot loop: every org-limited request must NOT burn global tokens."""
     before = _scope_count("org")

@@ -194,6 +194,13 @@ def _pin_defeated_by_rollback(state: AppState, b: Backend) -> bool:
     )
 
 
+def _session_key(session_id: str, org_id: Optional[str]) -> str:
+    """Namespace the pin by org so two tenants presenting the same session id
+    can't read or overwrite each other's pin (M8). The NUL separator cannot
+    appear in HTTP header values, so collisions across namespaces are impossible."""
+    return f"{org_id or '_anon'}\x00{session_id}"
+
+
 def route(
     state: AppState,
     model: str,
@@ -205,10 +212,11 @@ def route(
     cfg = state.config
     affinity_on = cfg.session_affinity.enabled and session_id is not None
     store = state.session_store
+    store_key = _session_key(session_id, org_id) if session_id is not None else ""
 
     session_route: Optional[str] = None
     if affinity_on and store is not None:
-        pinned_name = store.get(session_id)  # type: ignore[arg-type]
+        pinned_name = store.get(store_key)
         if pinned_name is not None:
             b = state.registry.get(pinned_name)
             if (
@@ -230,7 +238,7 @@ def route(
         return None, tier_name, None
 
     if affinity_on and store is not None:
-        store.put(session_id, backend.name)  # type: ignore[arg-type]
+        store.put(store_key, backend.name)
         if session_route is None:
             session_route = "new"
 

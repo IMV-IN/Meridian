@@ -276,21 +276,19 @@ def apply_rate_limit(
         "org" if org_id else "ip",
     ))
 
-    buckets = [
-        (state.rate_limit.get_or_create(key, cap, ref), label)
-        for key, cap, ref, label in scopes
-    ]
-    for bucket, label in buckets:
-        if bucket.get_remaining() < 1:
-            RATELIMIT_REJECTIONS.labels(scope=label).inc()
-            raise GatewayError(
-                "Rate Limit Exceeded",
-                "rate_limit_exceeded",
-                429,
-                headers={"Retry-After": str(1 / bucket.refill_rate)},
-            )
-    for bucket, _label in buckets:
-        bucket.allow_request()
+    # Atomic multi-scope admission: all scopes check first, then all consume,
+    # inside one exclusive window (see RateLimitStore.check_multi). A rejection
+    # never burns any scope's tokens.
+    rejected = state.rate_limit.check_multi(scopes)
+    if rejected is not None:
+        label, refill_rate = rejected
+        RATELIMIT_REJECTIONS.labels(scope=label).inc()
+        raise GatewayError(
+            "Rate Limit Exceeded",
+            "rate_limit_exceeded",
+            429,
+            headers={"Retry-After": str(1 / refill_rate)},
+        )
 
 
 async def prepare_chat_request(

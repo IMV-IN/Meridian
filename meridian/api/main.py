@@ -513,15 +513,21 @@ async def keys_create(request: Request) -> Response:
 
 @app.delete("/meridian/keys/{key_id}")
 async def keys_delete(key_id: str, request: Request) -> Response:
-    """Delete a keys_file key by its non-secret id. Inline-config keys refused."""
+    """Delete a keys_file key by its non-secret id. Inline-config keys refused.
+
+    Guards: you may not delete the key making the request, nor the last
+    remaining key-admin key.
+    """
     state = get_state()
     try:
-        require_key_admin(
+        identity = require_key_admin(
             auth_enabled=state.config.auth.enabled,
             key_index=state.key_index,
             authorization=request.headers.get("authorization"),
         )
-        view = delete_key(state, key_id)
+        view = delete_key(
+            state, key_id, caller_key_id=identity.key_id if identity else None
+        )
         return JSONResponse({"deleted": True, **view})
     except GatewayError as exc:
         return exc.to_response()

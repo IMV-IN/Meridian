@@ -95,6 +95,29 @@ class TestKeyFileWriter:
         save_keys_to_file(str(p), [KeyConfig(key=KEY_ORG, org_id="acme")])
         assert not (tmp_path / "keys.yaml.tmp").exists()
 
+    # ── H4 regressions: a rewrite must never widen file permissions ─────
+
+    def test_rewrite_preserves_restrictive_mode(self, tmp_path: Path) -> None:
+        import os
+
+        p = tmp_path / "keys.yaml"
+        save_keys_to_file(str(p), [KeyConfig(key=KEY_ORG, org_id="acme")])
+        os.chmod(p, 0o600)
+        save_keys_to_file(str(p), [KeyConfig(key=KEY_VIEWER, org_id="globex")])
+        assert (os.stat(p).st_mode & 0o777) == 0o600
+
+    def test_new_file_defaults_to_0600(self, tmp_path: Path) -> None:
+        """A credential store must not inherit a permissive umask."""
+        import os
+
+        old_umask = os.umask(0o022)  # deliberately permissive for the test
+        try:
+            p = tmp_path / "fresh_keys.yaml"
+            save_keys_to_file(str(p), [KeyConfig(key=KEY_ORG, org_id="acme")])
+            assert (os.stat(p).st_mode & 0o777) == 0o600
+        finally:
+            os.umask(old_umask)
+
 
 # ── HTTP surface ───────────────────────────────────────────────────────────
 
@@ -231,6 +254,32 @@ class TestKeysCreateEndpoint:
             )
             assert r.status_code == 400
 
+    async def test_create_conflicts_with_explicit_inline_key_id(self, tmp_path: Path) -> None:
+        """M1: an inline key with an *explicit* key_id must also block reuse —
+        the conflict check has to mirror the delete/identity resolution
+        (kc.key_id or derived), not derived-only."""
+        p = tmp_path / "keys.yaml"
+        p.write_text(
+            yaml.dump({"keys": [{"key": KEY_ADMIN, "org_id": "ops", "ops_admin": True}]})
+        )
+        cfg = MeridianConfig.from_dict({
+            "auth": {
+                "enabled": True,
+                "keys_file": str(p),
+                "keys": [
+                    {"key": KEY_ORG, "org_id": "acme", "key_id": "svc-explicit"}
+                ],
+            },
+            "backends": [],
+        })
+        async with await _client_for(cfg) as c:
+            r = await c.post(
+                "/meridian/keys",
+                headers={"Authorization": f"Bearer {KEY_ADMIN}"},
+                json={"org_id": "globex", "key_id": "svc-explicit"},
+            )
+            assert r.status_code == 409
+
 
 class TestKeysDeleteEndpoint:
     async def test_delete_removes_key_and_index(self, tmp_path: Path) -> None:
@@ -282,3 +331,70 @@ class TestKeysDeleteEndpoint:
                 headers={"Authorization": f"Bearer {KEY_VIEWER}"},
             )
             assert r.status_code == 403
+
+    # ── M2 regressions: self-delete and last-admin deletion are refused ──
+
+    async def test_self_delete_refused(self, tmp_path: Path) -> None:
+        """An admin key may not delete itself — that could brick the API."""
+        async with await _client_for(_cfg(tmp_path)) as c:
+            r = await c.delete(
+                f"/meridian/keys/{derive_key_id(KEY_ADMIN)}",
+                headers={"Authorization": f"Bearer {KEY_ADMIN}"},
+            )
+            assert r.status_code == 409
+            assert "self-delete" in r.json()["error"]["message"]
+            # The key still works.
+            ok = await c.get(
+                "/meridian/keys", headers={"Authorization": f"Bearer {KEY_ADMIN}"}
+            )
+            assert ok.status_code == 200
+
+    def test_delete_one_of_two_admins_allowed(self, tmp_path: Path) -> None:
+        """Deleting a different admin is fine while another admin remains."""
+        from types import SimpleNamespace
+
+        from meridian.api.keys_admin import delete_key
+
+        KEY_ADMIN2 = "mrdn_AdminTwo2222222222222222222bb"
+        assert derive_key_id(KEY_ADMIN2) != derive_key_id(KEY_ADMIN)
+        p = tmp_path / "keys.yaml"
+        p.write_text(yaml.dump({"keys": [
+            {"key": KEY_ADMIN, "org_id": "ops", "ops_admin": True},
+            {"key": KEY_ADMIN2, "org_id": "ops", "ops_admin": True},
+        ]}))
+        cfg = MeridianConfig.from_dict({
+            "auth": {"enabled": True, "keys_file": str(p), "keys": []},
+            "backends": [],
+        })
+        state = SimpleNamespace(config=cfg, key_index={})
+
+        view = delete_key(
+            state, derive_key_id(KEY_ADMIN), caller_key_id=derive_key_id(KEY_ADMIN2)
+        )
+        assert view["key_id"] == derive_key_id(KEY_ADMIN)
+        assert [k.key for k in load_keys_from_file(str(p))] == [KEY_ADMIN2]
+        assert KEY_ADMIN not in state.key_index and KEY_ADMIN2 in state.key_index
+
+    def test_last_admin_delete_refused(self, tmp_path: Path) -> None:
+        """Guard fires independently of self-delete: no key-admin survivors."""
+        from types import SimpleNamespace
+
+        import pytest
+
+        from meridian.api.errors import GatewayError
+        from meridian.api.keys_admin import delete_key
+
+        p = tmp_path / "keys.yaml"
+        p.write_text(yaml.dump({"keys": [
+            {"key": KEY_ADMIN, "org_id": "ops", "ops_admin": True},
+        ]}))
+        cfg = MeridianConfig.from_dict({
+            "auth": {"enabled": True, "keys_file": str(p), "keys": []},
+            "backends": [],
+        })
+        state = SimpleNamespace(config=cfg, key_index={})
+
+        with pytest.raises(GatewayError, match="last key-admin"):
+            delete_key(state, derive_key_id(KEY_ADMIN), caller_key_id=None)
+        # And the file is untouched.
+        assert len(load_keys_from_file(str(p))) == 1

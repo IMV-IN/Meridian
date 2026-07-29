@@ -120,12 +120,14 @@ def create_key(
     only once.
     """
     _require_manageable(state)
-    auth = state.config.auth
-    assert auth.keys_file is not None  # guarded above
 
     with _lifecycle_lock:
+        # Read auth inside the lock — a concurrent full reload may have
+        # swapped state.config (and thus the keys_file path).
+        auth = state.config.auth
+        assert auth.keys_file is not None  # guarded above
         file_keys = file_keys_only(auth)
-        inline_ids = {derive_key_id(kc.key) for kc in auth.keys}
+        inline_ids = {(kc.key_id or derive_key_id(kc.key)) for kc in auth.keys}
         index_keys = {kc.key for kc in file_keys} | {kc.key for kc in auth.keys}
 
         candidate = key or generate_key()
@@ -164,27 +166,46 @@ def create_key(
     return public_key_view(kc, auth.keys_file), candidate
 
 
-def delete_key(state: "AppState", key_id: str) -> Dict[str, Any]:
+def _is_key_admin(kc: KeyConfig) -> bool:
+    """Mirror of IdentityContext.can_manage_keys for a stored KeyConfig."""
+    return kc.ops_admin or kc.role == "admin"
+
+
+def delete_key(
+    state: "AppState", key_id: str, *, caller_key_id: Optional[str] = None
+) -> Dict[str, Any]:
     """Delete a keys_file key by its non-secret id. Returns the redacted view.
 
     Inline keys are refused (they belong to the config file). A deleted key
     keeps working until the index swap completes — which is immediate.
+    Guards: you may not delete the key you are calling with, nor the last
+    remaining key with key-admin rights (either would brick the API until a
+    config edit + reload).
     """
     _require_manageable(state)
-    auth = state.config.auth
-    assert auth.keys_file is not None  # guarded above
-
-    # Refuse inline keys up-front with a clear message.
-    for kc in auth.keys:
-        if (kc.key_id or derive_key_id(kc.key)) == key_id:
-            raise GatewayError(
-                f"Key {key_id!r} is defined inline in the config file; "
-                "remove it there and reload",
-                "invalid_request_error",
-                400,
-            )
 
     with _lifecycle_lock:
+        auth = state.config.auth
+        assert auth.keys_file is not None  # guarded above
+
+        # Refuse inline keys up-front with a clear message.
+        for kc in auth.keys:
+            if (kc.key_id or derive_key_id(kc.key)) == key_id:
+                raise GatewayError(
+                    f"Key {key_id!r} is defined inline in the config file; "
+                    "remove it there and reload",
+                    "invalid_request_error",
+                    400,
+                )
+
+        if caller_key_id is not None and caller_key_id == key_id:
+            raise GatewayError(
+                "Refusing to delete the key making the request (self-delete) — "
+                "use a different admin key",
+                "invalid_request_error",
+                409,
+            )
+
         file_keys = file_keys_only(auth)
         matches = [
             kc for kc in file_keys if (kc.key_id or derive_key_id(kc.key)) == key_id
@@ -200,6 +221,19 @@ def delete_key(state: "AppState", key_id: str) -> Dict[str, Any]:
                 409,
             )
         victim = matches[0]
+
+        # Last-admin guard: count key-admin keys that would remain across both
+        # sources if this delete went through.
+        if _is_key_admin(victim):
+            survivors = [kc for kc in file_keys if kc is not victim] + list(auth.keys)
+            if not any(_is_key_admin(kc) for kc in survivors):
+                raise GatewayError(
+                    f"Refusing to delete the last key-admin key ({key_id!r}) — "
+                    "create another ops_admin/admin key first",
+                    "invalid_request_error",
+                    409,
+                )
+
         remaining = [kc for kc in file_keys if kc is not victim]
         save_keys_to_file(auth.keys_file, remaining)
         n = reload_keys(state)

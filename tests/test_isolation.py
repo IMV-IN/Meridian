@@ -72,6 +72,36 @@ class TestIsolationConfig:
         assert cfg.isolation.mode == "dedicated"
         assert cfg.isolation.pools["org-b"] == ["pool-b", "spot"]
 
+    # ── H3 regressions: malformed pools must fail fast, not silently open ──
+
+    def test_empty_pool_list_rejected(self) -> None:
+        """pools={org: []} used to turn that org into a superuser (empty set ⊆
+        every backend's tags)."""
+        with pytest.raises(Exception, match="empty"):
+            MeridianConfig.from_dict(
+                {"isolation": {"mode": "dedicated", "pools": {"org-a": []}}}
+            )
+
+    def test_blank_pool_key_rejected(self) -> None:
+        with pytest.raises(Exception, match="non-empty"):
+            MeridianConfig.from_dict(
+                {"isolation": {"mode": "dedicated", "pools": {"": ["pool-a"]}}}
+            )
+
+    def test_blank_pool_tag_rejected(self) -> None:
+        with pytest.raises(Exception, match="tags must be non-empty"):
+            MeridianConfig.from_dict(
+                {"isolation": {"mode": "dedicated", "pools": {"org-a": ["pool-a", "  "]}}}
+            )
+
+    def test_unknown_isolation_key_rejected(self) -> None:
+        """A typo like ``pool:`` instead of ``pools:`` must not silently
+        degrade dedicated isolation to 'dedicated with zero pools'."""
+        with pytest.raises(Exception):
+            MeridianConfig.from_dict(
+                {"isolation": {"mode": "dedicated", "pool": {"org-a": ["pool-a"]}}}
+            )
+
 
 # ── Pure visibility logic ──────────────────────────────────────────────────
 
@@ -314,9 +344,11 @@ class TestAffinityUnderIsolation:
         )
 
     def test_pinned_out_of_pool_backend_is_remapped(self) -> None:
+        from meridian.api.routing import _session_key
+
         st = self._affinity_state()
         # Session pinned while isolation was shared -> now org-a is pinned.
-        st.session_store.put("sess-1", "b1")
+        st.session_store.put(_session_key("sess-1", "org-a"), "b1")
         backend, _, session_route = route(
             st, "m", _ctx(), session_id="sess-1", org_id="org-a"
         )
@@ -324,14 +356,35 @@ class TestAffinityUnderIsolation:
         assert backend.name == "a1"
         assert session_route == "remapped"  # pool violation invalidated the pin
         # And the pin now points inside the org's pool.
-        assert st.session_store.get("sess-1") == "a1"
+        assert st.session_store.get(_session_key("sess-1", "org-a")) == "a1"
 
     def test_pinned_in_pool_backend_still_used(self) -> None:
+        from meridian.api.routing import _session_key
+
         st = self._affinity_state()
-        st.session_store.put("sess-1", "a1")
+        st.session_store.put(_session_key("sess-1", "org-a"), "a1")
         backend, _, session_route = route(
             st, "m", _ctx(), session_id="sess-1", org_id="org-a"
         )
         assert backend is not None
         assert backend.name == "a1"
         assert session_route == "pinned"
+
+    def test_cross_org_same_session_id_cannot_read_or_overwrite_pin(self) -> None:
+        """M8: raw session ids are client-supplied; without org-namespacing,
+        org-b could read org-a's pin (then overwrite it on remap). The store
+        seals each pin under its org namespace."""
+        from meridian.api.routing import _session_key
+
+        st = self._affinity_state()
+        st.session_store.put(_session_key("sess-1", "org-a"), "a1")  # org-a's pin
+        # org-b presents the identical session id — must NOT see org-a's pin.
+        backend, _, session_route = route(
+            st, "m", _ctx(), session_id="sess-1", org_id="org-b"
+        )
+        assert backend is not None
+        assert backend.name == "b1"
+        assert session_route == "new"  # fresh pin in org-b's namespace, not "pinned"
+        # org-a's pin is untouched.
+        assert st.session_store.get(_session_key("sess-1", "org-a")) == "a1"
+        assert st.session_store.get(_session_key("sess-1", "org-b")) == "b1"

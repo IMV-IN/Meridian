@@ -277,6 +277,8 @@ class IsolationConfig(BaseModel):
     count as unlisted.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     mode: str = "shared"
     pools: Dict[str, List[str]] = Field(default_factory=dict)
 
@@ -285,6 +287,24 @@ class IsolationConfig(BaseModel):
     def _mode_ok(cls, v: str) -> str:
         if v not in ("shared", "dedicated"):
             raise ValueError("isolation.mode must be 'shared' or 'dedicated'")
+        return v
+
+    @field_validator("pools")
+    @classmethod
+    def _pools_ok(cls, v: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        """Reject empty pool lists (empty set ⊆ anything → org escapes isolation),
+        blank org keys, and blank tags (subset semantics are undefined for them)."""
+        for org, tags in v.items():
+            if not org.strip():
+                raise ValueError("isolation.pools: org keys must be non-empty")
+            if not tags:
+                raise ValueError(
+                    f"isolation.pools[{org!r}] is empty — an org pinned to an empty "
+                    "tag list can see every backend; remove the entry or give it tags"
+                )
+            for tag in tags:
+                if not tag.strip():
+                    raise ValueError(f"isolation.pools[{org!r}]: tags must be non-empty")
         return v
 
 

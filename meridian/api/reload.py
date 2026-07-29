@@ -71,7 +71,13 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
     # Parse + validate before touching anything — raises → state unchanged.
     new_cfg = MeridianConfig.from_yaml(state.config_path)
 
-    with _reload_lock:
+    # Lifecycle lock first (key create/delete hold it while rebuilding the
+    # index) so a full reload can't swap config mid-mutation and strand a
+    # just-written key in the old keys_file (M3). Local import: keys_admin
+    # already imports this module, so a module-level import would be circular.
+    from meridian.api.keys_admin import _lifecycle_lock  # noqa: PLC0415
+
+    with _lifecycle_lock, _reload_lock:
         # Build everything that might fail BEFORE mutating state.
         new_index = rebuild_key_index(new_cfg.auth)
         from meridian.api.state import build_registry  # local: avoid import cycle
@@ -95,6 +101,10 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
         state.key_index = new_index
         state.health_checker.registry = new_registry
         state.health_checker.update_config(new_cfg.health)
+
+        from meridian.api.state import warn_pool_tag_coverage
+
+        warn_pool_tag_coverage(new_cfg, new_registry)
 
         for b in new_registry.all_backends():
             BACKEND_HEALTHY.labels(backend=b.name).set(1 if b.healthy else 0)
