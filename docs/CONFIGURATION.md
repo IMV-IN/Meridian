@@ -50,6 +50,48 @@ tiering:
     long_decode: ["decode-pool"]
     default: ["general"]
 
+# Tenant isolation (optional, "shared" by default = pre-0.12 behavior: every
+# backend visible to every org). "dedicated" pins orgs listed in `pools` to
+# backend tag pools (pool tags ⊆ backend tags — same subset semantics as
+# tiering). A pinned org NEVER falls back outside its pool: an empty pool is
+# a 503, not a leak onto a neighbor's capacity. Orgs NOT listed (and anonymous
+# traffic) are excluded from every reserved pool — any backend matching a
+# claimed pool's full tag set. Session affinity remaps a pin whose backend has
+# left the org's pool. Empty pool lists, blank org keys/tags, and unknown keys
+# in this section fail config validation at load/reload.
+isolation:
+  mode: "shared"            # shared | dedicated
+  pools: {}                 # org_id -> required backend tags
+  # pools:
+  #   acme-enterprise: ["acme-dedicated", "gpu"]
+
+# Canary rollout (optional, disabled by default). Per-request weighted split
+# between the `stable_tags` and `canary_tags` backend pools. The controller
+# walks `steps` on a schedule (promotion) and rolls back to weight 0 when the
+# canary pool's rolling-window error rate breaches rollback_error_rate with at
+# least rollback_min_samples observations (demotion). A pool with no eligible
+# backend spills to the other side (availability beats split fidelity); if
+# NEITHER pool matches a backend for a model (e.g. untagged deployment),
+# routing falls back to all visible backends with a warning rather than
+# 503-ing. Dedicated-mode pinned orgs bypass the rollout (pool containment
+# wins). Session pins onto a rolled-back canary pool remap immediately; pins
+# survive ordinary weight tuning. State: GET /meridian/status ("canary" block),
+# meridian_canary_weight gauge, meridian_canary_rollbacks_total counter.
+canary:
+  enabled: false
+  canary_tags: ["canary"]   # tag set of the candidate pool
+  stable_tags: ["stable"]   # tag set of the incumbent pool
+  start_weight: 0.0         # % of new-session traffic on the canary pool
+  steps: []                 # promotion schedule: weight + duration_s (null = hold)
+  # steps:
+  #   - {weight: 10.0, duration_s: 600}
+  #   - {weight: 50.0, duration_s: 1800}
+  #   - {weight: 100.0, duration_s: null}
+  rollback_error_rate: 0.5  # fraction of 5xx outcomes in the window
+  rollback_min_samples: 10  # don't roll back on fewer samples (startup flaps)
+  window_s: 60.0            # rolling outcome window
+  tick_s: 5.0               # controller cycle period
+
 # Session affinity (optional, disabled by default). Pins a session to one backend
 # for KV-cache reuse. Requests carrying the `header` route to the same backend
 # while it stays healthy. Sliding TTL: each use refreshes the idle timeout.
@@ -70,8 +112,16 @@ session_affinity:
 # keys are rejected at config load. The /metrics, /meridian/*, and /ui
 # endpoints are always open (no auth gate). Key format: mrdn_ followed by
 # 20-40 alphanumeric characters.
+#
+# Optional per-key `key_id` overrides the non-secret prefix identifier used in
+# logs, budgets.keys, and usage queries (defaults to the key's first 13 chars).
+# `keys_file` (see DEPLOY.md) holds keys outside the main config; when set,
+# GET/POST/DELETE /meridian/keys manage those file keys live (admin-only: role
+# admin or ops_admin; the raw key is returned exactly once on POST) — see
+# OPS_RUNBOOK.md "Auth & keys". Inline `keys:` entries are NOT API-deletable.
 auth:
   enabled: false
+  # keys_file: /secrets/keys.yaml   # durable key store (managed via API)
   keys:
     - key: "mrdn_3kTyXq9Zm4PwR7sN8vBcDfGhJ"
       org_id: "acme"
@@ -79,6 +129,7 @@ auth:
       user_id: "alice"
     - key: "mrdn_9Bv4QwX8Ty2Rs5Np7MfLkHgDc"
       org_id: "acme"
+      # key_id: "svc-embedder"   # optional explicit non-secret id
 
 health:
   interval_s: 5
@@ -210,13 +261,14 @@ auth:
 
 Budgets are **disabled by default**. When `budgets.enabled: true`, Meridian meters each authenticated request against configured caps **before** routing to a backend. Metering uses the same estimated request cost as token-aware routing (`prompt_tokens * prefill_weight + max_tokens * decode_weight`) plus a request count — no response-body parsing, so streaming stays zero-copy.
 
-Caps cascade **org → team → user**. A request debits every applicable level; the first exhausted level returns **HTTP 429** (`"type": "rate_limit_exceeded"`) with `Retry-After` until the UTC period rolls (daily `YYYY-MM-DD` / monthly `YYYY-MM`). Scope keys:
+Caps cascade **org → team → user → key**. A request debits every applicable level; the first exhausted level returns **HTTP 429** (`"type": "rate_limit_exceeded"`) with `Retry-After` until the UTC period rolls (daily `YYYY-MM-DD` / monthly `YYYY-MM`). Scope keys:
 
 | Level | Config map | Key format |
 |---|---|---|
 | org | `budgets.orgs` | `org_id` |
 | team | `budgets.teams` | `{org_id}/{team_id}` |
 | user | `budgets.users` | `{org_id}/{user_id}` |
+| key | `budgets.keys` | `{key_id}` (the non-secret prefix id) |
 
 ```yaml
 budgets:
@@ -238,12 +290,29 @@ budgets:
     acme/alice:
       daily:
         requests: 200
+  keys:
+    mrdn_OrgKey00:                 # per-key caps (Phase 3): one chatty key can
+      daily:                       # blow its own budget without tripping the org
+        tokens: 50000
 
-# Per-org token-bucket overrides (not budget caps)
+# Token-bucket rate limiting (not budget caps). Scopes, checked in order:
+#   global (rate_limit.global_limit)   — one fleet-wide bucket (alias `global:`)
+#   model  (rate_limit.models[model])  — one bucket per listed model id
+#   org    (rate_limit.org_overrides)  — per org (fallback: client IP)
+# A request is checked against EVERY applicable scope first and only consumes
+# when all admit — a rejection never burns another scope's token. Rejections
+# land on meridian_ratelimit_rejections_total{scope=global|model|org|ip}.
 rate_limit:
   enabled: true
   token_capacity: 100
   token_refill_rate: 10
+  global_limit:                  # optional fleet-wide bucket
+    token_capacity: 1000
+    token_refill_rate: 100
+  models:                        # optional per-model buckets
+    big-expensive-model:
+      token_capacity: 5
+      token_refill_rate: 0.5
   org_overrides:
     acme:
       token_capacity: 20

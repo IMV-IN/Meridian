@@ -48,18 +48,21 @@ Key modules
 - Routing helpers: `meridian/api/routing.py`
 - Teardown: `meridian/api/finalize.py`
 - Router strategies: `meridian/router/strategies.py`
+- Tenant isolation: `meridian/router/isolation.py`
+- Canary rollout: `meridian/router/canary.py`
 - Registry: `meridian/registry/backend.py`
 - Health: `meridian/health/checker.py`
 - Proxy: `meridian/proxy/forward.py` (does not forward client Meridian keys)
 - Metrics: `meridian/metrics/collectors.py`
 - Auth / identity: `meridian/auth/`
+- Key lifecycle API logic: `meridian/api/keys_admin.py`
 - Usage / budgets: `meridian/usage/`
 - PII: `meridian/pii/`
 - Telemetry: `meridian/telemetry/`
 - Config schema: `meridian/config/models.py`
 - UI: `meridian/ui/index.html`
 
-**Milestone status:** A–N shipped and tagged through **v0.9.3** (see `docs/ship.md`). Next: **no new features** — the **v1.0 gate is on hold** pending cofounder / design-partner PoC sign-off (see `docs/internal/V1_GATE.md`).
+**Milestone status:** A–N plus Phases 1–3 shipped and tagged through **v0.12.0** (see `docs/ship.md`). Next: **no new features** — the **v1.0 gate is on hold** pending cofounder / design-partner PoC sign-off (see `docs/internal/V1_GATE.md`).
 
 ---
 

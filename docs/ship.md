@@ -37,10 +37,11 @@ _Last updated: 2026-07-28 — **v0.11.0 in tree**; Grafana dashboards, Helm hard
 | **0.9.4** | **`v0.9.4`** | RBAC roles, ops-endpoint auth, dashboard overhaul, scenario quickstart |
 | **0.10.0** | `v0.10.0` | Circuit breaker, retry+backoff, upstream/stream timeouts, full config reload; Phase 0 code health (fd fix, `[audit]` extra, 87% cov) |
 | **0.11.0** | **`v0.11.0`** | Grafana dashboards, Helm PDB/Ingress/TLS/RBAC, KEDA scaffolding, scale-to-zero idle marker |
+| **0.12.0** | **`v0.12.0`** | Tenant isolation modes, canary rollouts, key lifecycle API, per-key budgets/usage, per-model+global rate limits; branch-wide security/reliability hardening |
 
 Also: optional audit pipeline; Ollama load numbers ([`LOAD.md`](./LOAD.md)); hardened image scan ([`scans/IMAGE_SCAN_0.9.3.md`](./scans/IMAGE_SCAN_0.9.3.md)).
 
-**Latest release:** `v0.11.0` — `ghcr.io/imv-in/meridian:0.11.0`
+**Latest release:** `v0.12.0` — `ghcr.io/imv-in/meridian:0.12.0`
 
 ---
 

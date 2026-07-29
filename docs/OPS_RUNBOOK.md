@@ -25,6 +25,7 @@ Alert ideas (cardinality-safe labels only):
 | Action | How |
 |--------|-----|
 | Rotate app keys | Edit `auth.keys_file` → `SIGHUP` or `POST /meridian/reload` with `ops_admin` |
+| Create/delete keys live (no config edit) | `POST /meridian/keys` / `DELETE /meridian/keys/{key_id}` with an `admin`-role or `ops_admin` key; raw key returned once on POST. Inline-config keys are not API-deletable; self-delete and deleting the last admin key are refused (409) |
 | Break-glass export | Key with `cost_admin: true` |
 | Ops-only reload | Key with `ops_admin: true` |
 
