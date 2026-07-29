@@ -1,0 +1,57 @@
+# Phase 3 flagship demo — gateway + four mock backends (stable pool ×2,
+# canary pool ×1, acme-dedicated ×1) with auth, isolation, and canary rollout.
+#
+#   scripts/demo_phase3.sh        # seeds keys, then walks the story
+#
+# Gateway: http://localhost:8181 (DEMO_PORT env overrides) · /ui dashboard
+#
+# The default port avoids colliding with the standard :8080 quickstart.
+
+services:
+  backend-stable-1:
+    build: ./mock_backend
+    environment:
+      - BACKEND_NAME=stable-1
+      - BASE_LATENCY_MS=40
+      - MODEL_NAME=demo-model
+    command: uvicorn server:app --host 0.0.0.0 --port 9001
+
+  backend-stable-2:
+    build: ./mock_backend
+    environment:
+      - BACKEND_NAME=stable-2
+      - BASE_LATENCY_MS=60
+      - MODEL_NAME=demo-model
+    command: uvicorn server:app --host 0.0.0.0 --port 9002
+
+  backend-canary-1:
+    build: ./mock_backend
+    environment:
+      - BACKEND_NAME=canary-1
+      - BASE_LATENCY_MS=60
+      - MODEL_NAME=demo-model
+    command: uvicorn server:app --host 0.0.0.0 --port 9003
+
+  backend-acme-dedicated:
+    build: ./mock_backend
+    environment:
+      - BACKEND_NAME=acme-dedicated
+      - BASE_LATENCY_MS=50
+      - MODEL_NAME=demo-model
+    command: uvicorn server:app --host 0.0.0.0 --port 9004
+
+  meridian:
+    build: .
+    ports:
+      - "${DEMO_PORT:-8181}:8080"
+    environment:
+      - MERIDIAN_CONFIG=/app/config.yaml
+    depends_on:
+      - backend-stable-1
+      - backend-stable-2
+      - backend-canary-1
+      - backend-acme-dedicated
+    volumes:
+      - ./configs/phase3_demo.yaml:/app/config.yaml:ro
+      # writable key store: the key lifecycle API persists here
+      - ./.phase3_demo_keys:/app/demo_keys:rw

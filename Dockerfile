@@ -71,6 +71,9 @@ ENV PATH="/opt/venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1
 
 WORKDIR /app
+# Runtime user owns /app so logs (./meridian_requests.jsonl), sqlite stores,
+# and mounted config writes work when the container runs non-root.
+RUN chown meridian:meridian /app
 COPY --chown=meridian:meridian config.yaml .
 
 USER meridian

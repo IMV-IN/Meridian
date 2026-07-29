@@ -12,6 +12,7 @@ build/
 .understand-anything/
 .pytest_cache/
 .ruff_cache/
+graphify-out/
 
 # IDE
 .vscode/
@@ -45,3 +46,4 @@ config_real.yaml
 # local PoC artifacts
 poc_meridian_requests.jsonl
 docs/scans/*.json
+.phase3_demo_keys/

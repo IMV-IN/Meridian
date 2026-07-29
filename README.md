@@ -1,6 +1,6 @@
 # Meridian
 
-**Latest release: [v0.9.3](https://github.com/IMV-IN/Meridian/releases/tag/v0.9.3)** ·  
+**Latest release: [![GitHub release](https://img.shields.io/github/v/release/IMV-IN/Meridian?sort=semver)](https://github.com/IMV-IN/Meridian/releases/latest)** ·  
 **Docs index:** [`docs/README.md`](docs/README.md) · **Quickstart:** [`docs/QUICKSTART.md`](docs/QUICKSTART.md)
 
 Meridian is an **L7 inference gateway** for self-hosted / on-soil LLM fleets. It sits between your apps and OpenAI-compatible backends (vLLM, SGLang, TensorRT-LLM, Ollama, …) and adds **routing, health/failover, multi-tenant controls, and compliance hooks** without changing application code.
@@ -12,10 +12,11 @@ It is **not** an inference engine — no GPU scheduling, no KV-cache allocator.
 ## Why teams use it
 
 - **Drop-in OpenAI API** — `/v1/chat/completions` (stream + non-stream), `/v1/models`
-- **Routing & reliability** — least-inflight, token-aware, EWMA; health checks + failover
-- **Multi-tenant controls** — API keys → org/team/user; budgets; model allow-lists; rate limits
+- **Routing & reliability** — least-inflight, token-aware, EWMA; health checks + failover; **canary rollouts** with error-rate auto-rollback
+- **Multi-tenant controls** — API keys → org/team/user; budgets; model allow-lists; rate limits; **dedicated backend pools per tenant** (isolation modes)
+- **Key lifecycle API** — create/delete API keys live (`/meridian/keys`), per-key budgets and usage export
 - **Compliance hooks** — India PII pack (request path); optional tamper-evident audit; metadata-only logs
-- **Cost** — actual `usage` ledger + org-scoped export (`docs/ENTERPRISE_COST.md`)
+- **Cost** — actual `usage` ledger + org-scoped + per-key export (`docs/ENTERPRISE_COST.md`)
 - **Ops** — Prometheus, Helm, air-gap packaging, non-root image
 
 Full feature history: [`docs/MILESTONES.md`](docs/MILESTONES.md) · Status: [`docs/ship.md`](docs/ship.md)

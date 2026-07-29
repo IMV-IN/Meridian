@@ -1,0 +1,68 @@
+# Phase 3 flagship demo — isolation modes + key lifecycle API + canary rollout.
+# Backends: all mock (docker-compose.phase3.yaml) serving demo-model.
+#
+# Story beats (scripts/demo_phase3.sh walks them):
+#   1. acme is pinned to its own backend pool; globex (unlisted) can never
+#      land on it, and vice-versa (isolation.mode: dedicated).
+#   2. Keys are created/deleted via the API against keys_file — no restarts.
+#   3. canary rolls 15% of new traffic onto the canary pool; forcing mock 500s
+#      on it trips the error-rate rollback and traffic falls back to stable.
+
+gateway:
+  host: "0.0.0.0"
+  port: 8080
+  strategy: "least_inflight"
+
+backends:
+  - name: stable-1
+    url: "http://backend-stable-1:9001"
+    model: "demo-model"
+    tags: ["stable"]
+  - name: stable-2
+    url: "http://backend-stable-2:9002"
+    model: "demo-model"
+    tags: ["stable"]
+  - name: canary-1
+    url: "http://backend-canary-1:9003"
+    model: "demo-model"
+    tags: ["canary"]
+  - name: acme-dedicated
+    url: "http://backend-acme-dedicated:9004"
+    model: "demo-model"
+    tags: ["acme-dedicated"]
+
+health:
+  interval_s: 3
+  timeout_s: 2
+  # Deliberately high: chat 5xx count toward ejection cumulatively until a
+  # sweep succeeds; the demo forces a burst of mock failures to fill the
+  # canary rollback window, which would trip a low threshold and eject the
+  # backend instead. Production: keep this LOW (2–3) — dead backends should
+  # be ejected fast; the canary rollback covers *flaky* (error-rate) failures.
+  fail_threshold: 30
+
+auth:
+  enabled: true
+  # Seeded by scripts/demo_phase3.sh (mounted read-write so the key lifecycle
+  # API can persist new keys). Contains the admin key + two tenant keys.
+  keys_file: /app/demo_keys/keys.yaml
+
+isolation:
+  mode: dedicated
+  pools:
+    acme: ["acme-dedicated"]   # acme may ONLY use its own backend
+
+canary:
+  enabled: true
+  canary_tags: ["canary"]
+  stable_tags: ["stable"]
+  start_weight: 15.0           # 15% of new-season traffic on the canary pool
+  steps:                       # time-based promotion: hold 15% for 45s (demo
+    - weight: 15.0             # beats 1–5), then step up to 100% and hold
+      duration_s: 45
+    - weight: 100.0
+      duration_s: null
+  rollback_error_rate: 0.3
+  rollback_min_samples: 5
+  window_s: 300.0              # long window so the demo can fill it calmly
+  tick_s: 3.0

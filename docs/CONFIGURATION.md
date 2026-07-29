@@ -75,7 +75,14 @@ isolation:
 # routing falls back to all visible backends with a warning rather than
 # 503-ing. Dedicated-mode pinned orgs bypass the rollout (pool containment
 # wins). Session pins onto a rolled-back canary pool remap immediately; pins
-# survive ordinary weight tuning. State: GET /meridian/status ("canary" block),
+# survive ordinary weight tuning.
+# Interplay with health checking: passive failure tracking counts upstream 5xx
+# cumulatively between health sweeps — a canary that uniformly dies is EJECTED
+# by passive health marking before the error window can fill. The rollback
+# path is meant for *flaky* rollouts (a fraction of requests failing); dead
+# ones are handled by failover. If you demo/test rollback with injected
+# failures, raise health.fail_threshold above your burst size.
+# State: GET /meridian/status ("canary" block),
 # meridian_canary_weight gauge, meridian_canary_rollbacks_total counter.
 canary:
   enabled: false

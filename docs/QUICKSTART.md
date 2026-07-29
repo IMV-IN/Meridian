@@ -16,6 +16,11 @@ Scenarios C–F also use `jq` (or swap in `python3 -m json.tool`).
 | E | Cost / usage export | `rbac_demo.yaml` | no |
 | F | Telemetry & tiering headers | `mock_demo.yaml` | no |
 | G | Real backend (Ollama) | `local_gpu.yaml` | yes |
+| ★ | **Phase 3 flagship: isolation, key lifecycle API, canary auto-rollback** | `phase3_demo.yaml` | no |
+
+**New here? Skip the table and run the flagship:** `scripts/demo_phase3.sh`
+brings up its own stack (port 8181) and walks every headline feature with
+expected output inline.
 
 ---
 
