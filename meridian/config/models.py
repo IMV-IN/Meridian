@@ -304,6 +304,8 @@ class BudgetConfig(BaseModel):
     - ``orgs``: key = org_id
     - ``teams``: key = ``{org_id}/{team_id}``
     - ``users``: key = ``{org_id}/{user_id}``
+    - ``keys``: key = key_id (per-API-key caps; key_id defaults to the key
+      prefix when not explicitly set on the KeyConfig)
 
     ``store`` is ``sqlite`` (default, survives restart) or ``memory`` (tests).
     """
@@ -314,6 +316,7 @@ class BudgetConfig(BaseModel):
     orgs: Dict[str, ScopeBudget] = Field(default_factory=dict)
     teams: Dict[str, ScopeBudget] = Field(default_factory=dict)
     users: Dict[str, ScopeBudget] = Field(default_factory=dict)
+    keys: Dict[str, ScopeBudget] = Field(default_factory=dict)
 
     @field_validator("store")
     @classmethod

@@ -66,6 +66,7 @@ def _apply_actual_usage(
         team_id=chat.team_id,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
+        key_id=chat.identity.key_id if chat.identity else None,
     )
     reconcile_budget_usage(
         state,
@@ -527,9 +528,14 @@ async def usage_report(
     request: Request,
     org: Optional[str] = None,
     team: Optional[str] = None,
+    key: Optional[str] = None,
     window_days: int = 30,
 ) -> Response:
-    """Cost/token report. Requires auth when cost is enabled; org-scoped by key."""
+    """Cost/token report. Requires auth when cost is enabled; org-scoped by key.
+
+    ``key`` filters rows by the non-secret key_id (Phase 3 per-key tracking);
+    the org/team clamp from the caller's own key still applies.
+    """
     state = get_state()
     if state.cost_ledger is None:
         return JSONResponse({
@@ -547,7 +553,9 @@ async def usage_report(
     except GatewayError as exc:
         return exc.to_response()
     window = clamp_window_days(window_days, state.config.cost.max_window_days)
-    rows = state.cost_ledger.query(org_id=org_f, team_id=team_f, window_days=window)
+    rows = state.cost_ledger.query(
+        org_id=org_f, team_id=team_f, key_id=key, window_days=window
+    )
     return JSONResponse({
         "enabled": True,
         "currency": state.config.cost.currency,
@@ -557,6 +565,7 @@ async def usage_report(
                 "team_id": r.team_id,
                 "model": r.model,
                 "day": r.day,
+                "key_id": r.key_id,
                 "prompt_tokens": r.prompt_tokens,
                 "completion_tokens": r.completion_tokens,
                 "requests": r.requests,
@@ -572,6 +581,7 @@ async def usage_csv(
     request: Request,
     org: Optional[str] = None,
     team: Optional[str] = None,
+    key: Optional[str] = None,
     window_days: int = 30,
 ) -> Response:
     import csv
@@ -581,7 +591,7 @@ async def usage_csv(
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([
-        "org_id", "team_id", "model", "day",
+        "org_id", "team_id", "model", "day", "key_id",
         "prompt_tokens", "completion_tokens", "requests", "cost", "currency",
     ])
     if state.cost_ledger is not None:
@@ -595,9 +605,11 @@ async def usage_csv(
         except GatewayError as exc:
             return exc.to_response()
         window = clamp_window_days(window_days, state.config.cost.max_window_days)
-        for r in state.cost_ledger.query(org_id=org_f, team_id=team_f, window_days=window):
+        for r in state.cost_ledger.query(
+            org_id=org_f, team_id=team_f, key_id=key, window_days=window
+        ):
             w.writerow([
-                r.org_id, r.team_id, r.model, r.day,
+                r.org_id, r.team_id, r.model, r.day, r.key_id,
                 r.prompt_tokens, r.completion_tokens, r.requests,
                 f"{r.cost:.6f}", state.config.cost.currency,
             ])

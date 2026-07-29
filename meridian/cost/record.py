@@ -25,6 +25,7 @@ def record_actual_usage(
     team_id: Optional[str],
     prompt_tokens: int,
     completion_tokens: int,
+    key_id: Optional[str] = None,
 ) -> None:
     if state.cost_ledger is None or not state.config.cost.enabled:
         return
@@ -40,6 +41,7 @@ def record_actual_usage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         cost=cost,
+        key_id=key_id or "",
     )
     TOKENS_TOTAL.labels(model=model or "unknown", kind="prompt").inc(prompt_tokens)
     TOKENS_TOTAL.labels(model=model or "unknown", kind="completion").inc(completion_tokens)
