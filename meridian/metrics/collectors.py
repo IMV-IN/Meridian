@@ -36,6 +36,13 @@ BUDGET_REJECTIONS = Counter(
     ["level", "period"],
 )
 
+# Cardinality-safe: scope is one of global|model|org|ip — never tenant id.
+RATELIMIT_REJECTIONS = Counter(
+    "meridian_ratelimit_rejections_total",
+    "Requests rejected by token-bucket rate limiting",
+    ["scope"],
+)
+
 # Cardinality-safe: direction only — never tenant id.
 BUDGET_RECONCILES = Counter(
     "meridian_budget_reconciles_total",

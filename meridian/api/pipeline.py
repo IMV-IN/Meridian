@@ -8,14 +8,19 @@ from __future__ import annotations
 import json
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import Request
 
 from meridian.api.errors import GatewayError
 from meridian.api.state import AppState
 from meridian.auth import IdentityContext
-from meridian.metrics.collectors import BUDGET_RECONCILES, BUDGET_REJECTIONS, PII_DETECTIONS
+from meridian.metrics.collectors import (
+    BUDGET_RECONCILES,
+    BUDGET_REJECTIONS,
+    PII_DETECTIONS,
+    RATELIMIT_REJECTIONS,
+)
 from meridian.pii import apply_pii_policy, resolve_policy
 from meridian.router.strategies import RequestContext
 from meridian.router.token_estimator import estimate_prompt_tokens, extract_max_tokens
@@ -225,10 +230,36 @@ def apply_rate_limit(
     state: AppState,
     request: Request,
     org_id: Optional[str],
+    model: str = "",
 ) -> None:
+    """Token-bucket enforcement. Scopes: global → model → org/ip (check order).
+
+    Every configured scope is checked first, any failure rejects with 429
+    *before* any scope's bucket is consumed — a hot tenant cannot burn the
+    fleet-wide bucket with requests its own bucket would reject anyway.
+    Only when all scopes admit does each consume one token.
+    """
     if not state.config.rate_limit.enabled:
         return
     cfg = state.config.rate_limit
+
+    scopes: List[Tuple[str, float, float, str]] = []
+    if cfg.global_limit is not None:
+        scopes.append((
+            "global",
+            cfg.global_limit.token_capacity or cfg.token_capacity,
+            cfg.global_limit.token_refill_rate or cfg.token_refill_rate,
+            "global",
+        ))
+    if model and model in cfg.models:
+        mv = cfg.models[model]
+        scopes.append((
+            f"model:{model}",
+            mv.token_capacity or cfg.token_capacity,
+            mv.token_refill_rate or cfg.token_refill_rate,
+            "model",
+        ))
+
     capacity = cfg.token_capacity
     refill = cfg.token_refill_rate
     if org_id:
@@ -238,16 +269,28 @@ def apply_rate_limit(
                 capacity = override.token_capacity
             if override.token_refill_rate is not None:
                 refill = override.token_refill_rate
+    scopes.append((
+        f"org:{org_id}" if org_id else f"ip:{_client_ip(request)}",
+        capacity,
+        refill,
+        "org" if org_id else "ip",
+    ))
 
-    rl_key = f"org:{org_id}" if org_id else f"ip:{_client_ip(request)}"
-    bucket = state.rate_limit.get_or_create(rl_key, capacity, refill)
-    if not bucket.allow_request():
-        raise GatewayError(
-            "Rate Limit Exceeded",
-            "rate_limit_exceeded",
-            429,
-            headers={"Retry-After": str(1 / bucket.refill_rate)},
-        )
+    buckets = [
+        (state.rate_limit.get_or_create(key, cap, ref), label)
+        for key, cap, ref, label in scopes
+    ]
+    for bucket, label in buckets:
+        if bucket.get_remaining() < 1:
+            RATELIMIT_REJECTIONS.labels(scope=label).inc()
+            raise GatewayError(
+                "Rate Limit Exceeded",
+                "rate_limit_exceeded",
+                429,
+                headers={"Retry-After": str(1 / bucket.refill_rate)},
+            )
+    for bucket, _label in buckets:
+        bucket.allow_request()
 
 
 async def prepare_chat_request(
@@ -282,7 +325,7 @@ async def prepare_chat_request(
     rem_req: Optional[float] = None
     if meter_keys and state.usage_meter is not None:
         rem_tok, rem_req = state.usage_meter.remaining_headroom(meter_keys)
-    apply_rate_limit(state, request, org_id)
+    apply_rate_limit(state, request, org_id, model)
 
     return ChatRequest(
         body=body,

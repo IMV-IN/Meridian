@@ -142,6 +142,14 @@ class RateLimitConfig(BaseModel):
     sweep_interval_s: float = Field(default=60.0, gt=0.0)
     # Per-org capacity/refill overrides (moved off budgets — clear product boundary).
     org_overrides: Dict[str, OrgRateLimitOverride] = Field(default_factory=dict)
+    # Optional fleet-wide bucket, checked before org/model scopes
+    # (Phase 3). Key "global" in YAML; the field is aliased because
+    # ``global`` is a Python keyword.
+    global_limit: Optional[OrgRateLimitOverride] = Field(default=None, alias="global")
+    # Per-model buckets (Phase 3), keyed by model id.
+    models: Dict[str, OrgRateLimitOverride] = Field(default_factory=dict)
+
+    model_config = {"populate_by_name": True}
 
 
 class AuditBusConfig(BaseModel):
