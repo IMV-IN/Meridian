@@ -29,6 +29,7 @@ def _state(tier_tags, enabled=True):
         registry=registry,
         strategy=create_strategy("least_inflight"),
         config=cfg,
+        canary=None,
     )
 
 

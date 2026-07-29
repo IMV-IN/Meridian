@@ -22,6 +22,7 @@ from meridian.auth.keys import rebuild_key_index
 from meridian.config.models import MeridianConfig
 from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
 from meridian.router.affinity import SessionStore
+from meridian.router.canary import CanaryController
 from meridian.router.strategies import create_strategy
 from meridian.telemetry import JsonTelemetryAdapter, TelemetryAdapter, TelemetryPoller
 from meridian.usage import InMemoryUsageMeter, SqliteUsageMeter
@@ -151,6 +152,19 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
                 else None
             )
 
+        # Canary: save old ref before swapping (stop outside lock).
+        old_canary = state.canary
+        if new_cfg.canary != old_cfg.canary:
+            state.canary = (
+                CanaryController(new_cfg.canary)
+                if new_cfg.canary.enabled
+                else None
+            )
+            if state.canary is not None and old_canary is not None:
+                # Retag-safe carry-over of a prior auto-rollback — never
+                # re-arm a known-bad pool just because the section was edited.
+                state.canary.merge_from(old_canary)
+
         logger.info(
             "Config reloaded from %s — strategy=%s, %d backend(s), %d key(s)",
             state.config_path,
@@ -158,6 +172,13 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
             len(new_registry.all_backends()),
             len(new_index),
         )
+
+    # Stop old canary, start new canary (async — outside lock).
+    if new_cfg.canary != old_cfg.canary:
+        if old_canary is not None:
+            await old_canary.stop()
+        if state.canary is not None:
+            await state.canary.start()
 
     # Telemetry poller restart is async — outside the lock.
     # Roll back to the old poller if the new one fails to start.

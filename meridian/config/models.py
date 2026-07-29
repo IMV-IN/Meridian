@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
 class GatewayConfig(BaseModel):
@@ -207,6 +207,62 @@ class SessionAffinityConfig(BaseModel):
     max_sessions: int = Field(default=100_000, ge=1)
 
 
+class CanaryStep(BaseModel):
+    """One weight-shift step: hold ``weight``% traffic on the canary pool for
+    ``duration_s`` seconds, then advance. None duration = hold forever."""
+
+    weight: float = Field(ge=0.0, le=100.0)
+    duration_s: Optional[float] = Field(default=None, gt=0.0)
+
+
+class CanaryConfig(BaseModel):
+    """Canary rollout between two backend tag pools (Phase 3).
+
+    Traffic split: stable pool vs canary pool by weight percent, decided per
+    request. The controller walks ``steps`` on a clock (promotion) and rolls
+    back to weight 0 when the canary pool's rolling-window error rate breaches
+    ``rollback_error_rate`` with at least ``rollback_min_samples`` observations
+    (demotion). Pools that are empty contribute nothing: the request spills to
+    the other pool (availability beats split fidelity).
+
+    Dedicated-mode orgs pinned to their own pool bypass canary — pool
+    containment wins over rollout scheduling.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(default=False)
+    canary_tags: List[str] = Field(default_factory=lambda: ["canary"])
+    stable_tags: List[str] = Field(default_factory=lambda: ["stable"])
+    start_weight: float = Field(default=0.0, ge=0.0, le=100.0)
+    steps: List[CanaryStep] = Field(default_factory=list)
+    rollback_error_rate: float = Field(default=0.5, gt=0.0, le=1.0)
+    rollback_min_samples: int = Field(default=10, ge=1)
+    window_s: float = Field(default=60.0, gt=0.0)
+    tick_s: float = Field(default=5.0, gt=0.0)
+
+    @model_validator(mode="after")
+    def _tags_ok(self) -> "CanaryConfig":
+        """Empty canary_tags silently corrupts the rollback signal (empty set ⊆
+        every backend, so every request feeds the window) and makes pool
+        selection match everything. Overlapping pools make the split meaningless."""
+        if not self.enabled:
+            return self
+        for name, tags in (("canary_tags", self.canary_tags), ("stable_tags", self.stable_tags)):
+            if not tags:
+                raise ValueError(f"canary.{name} must be non-empty when canary is enabled")
+            for tag in tags:
+                if not tag.strip():
+                    raise ValueError(f"canary.{name}: tags must be non-empty")
+        overlap = set(self.canary_tags) & set(self.stable_tags)
+        if overlap:
+            raise ValueError(
+                f"canary pools overlap on tags {sorted(overlap)} — backends would be "
+                "claimable by both pools, making the weight split meaningless"
+            )
+        return self
+
+
 class IsolationConfig(BaseModel):
     """Tenant isolation modes (Phase 3). ``shared`` (default) = all backends
     visible to all orgs (pre-0.12 behavior).
@@ -403,6 +459,7 @@ class MeridianConfig(BaseModel):
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
     resilience: ResilienceConfig = Field(default_factory=ResilienceConfig)
     isolation: IsolationConfig = Field(default_factory=IsolationConfig)
+    canary: CanaryConfig = Field(default_factory=CanaryConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:

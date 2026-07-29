@@ -362,6 +362,16 @@ async def list_models() -> Response:
     })
 
 
+def _status_body(state: AppState) -> dict[str, object]:
+    body: dict[str, object] = {
+        "strategy": state.config.gateway.strategy,
+        "backends": [b.to_status_dict() for b in state.registry.all_backends()],
+    }
+    if state.canary is not None:
+        body["canary"] = state.canary.status()
+    return body
+
+
 @app.get("/meridian/status")
 async def status(request: Request) -> Response:
     state = get_state()
@@ -373,10 +383,7 @@ async def status(request: Request) -> Response:
         )
     except GatewayError as exc:
         return exc.to_response()
-    return JSONResponse({
-        "strategy": state.config.gateway.strategy,
-        "backends": [b.to_status_dict() for b in state.registry.all_backends()],
-    })
+    return JSONResponse(_status_body(state))
 
 
 @app.get("/meridian/version")

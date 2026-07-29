@@ -27,6 +27,7 @@ def _state(*, affinity_enabled: bool = True):
         strategy=create_strategy("least_inflight"),
         config=cfg,
         session_store=SessionStore(ttl_ms=600_000, max_sessions=100, clock=now_ms),
+        canary=None,
     )
 
 

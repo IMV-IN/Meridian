@@ -39,6 +39,7 @@ def _state(backends: list[Backend], iso: dict) -> SimpleNamespace:
         strategy=create_strategy("least_inflight"),
         config=cfg,
         session_store=None,
+        canary=None,
     )
 
 
@@ -261,6 +262,7 @@ class TestIsolationWithTiering:
             strategy=create_strategy("least_inflight"),
             config=cfg,
             session_store=None,
+            canary=None,
         )
 
     def test_pinned_org_tier_subpool_preferred(self) -> None:
@@ -308,6 +310,7 @@ class TestAffinityUnderIsolation:
             strategy=create_strategy("least_inflight"),
             config=cfg,
             session_store=SessionStore(ttl_ms=600_000, max_sessions=100, clock=now_ms),
+            canary=None,
         )
 
     def test_pinned_out_of_pool_backend_is_remapped(self) -> None:
