@@ -231,6 +231,9 @@ class KeyConfig(BaseModel):
     org_id: str = Field(min_length=1)
     team_id: Optional[str] = None
     user_id: Optional[str] = None
+    # Stable, non-secret identifier for this key (usage metering, ops views,
+    # key lifecycle API paths). Defaults to the key prefix (mrdn_ + first 8).
+    key_id: Optional[str] = None
     # Model allow-list. Empty = all models allowed (backward compatible).
     allowed_models: List[str] = Field(default_factory=list)
     # Optional PII policy override for this key (Milestone L). None = use global.

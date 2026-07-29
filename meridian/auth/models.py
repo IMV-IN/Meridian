@@ -32,6 +32,9 @@ class IdentityContext:
     cost_admin: bool = False
     ops_admin: bool = False
     role: Optional[str] = None
+    # Stable, non-secret identifier for the presenting key (usage metering,
+    # ops views). None for pre-0.12 identities built outside the key index.
+    key_id: Optional[str] = None
 
     @property
     def can_view_ops(self) -> bool:
@@ -50,6 +53,15 @@ class IdentityContext:
     def can_reload(self) -> bool:
         """May call POST /meridian/reload (key rotation)."""
         return self.ops_admin or self.role in ("operator", "admin")
+
+    @property
+    def can_manage_keys(self) -> bool:
+        """May call the key lifecycle API (POST/DELETE /meridian/keys).
+
+        Narrower than reload: rotating the credential surface is an
+        admin-only action, not an operator action.
+        """
+        return self.ops_admin or self.role == "admin"
 
     @property
     def can_read_all_cost(self) -> bool:

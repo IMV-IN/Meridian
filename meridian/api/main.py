@@ -18,9 +18,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from prometheus_client import generate_latest
 
-from meridian.api.authz import require_ops_view, require_reload
+from meridian.api.authz import require_key_admin, require_ops_view, require_reload
 from meridian.api.errors import GatewayError
 from meridian.api.finalize import finalize_request, stamp_meridian_headers
+from meridian.api.keys_admin import create_key, delete_key, list_keys
 from meridian.api.pipeline import ChatRequest, prepare_chat_request, reconcile_budget_usage
 from meridian.api.reload import reload_config
 from meridian.api.routing import route
@@ -430,6 +431,95 @@ async def reload_auth_keys(request: Request) -> Response:
             400,
         ).to_response()
     return JSONResponse({"reloaded": True, **report})
+
+
+@app.get("/meridian/keys")
+async def keys_list(request: Request) -> Response:
+    """List API keys, redacted (id/org/role/source only — never the raw key).
+
+    Requires auth.enabled and a key_admin-capable key (ops_admin or role admin).
+    """
+    state = get_state()
+    try:
+        require_key_admin(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+        return JSONResponse({"keys": list_keys(state)})
+    except GatewayError as exc:
+        return exc.to_response()
+    except Exception as exc:
+        logger.exception("Key listing failed")
+        return GatewayError(str(exc), "meridian_internal_error", 500).to_response()
+
+
+@app.post("/meridian/keys", status_code=201)
+async def keys_create(request: Request) -> Response:
+    """Create an API key, persist to keys_file, hot-swap the index.
+
+    The full key value is returned exactly once, in this response. ``key``
+    may be provided explicitly (must match the mrdn_ pattern) or generated.
+    """
+    from meridian.api.keys_admin import KeyCreateRequest
+
+    state = get_state()
+    try:
+        require_key_admin(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+    except GatewayError as exc:
+        return exc.to_response()
+    try:
+        body = await request.json()
+        req = KeyCreateRequest.model_validate(body)
+    except Exception:
+        return GatewayError(
+            "Invalid request body — expected KeyCreateRequest fields",
+            "invalid_request_error",
+            400,
+        ).to_response()
+    try:
+        view, full_key = create_key(
+            state,
+            org_id=req.org_id,
+            key=req.key,
+            team_id=req.team_id,
+            user_id=req.user_id,
+            key_id=req.key_id,
+            allowed_models=req.allowed_models,
+            pii_policy=req.pii_policy,
+            cost_admin=req.cost_admin,
+            ops_admin=req.ops_admin,
+            role=req.role,
+        )
+        return JSONResponse({"key": full_key, **view}, status_code=201)
+    except GatewayError as exc:
+        return exc.to_response()
+    except Exception as exc:
+        logger.exception("Key creation failed")
+        return GatewayError(str(exc), "meridian_internal_error", 500).to_response()
+
+
+@app.delete("/meridian/keys/{key_id}")
+async def keys_delete(key_id: str, request: Request) -> Response:
+    """Delete a keys_file key by its non-secret id. Inline-config keys refused."""
+    state = get_state()
+    try:
+        require_key_admin(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+        view = delete_key(state, key_id)
+        return JSONResponse({"deleted": True, **view})
+    except GatewayError as exc:
+        return exc.to_response()
+    except Exception as exc:
+        logger.exception("Key deletion failed")
+        return GatewayError(str(exc), "meridian_internal_error", 500).to_response()
 
 
 @app.get("/meridian/usage")
