@@ -6,11 +6,16 @@ this file is what you actually say, show, and send. Keep it synced with
 [`ship.md`](../ship.md) — **never pitch a feature that isn't in a tagged
 release** (that's a v1.0 gate rule).
 
-_Last updated: 2026-07-10. Shipped basis: **v0.9.3** (milestones A–N + 0.9.x
-polish). Evidence: [`POC_REPORT.md`](./POC_REPORT.md), [`LOAD.md`](../LOAD.md),
+_Last updated: 2026-07-30. Shipped basis: **v0.12.0** (milestones A–N, Phases
+1–3). Evidence: [`POC_REPORT.md`](./POC_REPORT.md), [`LOAD.md`](../LOAD.md),
 [`ship.md`](../ship.md). **Do not pitch** multi-provider routing, semantic
 cache, batch APIs, SSO, or true KV disaggregation — not on this tag. **v1.0**
 is a verification gate, not a feature release ([`V1_GATE.md`](./V1_GATE.md))._
+
+**New in this basis (Phase 3, safe to pitch):** tenant isolation modes
+(dedicated backend pools per org), canary rollouts with error-rate
+auto-rollback, key lifecycle API (create/delete keys without config edits),
+per-key budgets + usage export, per-model and global rate limits.
 
 ---
 
@@ -57,25 +62,38 @@ LiteLLM/Portkey territory — walk away or park them for post-v1.0).
 ### CISO / compliance head — *sovereignty & proof*
 - "Nothing leaves your VPC. Meridian is self-hosted, MIT-licensed, you can
   read every line."
+- "Audited orgs can be **pinned to dedicated backend pools** — your regulated
+  workloads never share capacity with anyone else's, in either direction;
+  session pins can't cross the boundary."
 - "Audit logs are metadata-only by default — prompts are never logged — and
   the audit pipeline is tamper-evident: SHA-256 hash chain → Merkle root →
   Ed25519 signature → S3 Object Lock. If anyone alters one byte of history,
   verification fails. You get mathematical proof for the auditor, not a
   promise."
-- Demo move: alter a stored audit record live, show verification break.
+- Demo move: alter a stored audit record live, show verification break. Then
+  show two orgs on the same gateway routed to physically separate backends.
 
 ### VP Engineering / platform lead — *reliability without rework*
 - "Drop-in OpenAI-compatible: change `base_url`, done. Streaming included."
 - "Token-aware routing stops a 2k-token generation from queueing behind your
   chatbot's 32-token replies; health checks + failover eject a dead vLLM node
   in ~10 seconds with zero app awareness."
+- "**Canary rollouts are built in**: shift 10% of traffic to the new model
+  build, watch its error rate; a window of failures above your threshold rolls
+  back to 0 automatically. Model upgrades stop being deployment days."
+- "Keys rotate without a restart and get **created/revoked via an API** — no
+  config edit, no SIGHUP, no ask-platform-tickets for key issuance."
 - Demo move: `docker stop` a backend mid-load, watch traffic shift on the
-  dashboard.
+  dashboard. Then run a canary rollout live: weight 10 → force the canary to
+  5xx → watch the rollback fire and traffic fall back on its own.
 
 ### CFO / finance — *attribution & control*
 - "Every request carries an org/team identity. You get **token/request budgets**
-  (org→team→user) and a **cost ledger** from actual backend `usage`, exportable
-  as JSON/CSV with org-scoped access for finance keys."
+  (org→team→user→**key** — a runaway integration blows its own cap, not the
+  org's) and a **cost ledger** from actual backend `usage`, exportable as
+  JSON/CSV with org-scoped access for finance keys and a **per-key filter**."
+- "Fleet-wide and per-model rate limits cap what any single integration or
+  model can take — capacity planning you can defend in a budget review."
 - "Gateway overhead on a real small model is ~**2 ms** vs ~150 ms generation —
   you are not buying latency; you are buying control and proof."
   ([`LOAD.md`](../LOAD.md))
@@ -83,9 +101,11 @@ LiteLLM/Portkey territory — walk away or park them for post-v1.0).
   regulatory liability of public APIs at the same volume — and versus 6–9
   months of platform-team time building this in-house."
 
-## 5. Demo script (15 minutes, all shipped features)
+## 5. Demo script (18 minutes, all shipped features)
 
-Prep: `docker compose up --build` on a laptop; auth-enabled config ready.
+Prep: `docker compose up --build` on a laptop; auth-enabled config ready
+(and, for steps 6–7, `configs/` demo with tagged stable/canary pools if not
+working from the real-engine setup).
 
 1. **Drop-in compatibility (2 min)** — point the OpenAI Python SDK at
    Meridian, run a chat completion, show `x-meridian-backend` header.
@@ -94,10 +114,24 @@ Prep: `docker compose up --build` on a laptop; auth-enabled config ready.
 3. **Failover (3 min)** — `docker stop` the fast backend; dashboard flips to
    unhealthy in ~10 s; requests keep succeeding via the slow backend; restart
    it, watch recovery.
-4. **Tenancy (4 min)** — switch to auth config: request without a key → 401;
+4. **Tenancy (3 min)** — switch to auth config: request without a key → 401;
    with key → 200 and org-tagged logs; request a disallowed model → 403;
    hammer one org's key → 429 while another org sails through.
-5. **Audit integrity (3 min)** — show a JSONL/audit event (no prompt in it),
+5. **Tenant isolation (2 min)** — show two orgs pinned to dedicated backend
+   pools (`isolation.pools`): org A's requests only ever land on its own
+   backends even when org B floods the gateway. Land: *"audited capacity, not
+   a traffic queue."*
+6. **Key lifecycle (2 min)** — `POST /meridian/keys` live, use the new key
+   immediately (no restart), `GET /meridian/keys` shows it redacted,
+   `DELETE` it, watch it 401 on the next request.
+7. **Canary rollout (2 min)** — enable canary with `start_weight: 10`, route
+   a burst, show the split in headers/metrics; force the canary to 5xx, watch
+   `meridian_canary_rollbacks_total` tick and traffic fall back to stable by
+   itself.
+
+Then, time permitting, the closers:
+
+8. **Audit integrity (1 min)** — show a JSONL/audit event (no prompt in it),
    then the hash-chain verification, then tamper with a record and re-verify
    → failure. Land the line: *"this is what you hand the auditor."*
 
@@ -106,11 +140,11 @@ Prep: `docker compose up --build` on a laptop; auth-enabled config ready.
 | Objection | Response |
 |---|---|
 | "We'll build this ourselves." | "Your team can — it's 6–9 months of gateway plumbing before they touch your actual product. Meridian is MIT open source: adopt it, audit it, and pay us only for the enterprise controls and support. Build vs buy here is really build vs *fork*." |
-| "How is this different from LiteLLM/Portkey?" | "They're API-management proxies aimed at multi-provider SaaS. Meridian is compliance-first and sovereign: on-soil deployment, tamper-evident WORM audit trail, India PII pack *(post-L)*, air-gapped installs. If your problem is regulator-shaped, they aren't in this category." |
+| "How is this different from LiteLLM/Portkey?" | "They're API-management proxies aimed at multi-provider SaaS. Meridian is compliance-first and sovereign: on-soil deployment, tamper-evident WORM audit trail, India PII pack, air-gapped installs, dedicated tenant pools. If your problem is regulator-shaped, they aren't in this category." |
 | "It's Python — will it be fast enough?" | "The gateway adds low-single-digit ms; your model generates tokens at 80/s. At a bank's true peak of 50–150 in-flight requests, the gateway is never the bottleneck — we publish overhead benchmarks per release." *(Backed by numbers from Milestone K.)* |
 | "Single gateway = single point of failure?" | "The gateway is stateless for the data path and restarts in seconds; backends fail over automatically. For hard HA requirements we run active-passive behind your LB today; shared-state HA is on the roadmap." |
 | "Is it battle-tested?" | Honest answer pre-v1.0: "We're onboarding design partners now — you'd get direct engineering support and roadmap influence at design-partner pricing." Don't fake maturity; regulated buyers verify. |
-| "What about PII in prompts?" | Pre-L: "On the current milestone — India entity pack (Aadhaar/PAN/GSTIN/IFSC/UPI) with block/redact policies. Today prompts already never reach logs." Post-L: demo it. |
+| "What about PII in prompts?" | "Shipped — India entity pack (Aadhaar/PAN/GSTIN/IFSC/UPI) with block/redact policies, counts-only logging. Demo it live: fire an Aadhaar-shaped prompt at the gateway." |
 
 ## 7. Deployment models & pricing (summary)
 
@@ -146,14 +180,15 @@ un-losable if the product works.
 
 ## 9. What NOT to claim (until shipped — check ship.md first)
 
-- ❌ Token budgets / spend caps (Milestone J)
-- ❌ PII detection & redaction (Milestone L)
-- ❌ Per-team cost reports in ₹/$ (Milestone M)
-- ❌ Helm / air-gapped installer (Milestone N)
 - ❌ Multi-provider routing, semantic caching (post-v1.0,
   [`FEATURES.md`](./FEATURES.md))
+- ❌ SSO/OIDC, hierarchical org roles (post-v1.0)
+- ❌ Batch APIs, true prefill/decode disaggregation, KV-cache-aware routing
+  (engine-internal hooks — post-v1.0 roadmap)
+- ❌ Shared-state / multi-replica HA for the gateway itself (active-passive
+  behind an LB is the shipped answer)
 
-Phrase these as "on the current milestone" with the roadmap doc, never as
+Phrase these as "on the roadmap" with [`ROADMAP.md`](../ROADMAP.md), never as
 present tense. One caught overclaim costs the CISO's trust permanently.
 
 ## 10. Follow-up kit (send within 24h of a meeting)
