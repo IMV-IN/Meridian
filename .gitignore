@@ -12,6 +12,7 @@ build/
 .understand-anything/
 .pytest_cache/
 .ruff_cache/
+graphify-out/
 
 # IDE
 .vscode/
