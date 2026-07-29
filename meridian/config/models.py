@@ -199,6 +199,31 @@ class SessionAffinityConfig(BaseModel):
     max_sessions: int = Field(default=100_000, ge=1)
 
 
+class IsolationConfig(BaseModel):
+    """Tenant isolation modes (Phase 3). ``shared`` (default) = all backends
+    visible to all orgs (pre-0.12 behavior).
+
+    ``dedicated``: orgs listed in ``pools`` are pinned to backend tag pools
+    (pool tags ⊆ backend tags — same subset semantics as tiering). Pinned
+    orgs never fall back outside their pool: if their pool has no healthy
+    backend the request fails (503) instead of landing on a neighbor's
+    capacity. Orgs not listed are excluded from *every* reserved pool (any
+    backend matching a claimed pool's full tag set), so unlisted traffic
+    cannot starve a dedicated pool either. Org-less requests (auth off)
+    count as unlisted.
+    """
+
+    mode: str = "shared"
+    pools: Dict[str, List[str]] = Field(default_factory=dict)
+
+    @field_validator("mode")
+    @classmethod
+    def _mode_ok(cls, v: str) -> str:
+        if v not in ("shared", "dedicated"):
+            raise ValueError("isolation.mode must be 'shared' or 'dedicated'")
+        return v
+
+
 class KeyConfig(BaseModel):
     """A single API key mapped to an identity."""
 
@@ -363,6 +388,7 @@ class MeridianConfig(BaseModel):
     cost: CostConfig = Field(default_factory=CostConfig)
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
     resilience: ResilienceConfig = Field(default_factory=ResilienceConfig)
+    isolation: IsolationConfig = Field(default_factory=IsolationConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:

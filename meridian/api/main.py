@@ -190,7 +190,7 @@ async def chat_completions(request: Request) -> Response:
         session_id = request.headers.get(state.config.session_affinity.header)
 
     backend, tier_name, session_route = route(
-        state, chat.model, chat.request_ctx, session_id
+        state, chat.model, chat.request_ctx, session_id, org_id=chat.org_id
     )
     if backend is None:
         return GatewayError(
