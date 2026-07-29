@@ -58,11 +58,17 @@ def build_meter_keys(
     - org:  ``orgs[org_id]``
     - team: ``teams[org_id/team_id]``
     - user: ``users[org_id/user_id]``
+    - key:  ``keys[key_id]`` (per-API-key caps, Phase 3)
     """
     if now is None:
         now = datetime.now(timezone.utc)
 
     keys: List[MeterKey] = []
+
+    if identity.key_id:
+        key_scope = budgets.keys.get(identity.key_id)
+        if key_scope is not None:
+            _append_scope_keys(keys, key_scope, "key", identity.key_id, now)
 
     org_scope = budgets.orgs.get(identity.org_id)
     if org_scope is not None:

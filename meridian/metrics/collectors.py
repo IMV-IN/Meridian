@@ -36,6 +36,23 @@ BUDGET_REJECTIONS = Counter(
     ["level", "period"],
 )
 
+# Cardinality-safe: scope is one of global|model|org|ip — never tenant id.
+RATELIMIT_REJECTIONS = Counter(
+    "meridian_ratelimit_rejections_total",
+    "Requests rejected by token-bucket rate limiting",
+    ["scope"],
+)
+
+# Canary rollout state (Phase 3). Unlabeled: one rollout per process.
+CANARY_WEIGHT = Gauge(
+    "meridian_canary_weight",
+    "Current canary traffic weight (percent)",
+)
+CANARY_ROLLBACKS = Counter(
+    "meridian_canary_rollbacks_total",
+    "Automatic canary rollbacks on error-rate breach",
+)
+
 # Cardinality-safe: direction only — never tenant id.
 BUDGET_RECONCILES = Counter(
     "meridian_budget_reconciles_total",

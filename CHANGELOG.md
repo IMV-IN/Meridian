@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.12.0] - 2026-07-30
+
+Complete-product track: Phase 3 (platform depth & multi-tenancy) from
+[`docs/FULL.md`](docs/FULL.md).
+
+### Added
+
+- **Tenant isolation modes** (`isolation.mode: shared | dedicated`, default `shared`) — orgs listed in `isolation.pools` are pinned to backend tag pools and **never** fall back outside them (an empty pool is a 503, not a leak onto a neighbor's capacity); unlisted orgs are excluded from *every* reserved pool, so noisy tenants can't starve a dedicated one in either direction. Session affinity remaps a pin that has fallen out of the org's pool. Startup and `reload` log loudly when a pool tag set matches zero backends or reserved pools cover all backends.
+- **Canary rollouts** (`canary`, off by default) — weighted per-request split between `stable_tags` and `canary_tags` backend pools. Promotion walks a `steps` schedule by duration; demotion is error-based: a rolling-window error rate over `rollback_min_samples` breaches → automatic rollback to weight 0 (`meridian_canary_rollbacks_total`). Empty pool spills to the other side (availability beats split fidelity); dedicated-mode pinned orgs bypass; `meridian_canary_weight` gauge + `canary` block in `/meridian/status`.
+- **Key lifecycle API** — `GET/POST/DELETE /meridian/keys` (admin-only: `ops_admin` or `role: admin`). Keys are managed without config edits; every mutation is written atomically to `auth.keys_file` (temp+fsync+rename) and hot-swapped into the index immediately. The raw key is returned **exactly once** (POST 201); every other surface uses the non-secret prefix `key_id`. Inline-config keys are refused by DELETE.
+- **Per-key usage tracking** — `budgets.keys[{key_id}]` gives individual API keys their own budget caps; cost-ledger rows carry a `key_id` column (`/meridian/usage?key=`, CSV export); pre-0.12 sqlite databases migrate automatically on first boot (historical rows preserved with `key_id = ''`).
+- **Per-model + global rate limits** — `rate_limit.global_limit` (fleet-wide bucket, alias `global:`) and `rate_limit.models[{model}]` (per-model bucket) scopes, checked global → model → org/ip. Rejections counted on `meridian_ratelimit_rejections_total{scope=global|model|org|ip}`.
+
+### Security & reliability hardening (branch code review)
+
+- **Isolation**: an org pinned to an *empty* pool list could previously see **every** backend (empty-set ⊆ anything) — `isolation.pools` now rejects empty lists, blank org keys, and blank tags at load; unknown keys in `isolation:`/`canary:` are rejected (`extra="forbid"`), so a `pool:` typo can't silently disable isolation.
+- **Session pins are namespaced by org** — two orgs presenting the same `x-meridian-session` id no longer read/overwrite each other's pin.
+- **Canary safety**: enabling canary on an untagged deployment falls back to default routing (previously every request 503'd); session pins onto a rolled-back pool remap immediately instead of indefinitely serving a failing rollout; editing the canary section on reload carries the rollback state over (no silent re-arm); `meridian_canary_weight` reflects the split from construction and clears when disabled.
+- **Keys**: `keys_file` rewrites preserve the file's mode (fresh files 0600 — a rewrite previously widened a 0600 credential store to umask defaults); self-delete and last-key-admin deletes are refused (409) so the API can't brick itself; `reload_config` takes the lifecycle lock so a config swap can't strand a just-written key.
+- **Rate limits**: multi-scope check+consume is atomic under the store lock — no concurrent over-admission, a rejection never burns another scope's token.
+- **Cost ledger**: the pre-0.12 sqlite schema migration runs as one transaction and resumes idempotently from a crash (leftover `cost_ledger_v1` staging table; `INSERT OR IGNORE` dedupe), instead of stranding history on a partial migration.
+
+### Tests & validation
+
+- **537 tests** (486 at branch start, +51): isolation modes & affinity-under-isolation; key lifecycle incl. file permissions, self/last-admin guards; per-key budgets/ledger/migration resume; rate-limit scopes incl. thread-race no-over-admission; canary controller, routing, rollback-pin semantics, reload re-arm prevention.
+- Gates: `ruff check .`, `mypy meridian`, `pytest -q` all green.
+
 ## [0.11.0] - 2026-07-28
 
 Complete-product track: Phase 2 (observability, packaging & elasticity) from

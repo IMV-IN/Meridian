@@ -49,6 +49,9 @@ def finalize_request(
     REQUEST_LATENCY.labels(backend=backend.name, model=model).observe(latency)
     BACKEND_HEALTHY.labels(backend=backend.name).set(1 if backend.healthy else 0)
 
+    if state.canary is not None:
+        state.canary.record_backend(backend, status_code)
+
     pii_meta = pii_counts if pii_counts else None
     state.request_logger.log(
         request_id=request_id,

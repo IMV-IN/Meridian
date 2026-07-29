@@ -66,3 +66,26 @@ def require_reload(
             403,
         )
     return identity
+
+
+def require_key_admin(
+    *,
+    auth_enabled: bool,
+    key_index: Dict[str, IdentityContext],
+    authorization: Optional[str],
+) -> Optional[IdentityContext]:
+    """Require key-management rights (ops_admin / role admin)."""
+    if not auth_enabled:
+        raise GatewayError(
+            "Key management requires auth.enabled",
+            "authentication_error",
+            401,
+        )
+    identity = _authenticate(key_index, authorization)
+    if not identity.can_manage_keys:
+        raise GatewayError(
+            "admin or ops_admin key required for key management",
+            "permission_error",
+            403,
+        )
+    return identity

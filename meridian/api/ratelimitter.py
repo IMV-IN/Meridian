@@ -85,25 +85,62 @@ class RateLimitStore:
         """Return the bucket for *key*, creating it if missing; slide idle TTL."""
         now = self._clock()
         with self._lock:
-            entry = self._map.get(key)
-            if entry is not None:
-                bucket, expiry = entry
-                if now < expiry:
-                    new_expiry = now + self._ttl
-                    self._map[key] = (bucket, new_expiry)
-                    heappush(self._expiry_heap, (new_expiry, key))
-                    return bucket
-                # Expired — drop and recreate below
-                del self._map[key]
+            return self._get_or_create_locked(key, max_tokens, refill_rate, now)
 
-            if len(self._map) >= self._max:
-                self._evict_nearest_expiry()
+    def _get_or_create_locked(
+        self,
+        key: str,
+        max_tokens: float,
+        refill_rate: float,
+        now: float,
+    ) -> TokenBucket:
+        """get_or_create without locking — caller must hold ``self._lock``."""
+        entry = self._map.get(key)
+        if entry is not None:
+            bucket, expiry = entry
+            if now < expiry:
+                new_expiry = now + self._ttl
+                self._map[key] = (bucket, new_expiry)
+                heappush(self._expiry_heap, (new_expiry, key))
+                return bucket
+            # Expired — drop and recreate below
+            del self._map[key]
 
-            bucket = TokenBucket(max_tokens=max_tokens, refill_rate=refill_rate)
-            expiry = now + self._ttl
-            self._map[key] = (bucket, expiry)
-            heappush(self._expiry_heap, (expiry, key))
-            return bucket
+        if len(self._map) >= self._max:
+            self._evict_nearest_expiry()
+
+        bucket = TokenBucket(max_tokens=max_tokens, refill_rate=refill_rate)
+        expiry = now + self._ttl
+        self._map[key] = (bucket, expiry)
+        heappush(self._expiry_heap, (expiry, key))
+        return bucket
+
+    def check_multi(
+        self, scopes: List[Tuple[str, float, float, str]]
+    ) -> Optional[Tuple[str, float]]:
+        """Atomically check every scope; consume one token per scope only when
+        ALL admit. Returns ``(rejected_scope_label, refill_rate)`` on rejection,
+        None when admitted.
+
+        Holding ``_lock`` across check+consume makes the pair serializable:
+        buckets can only refill inside the window, never drain, so a scope
+        passing the check always consumes — no over-admission, no consumed-but-
+        rejected partial state. Nested locking order (store → bucket) is the
+        only nesting in the codebase, so it cannot deadlock.
+        """
+        now = self._clock()
+        with self._lock:
+            buckets = [
+                (self._get_or_create_locked(key, cap, ref, now), label)
+                for key, cap, ref, label in scopes
+            ]
+            for bucket, label in buckets:
+                if bucket.get_remaining() < 1:
+                    return label, bucket.refill_rate
+            for bucket, _label in buckets:
+                admitted = bucket.allow_request()
+                assert admitted  # exclusive window: check passed → consume cannot fail
+            return None
 
     def sweep(self) -> int:
         """Drop expired entries. Returns number removed."""

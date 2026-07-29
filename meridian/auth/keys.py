@@ -6,10 +6,30 @@ pulling in the web framework.
 
 from __future__ import annotations
 
-from typing import List
+import os
+import secrets
+import string
+from typing import Any, Dict, List, Tuple
 
 from meridian.auth.models import IdentityContext
 from meridian.config.models import AuthConfig, KeyConfig
+
+_KEY_ALPHABET = string.ascii_letters + string.digits
+
+
+def derive_key_id(key: str) -> str:
+    """Stable, non-secret identifier for a raw key.
+
+    ``mrdn_`` + the first 8 characters of the key body — enough entropy to be
+    unique within a deployment's key set, useless for authentication.
+    """
+    body = key[len("mrdn_"):] if key.startswith("mrdn_") else key
+    return f"mrdn_{body[:8]}"
+
+
+def generate_key() -> str:
+    """Generate a random key matching the KeyConfig pattern (mrdn_ + 32 alnum)."""
+    return "mrdn_" + "".join(secrets.choice(_KEY_ALPHABET) for _ in range(32))
 
 
 class AuthError(Exception):
@@ -38,6 +58,7 @@ def _identity_from_key(kc: KeyConfig) -> IdentityContext:
         cost_admin=kc.cost_admin,
         ops_admin=kc.ops_admin,
         role=kc.role,
+        key_id=kc.key_id or derive_key_id(kc.key),
     )
 
 
@@ -53,6 +74,52 @@ def load_keys_from_file(path: str) -> List[KeyConfig]:
     if not isinstance(raw, list):
         raise ValueError(f"keys file {path!r}: 'keys' must be a list")
     return [KeyConfig.model_validate(item) for item in raw]
+
+
+def load_keys_with_sources(auth: AuthConfig) -> List[Tuple[KeyConfig, str]]:
+    """(KeyConfig, source) pairs; source is 'inline' or the keys_file path."""
+    out: List[Tuple[KeyConfig, str]] = [(kc, "inline") for kc in auth.keys]
+    if auth.keys_file:
+        out.extend((kc, auth.keys_file) for kc in load_keys_from_file(auth.keys_file))
+    return out
+
+
+def save_keys_to_file(path: str, keys: List[KeyConfig]) -> None:
+    """Atomically rewrite the keys_file with the given file-source keys.
+
+    Other top-level YAML sections are preserved (comments are not — YAML
+    round-tripping is out of scope). Write-temp + rename in the same
+    directory so a crash never leaves a half-written file.
+    """
+    import yaml
+
+    existing: Dict[str, Any] = {}
+    if os.path.exists(path):
+        with open(path) as f:
+            raw = yaml.safe_load(f)
+        existing = raw if isinstance(raw, dict) else {}
+    existing["keys"] = [
+        {k: v for k, v in kc.model_dump(mode="json").items() if v is not None}
+        for kc in keys
+    ]
+    tmp = f"{path}.tmp"
+    with open(tmp, "w") as f:
+        yaml.safe_dump(existing, f, default_flow_style=False, sort_keys=False)
+        f.flush()
+        os.fsync(f.fileno())
+    # The file stores plaintext API keys — never let a rewrite widen its
+    # permissions. Preserve the existing mode (operators may restrict
+    # further); default to 0600 for a fresh file.
+    if os.path.exists(path):
+        os.chmod(tmp, os.stat(path).st_mode & 0o777)
+    else:
+        os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+
+
+def file_keys_only(auth: AuthConfig) -> List[KeyConfig]:
+    """Keys sourced from keys_file (empty when unconfigured)."""
+    return load_keys_from_file(auth.keys_file) if auth.keys_file else []
 
 
 def build_key_index(auth: AuthConfig) -> dict[str, IdentityContext]:

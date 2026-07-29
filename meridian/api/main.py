@@ -18,9 +18,10 @@ from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse, Response
 from prometheus_client import generate_latest
 
-from meridian.api.authz import require_ops_view, require_reload
+from meridian.api.authz import require_key_admin, require_ops_view, require_reload
 from meridian.api.errors import GatewayError
 from meridian.api.finalize import finalize_request, stamp_meridian_headers
+from meridian.api.keys_admin import create_key, delete_key, list_keys
 from meridian.api.pipeline import ChatRequest, prepare_chat_request, reconcile_budget_usage
 from meridian.api.reload import reload_config
 from meridian.api.routing import route
@@ -65,6 +66,7 @@ def _apply_actual_usage(
         team_id=chat.team_id,
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
+        key_id=chat.identity.key_id if chat.identity else None,
     )
     reconcile_budget_usage(
         state,
@@ -154,7 +156,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await shutdown_app()
 
 
-app = FastAPI(title="Meridian", version="0.11.0", lifespan=lifespan)
+app = FastAPI(title="Meridian", version="0.12.0", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -190,7 +192,7 @@ async def chat_completions(request: Request) -> Response:
         session_id = request.headers.get(state.config.session_affinity.header)
 
     backend, tier_name, session_route = route(
-        state, chat.model, chat.request_ctx, session_id
+        state, chat.model, chat.request_ctx, session_id, org_id=chat.org_id
     )
     if backend is None:
         return GatewayError(
@@ -360,6 +362,16 @@ async def list_models() -> Response:
     })
 
 
+def _status_body(state: AppState) -> dict[str, object]:
+    body: dict[str, object] = {
+        "strategy": state.config.gateway.strategy,
+        "backends": [b.to_status_dict() for b in state.registry.all_backends()],
+    }
+    if state.canary is not None:
+        body["canary"] = state.canary.status()
+    return body
+
+
 @app.get("/meridian/status")
 async def status(request: Request) -> Response:
     state = get_state()
@@ -371,10 +383,7 @@ async def status(request: Request) -> Response:
         )
     except GatewayError as exc:
         return exc.to_response()
-    return JSONResponse({
-        "strategy": state.config.gateway.strategy,
-        "backends": [b.to_status_dict() for b in state.registry.all_backends()],
-    })
+    return JSONResponse(_status_body(state))
 
 
 @app.get("/meridian/version")
@@ -432,14 +441,114 @@ async def reload_auth_keys(request: Request) -> Response:
     return JSONResponse({"reloaded": True, **report})
 
 
+@app.get("/meridian/keys")
+async def keys_list(request: Request) -> Response:
+    """List API keys, redacted (id/org/role/source only — never the raw key).
+
+    Requires auth.enabled and a key_admin-capable key (ops_admin or role admin).
+    """
+    state = get_state()
+    try:
+        require_key_admin(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+        return JSONResponse({"keys": list_keys(state)})
+    except GatewayError as exc:
+        return exc.to_response()
+    except Exception as exc:
+        logger.exception("Key listing failed")
+        return GatewayError(str(exc), "meridian_internal_error", 500).to_response()
+
+
+@app.post("/meridian/keys", status_code=201)
+async def keys_create(request: Request) -> Response:
+    """Create an API key, persist to keys_file, hot-swap the index.
+
+    The full key value is returned exactly once, in this response. ``key``
+    may be provided explicitly (must match the mrdn_ pattern) or generated.
+    """
+    from meridian.api.keys_admin import KeyCreateRequest
+
+    state = get_state()
+    try:
+        require_key_admin(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+    except GatewayError as exc:
+        return exc.to_response()
+    try:
+        body = await request.json()
+        req = KeyCreateRequest.model_validate(body)
+    except Exception:
+        return GatewayError(
+            "Invalid request body — expected KeyCreateRequest fields",
+            "invalid_request_error",
+            400,
+        ).to_response()
+    try:
+        view, full_key = create_key(
+            state,
+            org_id=req.org_id,
+            key=req.key,
+            team_id=req.team_id,
+            user_id=req.user_id,
+            key_id=req.key_id,
+            allowed_models=req.allowed_models,
+            pii_policy=req.pii_policy,
+            cost_admin=req.cost_admin,
+            ops_admin=req.ops_admin,
+            role=req.role,
+        )
+        return JSONResponse({"key": full_key, **view}, status_code=201)
+    except GatewayError as exc:
+        return exc.to_response()
+    except Exception as exc:
+        logger.exception("Key creation failed")
+        return GatewayError(str(exc), "meridian_internal_error", 500).to_response()
+
+
+@app.delete("/meridian/keys/{key_id}")
+async def keys_delete(key_id: str, request: Request) -> Response:
+    """Delete a keys_file key by its non-secret id. Inline-config keys refused.
+
+    Guards: you may not delete the key making the request, nor the last
+    remaining key-admin key.
+    """
+    state = get_state()
+    try:
+        identity = require_key_admin(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+        view = delete_key(
+            state, key_id, caller_key_id=identity.key_id if identity else None
+        )
+        return JSONResponse({"deleted": True, **view})
+    except GatewayError as exc:
+        return exc.to_response()
+    except Exception as exc:
+        logger.exception("Key deletion failed")
+        return GatewayError(str(exc), "meridian_internal_error", 500).to_response()
+
+
 @app.get("/meridian/usage")
 async def usage_report(
     request: Request,
     org: Optional[str] = None,
     team: Optional[str] = None,
+    key: Optional[str] = None,
     window_days: int = 30,
 ) -> Response:
-    """Cost/token report. Requires auth when cost is enabled; org-scoped by key."""
+    """Cost/token report. Requires auth when cost is enabled; org-scoped by key.
+
+    ``key`` filters rows by the non-secret key_id (Phase 3 per-key tracking);
+    the org/team clamp from the caller's own key still applies.
+    """
     state = get_state()
     if state.cost_ledger is None:
         return JSONResponse({
@@ -457,7 +566,9 @@ async def usage_report(
     except GatewayError as exc:
         return exc.to_response()
     window = clamp_window_days(window_days, state.config.cost.max_window_days)
-    rows = state.cost_ledger.query(org_id=org_f, team_id=team_f, window_days=window)
+    rows = state.cost_ledger.query(
+        org_id=org_f, team_id=team_f, key_id=key, window_days=window
+    )
     return JSONResponse({
         "enabled": True,
         "currency": state.config.cost.currency,
@@ -467,6 +578,7 @@ async def usage_report(
                 "team_id": r.team_id,
                 "model": r.model,
                 "day": r.day,
+                "key_id": r.key_id,
                 "prompt_tokens": r.prompt_tokens,
                 "completion_tokens": r.completion_tokens,
                 "requests": r.requests,
@@ -482,6 +594,7 @@ async def usage_csv(
     request: Request,
     org: Optional[str] = None,
     team: Optional[str] = None,
+    key: Optional[str] = None,
     window_days: int = 30,
 ) -> Response:
     import csv
@@ -491,7 +604,7 @@ async def usage_csv(
     buf = io.StringIO()
     w = csv.writer(buf)
     w.writerow([
-        "org_id", "team_id", "model", "day",
+        "org_id", "team_id", "model", "day", "key_id",
         "prompt_tokens", "completion_tokens", "requests", "cost", "currency",
     ])
     if state.cost_ledger is not None:
@@ -505,9 +618,11 @@ async def usage_csv(
         except GatewayError as exc:
             return exc.to_response()
         window = clamp_window_days(window_days, state.config.cost.max_window_days)
-        for r in state.cost_ledger.query(org_id=org_f, team_id=team_f, window_days=window):
+        for r in state.cost_ledger.query(
+            org_id=org_f, team_id=team_f, key_id=key, window_days=window
+        ):
             w.writerow([
-                r.org_id, r.team_id, r.model, r.day,
+                r.org_id, r.team_id, r.model, r.day, r.key_id,
                 r.prompt_tokens, r.completion_tokens, r.requests,
                 f"{r.cost:.6f}", state.config.cost.currency,
             ])

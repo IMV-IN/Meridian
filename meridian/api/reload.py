@@ -22,6 +22,7 @@ from meridian.auth.keys import rebuild_key_index
 from meridian.config.models import MeridianConfig
 from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
 from meridian.router.affinity import SessionStore
+from meridian.router.canary import CanaryController
 from meridian.router.strategies import create_strategy
 from meridian.telemetry import JsonTelemetryAdapter, TelemetryAdapter, TelemetryPoller
 from meridian.usage import InMemoryUsageMeter, SqliteUsageMeter
@@ -70,7 +71,13 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
     # Parse + validate before touching anything — raises → state unchanged.
     new_cfg = MeridianConfig.from_yaml(state.config_path)
 
-    with _reload_lock:
+    # Lifecycle lock first (key create/delete hold it while rebuilding the
+    # index) so a full reload can't swap config mid-mutation and strand a
+    # just-written key in the old keys_file (M3). Local import: keys_admin
+    # already imports this module, so a module-level import would be circular.
+    from meridian.api.keys_admin import _lifecycle_lock  # noqa: PLC0415
+
+    with _lifecycle_lock, _reload_lock:
         # Build everything that might fail BEFORE mutating state.
         new_index = rebuild_key_index(new_cfg.auth)
         from meridian.api.state import build_registry  # local: avoid import cycle
@@ -94,6 +101,10 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
         state.key_index = new_index
         state.health_checker.registry = new_registry
         state.health_checker.update_config(new_cfg.health)
+
+        from meridian.api.state import warn_pool_tag_coverage
+
+        warn_pool_tag_coverage(new_cfg, new_registry)
 
         for b in new_registry.all_backends():
             BACKEND_HEALTHY.labels(backend=b.name).set(1 if b.healthy else 0)
@@ -151,6 +162,19 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
                 else None
             )
 
+        # Canary: save old ref before swapping (stop outside lock).
+        old_canary = state.canary
+        if new_cfg.canary != old_cfg.canary:
+            state.canary = (
+                CanaryController(new_cfg.canary)
+                if new_cfg.canary.enabled
+                else None
+            )
+            if state.canary is not None and old_canary is not None:
+                # Retag-safe carry-over of a prior auto-rollback — never
+                # re-arm a known-bad pool just because the section was edited.
+                state.canary.merge_from(old_canary)
+
         logger.info(
             "Config reloaded from %s — strategy=%s, %d backend(s), %d key(s)",
             state.config_path,
@@ -158,6 +182,13 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
             len(new_registry.all_backends()),
             len(new_index),
         )
+
+    # Stop old canary, start new canary (async — outside lock).
+    if new_cfg.canary != old_cfg.canary:
+        if old_canary is not None:
+            await old_canary.stop()
+        if state.canary is not None:
+            await state.canary.start()
 
     # Telemetry poller restart is async — outside the lock.
     # Roll back to the old poller if the new one fails to start.
