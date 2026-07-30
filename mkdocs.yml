@@ -69,6 +69,7 @@ nav:
       - Deployment guide: DEPLOY.md
       - Air-gapped installs: AIRGAP.md
       - Load and overhead: LOAD.md
+      - Real-engine validation: REAL_ENGINE_VALIDATION.md
   - Operate:
       - Operations runbook: OPS_RUNBOOK.md
       - Cost and usage: ENTERPRISE_COST.md

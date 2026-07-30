@@ -60,12 +60,13 @@ uvicorn meridian.api.main:app --host 0.0.0.0 --port 8080
 #   meridian --config configs/local_gpu.yaml
 ```
 
-Published images: `ghcr.io/imv-in/meridian:0.9.3` / `:latest`  
+Published images: `ghcr.io/imv-in/meridian:0.12.0` / `:latest`
+
 ```bash
 docker run --rm -p 8080:8080 \
   -v "$(pwd)/configs/mock_demo.yaml:/app/config.yaml:ro" \
   -e MERIDIAN_CONFIG=/app/config.yaml \
-  ghcr.io/imv-in/meridian:0.9.3
+  ghcr.io/imv-in/meridian:0.12.0
 ```
 (You’ll still need reachable backends in that config.)
 
@@ -77,7 +78,22 @@ export MERIDIAN_CONFIG=configs/local_gpu.yaml
 uvicorn meridian.api.main:app --host 0.0.0.0 --port 8080
 ```
 
-Load / overhead numbers: [`docs/LOAD.md`](docs/LOAD.md)
+### Measured real-engine overhead
+
+Meridian v0.12.0 was tested against Ollama 0.31.1 with `qwen2.5:0.5b` on
+an RTX 4060 Laptop GPU. All direct and gateway sync/stream checks passed with
+zero benchmark errors.
+
+| Concurrency | Requests | Direct p50 | Meridian p50 | p50 delta | RPS change |
+|------------:|---------:|-----------:|-------------:|----------:|-----------:|
+| 1 | 30 | 174.1 ms | 180.5 ms | +6.4 ms | -3.9% |
+| 4 | 40 | 368.5 ms | 375.5 ms | +7.0 ms | -2.2% |
+| 8 | 80 | 243.0 ms | 247.2 ms | +4.1 ms | -1.7% |
+
+These are sequential single-host runs, not a cross-row scaling curve. Ollama
+GPU warm state and dynamic batching affect absolute latency. See the
+[`methodology and raw evidence`](docs/LOAD.md) and
+[`reproducible Ollama/vLLM validation`](docs/REAL_ENGINE_VALIDATION.md).
 
 ## Documentation map
 
