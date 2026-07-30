@@ -4,11 +4,11 @@ A scannable record of **what's shipped** and **what's next**.
 
 | Want | Read |
 |------|------|
-| **Docs index** | **[`README.md`](./README.md)** |
+| **Docs index** | **[`index.md`](./index.md)** |
 | **First run** | [`QUICKSTART.md`](./QUICKSTART.md) |
 | **Full story (what + why for every milestone)** | [`MILESTONES.md`](./MILESTONES.md) |
 | Backlog order | [`ROADMAP.md`](./ROADMAP.md) |
-| Release-note detail | [`../CHANGELOG.md`](../CHANGELOG.md) |
+| Release-note detail | [`CHANGELOG.md`](https://github.com/IMV-IN/Meridian/blob/main/CHANGELOG.md) |
 | Pitchable claims only | [`internal/PITCH.md`](./internal/PITCH.md) |
 
 _Last updated: 2026-07-28 — **v0.11.0 in tree**; Grafana dashboards, Helm hardening + KEDA scaffolding, scale-to-zero idle marker; next: Phase 3 platform depth (v0.12.0)._

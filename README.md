@@ -1,7 +1,7 @@
 # Meridian
 
 **Latest release: [![GitHub release](https://img.shields.io/github/v/release/IMV-IN/Meridian?sort=semver)](https://github.com/IMV-IN/Meridian/releases/latest)** ·  
-**Docs index:** [`docs/README.md`](docs/README.md) · **Quickstart:** [`docs/QUICKSTART.md`](docs/QUICKSTART.md)
+**Website:** [imv-in.github.io/Meridian](https://imv-in.github.io/Meridian/) · **Quickstart:** [`docs/QUICKSTART.md`](docs/QUICKSTART.md)
 
 Meridian is an **L7 inference gateway** for self-hosted / on-soil LLM fleets. It sits between your apps and OpenAI-compatible backends (vLLM, SGLang, TensorRT-LLM, Ollama, …) and adds **routing, health/failover, multi-tenant controls, and compliance hooks** without changing application code.
 
