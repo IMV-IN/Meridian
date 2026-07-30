@@ -241,7 +241,7 @@ docker compose down
 |------|------|
 | Production deploy | [`DEPLOY.md`](./DEPLOY.md) · [`OPS_RUNBOOK.md`](./OPS_RUNBOOK.md) |
 | Auth / budgets / cost / roles | [`CONFIGURATION.md`](./CONFIGURATION.md), `configs/enterprise_example.yaml` |
-| Docs map | [`README.md`](./README.md) |
+| Docs map | [`index.md`](./index.md) |
 
 **Env var:** always `MERIDIAN_CONFIG` (uppercase), e.g.
 `MERIDIAN_CONFIG=configs/local_gpu.yaml uvicorn meridian.api.main:app --port 8080`

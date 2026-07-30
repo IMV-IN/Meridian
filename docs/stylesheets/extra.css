@@ -1,0 +1,109 @@
+:root {
+  --md-primary-fg-color: #10211f;
+  --md-primary-fg-color--light: #23413c;
+  --md-primary-fg-color--dark: #081210;
+  --md-accent-fg-color: #d77d00;
+  --meridian-lime: #e4f6c9;
+  --meridian-ink: #10211f;
+  --meridian-amber: #f3a712;
+}
+
+[data-md-color-scheme="slate"] {
+  --md-default-bg-color: #101817;
+  --md-default-bg-color--light: #172321;
+  --md-default-fg-color: #e4ece5;
+  --md-primary-fg-color: #172d29;
+}
+
+.mdx-hero {
+  margin: 1.5rem 0 3rem;
+  padding: clamp(2rem, 7vw, 6rem) clamp(1.5rem, 6vw, 5rem);
+  border: 1px solid rgba(16, 33, 31, 0.16);
+  border-radius: 1.25rem;
+  background:
+    radial-gradient(circle at 88% 18%, rgba(243, 167, 18, 0.88) 0 0.3rem, transparent 0.35rem),
+    radial-gradient(circle at 93% 24%, rgba(228, 246, 201, 0.9) 0 0.18rem, transparent 0.24rem),
+    linear-gradient(135deg, var(--meridian-ink) 0%, #21453e 58%, #386158 100%);
+  color: #f4f8ee;
+  box-shadow: 0 1.2rem 3rem rgba(16, 33, 31, 0.16);
+}
+
+.mdx-hero h1 {
+  max-width: 10ch;
+  margin-bottom: 0.75rem;
+  color: var(--meridian-lime);
+  font-size: clamp(2.8rem, 8vw, 5.8rem);
+  line-height: 0.92;
+  letter-spacing: -0.065em;
+}
+
+.mdx-hero h2 {
+  max-width: 28rem;
+  margin-top: 0;
+  color: #f4f8ee;
+  font-size: clamp(1.2rem, 2.4vw, 2rem);
+  font-weight: 500;
+  letter-spacing: -0.025em;
+}
+
+.mdx-hero p {
+  max-width: 46rem;
+  color: rgba(244, 248, 238, 0.82);
+  font-size: 1.05rem;
+}
+
+.mdx-hero .md-button {
+  margin: 0.75rem 0.5rem 0 0;
+  border-color: rgba(228, 246, 201, 0.45);
+  color: var(--meridian-lime);
+}
+
+.mdx-hero .md-button--primary {
+  border-color: var(--meridian-amber);
+  background: var(--meridian-amber);
+  color: var(--meridian-ink);
+}
+
+.mdx-signal-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.75rem;
+  margin: 2rem 0 4rem;
+}
+
+.mdx-signal {
+  min-height: 10rem;
+  padding: 1.2rem;
+  border-top: 3px solid var(--meridian-amber);
+  background: color-mix(in srgb, var(--md-code-bg-color) 76%, transparent);
+}
+
+.mdx-signal strong,
+.mdx-signal p:first-child {
+  color: var(--md-primary-fg-color);
+}
+
+.mdx-signal p:first-child {
+  margin-top: 0;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+@media screen and (max-width: 900px) {
+  .mdx-signal-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media screen and (max-width: 600px) {
+  .mdx-signal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .mdx-hero {
+    border-radius: 0.75rem;
+  }
+}

@@ -6,7 +6,7 @@ Copy examples into `config.yaml` or a file under `configs/`, then set:
 export MERIDIAN_CONFIG=/path/to/config.yaml   # always UPPERCASE
 ```
 
-See also: [QUICKSTART.md](./QUICKSTART.md), [enterprise_example.yaml](../configs/enterprise_example.yaml).
+See also: [QUICKSTART.md](./QUICKSTART.md), [enterprise_example.yaml](https://github.com/IMV-IN/Meridian/blob/main/configs/enterprise_example.yaml).
 
 ---
 
@@ -328,7 +328,7 @@ rate_limit:
 
 Rejections increment `meridian_budget_rejections_total{level,period}` (never labeled by tenant id). Auth must be enabled for budgets to apply — without an identity there is no tenant to meter.
 
-> **Scope:** the identity keystone (auth, identity logging, per-org rate limiting, model access, tenant budgets) is complete. See [`docs/ship.md`](docs/ship.md).
+> **Scope:** the identity keystone (auth, identity logging, per-org rate limiting, model access, tenant budgets) is complete. See [`ship.md`](ship.md).
 
 ### PII detection & redaction (India pack)
 

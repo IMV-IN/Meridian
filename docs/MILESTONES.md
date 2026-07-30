@@ -7,7 +7,7 @@ shipped, **why it mattered**, and how pieces fit together.
 |-----|------|
 | **This file** | Full story: motivation + design intent per milestone |
 | [`ship.md`](./ship.md) | One-line status table + “what’s next” |
-| [`CHANGELOG.md`](../CHANGELOG.md) | Release-note detail per version |
+| [`CHANGELOG.md`](https://github.com/IMV-IN/Meridian/blob/main/CHANGELOG.md) | Release-note detail per version |
 | [`ROADMAP.md`](./ROADMAP.md) | Ordering of backlog (what’s left) |
 | [`V1_ROADMAP.md`](./internal/V1_ROADMAP.md) | Detailed plans / DoD for remaining work |
 | [`PITCH.md`](./internal/PITCH.md) | What sales can claim (must match **tagged** releases) |

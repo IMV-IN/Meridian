@@ -1,0 +1,89 @@
+site_name: Meridian
+site_description: The reliability and control plane for self-hosted inference fleets.
+site_url: https://imv-in.github.io/Meridian/
+repo_url: https://github.com/IMV-IN/Meridian
+repo_name: IMV-IN/Meridian
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  language: en
+  font:
+    text: IBM Plex Sans
+    code: IBM Plex Mono
+  logo: assets/meridian-mark.svg
+  favicon: assets/meridian-mark.svg
+  features:
+    - navigation.instant
+    - navigation.tracking
+    - navigation.sections
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.action.edit
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      toggle:
+        icon: material/weather-night
+        name: Switch to light mode
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/IMV-IN/Meridian
+
+extra_css:
+  - stylesheets/extra.css
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.keys
+  - pymdownx.magiclink
+  - pymdownx.superfences
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Start here:
+      - Quickstart: QUICKSTART.md
+      - Configuration: CONFIGURATION.md
+      - Flagship Phase 3 demo: https://github.com/IMV-IN/Meridian/blob/main/scripts/demo_phase3.sh
+  - Deploy:
+      - Deployment guide: DEPLOY.md
+      - Air-gapped installs: AIRGAP.md
+      - Load and overhead: LOAD.md
+  - Operate:
+      - Operations runbook: OPS_RUNBOOK.md
+      - Cost and usage: ENTERPRISE_COST.md
+      - Audit pipeline: AUDIT_E2E.md
+      - Known issues: KNOWN_ISSUES.md
+  - Understand:
+      - Architecture and scope: FULL.md
+      - Milestones: MILESTONES.md
+      - What's shipped: ship.md
+      - Roadmap: ROADMAP.md
+      - Security: https://github.com/IMV-IN/Meridian/blob/main/SECURITY.md
+  - Release notes: https://github.com/IMV-IN/Meridian/blob/main/CHANGELOG.md
+
+exclude_docs: |
+  internal/
+  scans/
+  superpowers/
+  README.md
