@@ -1,5 +1,6 @@
 site_name: Meridian
 site_description: The reliability and control plane for self-hosted inference fleets.
+site_url: https://imv-in.github.io/Meridian/
 repo_url: https://github.com/IMV-IN/Meridian
 repo_name: IMV-IN/Meridian
 edit_uri: edit/main/docs/
