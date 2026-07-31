@@ -1,0 +1,67 @@
+# meridian-control
+
+The central control plane for [`meridian-node`](https://github.com/IMV-IN/meridian-node)
+GPU agents. It is a **separate service** from the Meridian gateway (it does not
+import or modify gateway code); the gateway consumes its serving projection
+read-only.
+
+It implements the node control protocol (`contracts/v1` in the meridian-node
+repo): approval-gated enrollment with a built-in Ed25519 CA, epoch-fenced
+sessions with restore-safe fencing, leases, desired-state generations, and
+observations. State is durable via SQLAlchemy — **SQLite by default**, Postgres
+via a connection URL — so control replicas are stateless.
+
+See the meridian-node `DESIGN.md`, decision 13 and sections 8, 10, 15, and 17.
+
+## Install & run
+
+```bash
+pip install -e ".[control]"          # from the Meridian repo root
+
+# Run the control plane (SQLite by default)
+meridian-control run --host 0.0.0.0 --port 8443
+# Or point at Postgres:
+MERIDIAN_CONTROL_DB_URL=postgresql+psycopg://user:pass@host/meridian_control \
+  meridian-control run
+
+# Mint a one-time enrollment token for a node
+meridian-control mint-token --auto-approve
+```
+
+## Endpoints
+
+| Method + path | Purpose |
+|---|---|
+| `POST /control/v1/enroll` | Node enrollment (Bearer token) |
+| `GET /control/v1/enroll/claims/{id}` | Pending-approval possession handshake |
+| `POST /control/v1/nodes/{id}/sessions` | Establish a fenced session |
+| `POST /control/v1/nodes/{id}/heartbeat` | Renew lease, get desired generation |
+| `GET /control/v1/nodes/{id}/desired-state` | Fetch the desired snapshot |
+| `POST /control/v1/nodes/{id}/observations` | Report observed state |
+| `POST /admin/tokens` · `/admin/claims/{id}/approve` · `/admin/nodes/{id}/desired` · `/admin/nodes/{id}/stop-authorize` · `/admin/nodes/{id}/revoke` · `/admin/restore` | Operator actions |
+| `GET /admin/projection` | Serving projection (gateway consumes read-only) |
+
+## Restore safety
+
+`POST /admin/restore {"high_water_epoch": N}` is the restore-from-backup runbook
+step (DESIGN 17.5): it increments the control-plane incarnation and raises the
+epoch floor past the last-issued high-water mark, so a fencing epoch that
+regressed in restored data can never re-admit a previously fenced agent.
+
+## Tests
+
+```bash
+pytest tests/control
+```
+
+`tests/control/test_cross_repo.py` runs the **real meridian-node agent** against
+this service over a real HTTP socket — the cross-repository compatibility target
+from the node's DESIGN §20/§24. It is skipped unless `meridian-node` is
+installed (`pip install -e ../meridian-node[http]`).
+
+## Not yet included
+
+- Alembic migrations (schema is created via `create_all` for now).
+- Gateway wiring: the serving projection exists (`GET /admin/projection`); the
+  gateway registry integration is a separate, independently-reviewed change.
+- Certificate rotation/revocation automation and CRL distribution.
