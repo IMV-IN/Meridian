@@ -1,4 +1,4 @@
-# Load & overhead numbers (0.9.3)
+# Load and overhead numbers
 
 How much latency Meridian adds in front of a backend, and how to re-measure
 on your hardware for ~1k-user capacity planning.
@@ -24,33 +24,13 @@ The script:
 ### Recipe
 
 ```bash
-# 1) Backend
-ollama pull qwen2.5:0.5b
-ollama serve   # default http://127.0.0.1:11434
-
-# 2) Meridian (config already points at Ollama)
-MERIDIAN_CONFIG=configs/local_gpu.yaml \
-  uvicorn meridian.api.main:app --host 127.0.0.1 --port 18080
-
-# 3) Smoke (stream + non-stream + headers)
-python scripts/smoke_test.py --url http://127.0.0.1:18080 --model qwen2.5:0.5b
-
-# 4) Overhead (direct Ollama vs via Meridian)
-python scripts/bench_overhead.py \
-  --backend-url http://127.0.0.1:11434 \
-  --gateway-url http://127.0.0.1:18080 \
-  --model qwen2.5:0.5b \
-  --requests 30 --concurrency 1 --warmup 3
-
-# Optional light concurrency:
-python scripts/bench_overhead.py \
-  --backend-url http://127.0.0.1:11434 \
-  --gateway-url http://127.0.0.1:18080 \
-  --model qwen2.5:0.5b \
-  --requests 20 --concurrency 4 --warmup 2
+PYTHON=.venv/bin/python sh scripts/validate_ollama.sh
 ```
 
-If `auth.enabled`, add `--auth mrdn_...` to the bench and smoke commands.
+The profile handles backend readiness, a disposable Meridian process, smoke
+checks, and the serial overhead run. See
+[`REAL_ENGINE_VALIDATION.md`](./REAL_ENGINE_VALIDATION.md) for the complete
+Ollama/vLLM release matrix and environment overrides.
 
 > Real-model **absolute** latency is dominated by the engine. Use these numbers
 > to confirm **gateway overhead stays small relative to generation time**, not
@@ -92,40 +72,59 @@ assert absolute ms (hardware variance).
 
 ## Reference numbers (Ollama, real path)
 
-Recorded **2026-07-10** on the same Linux host:
+Recorded **2026-07-30**. Complete machine-readable results:
+[`serial`](./validation/ollama-v0.12.0.json),
+[`concurrency 4`](./validation/ollama-v0.12.0-c4.json), and
+[`concurrency 8`](./validation/ollama-v0.12.0-c8.json).
 
 | Host detail | Value |
 |-------------|--------|
 | GPU | NVIDIA GeForce RTX 4060 Laptop (8 GiB) |
 | Backend | Ollama `qwen2.5:0.5b` on `127.0.0.1:11434` |
-| Meridian | **v0.9.3**, `configs/local_gpu.yaml`, port **18080** (no auth/budgets/cost) |
+| Meridian | **v0.12.0**, generated validation config, port **18080** (no auth/budgets/cost) |
+| Ollama | **0.31.1** |
+| Python | **3.12.11** |
+| NVIDIA driver | **580.159.03** |
 | Request shape | non-stream chat, `max_tokens=8`, message `"bench"` |
 
 ### Serial isolation (`n=30`, `concurrency=1`)
 
 | Path | p50 (ms) | p95 (ms) | mean (ms) | RPS | errors |
 |------|----------|----------|-----------|-----|--------|
-| Direct → Ollama | 151.0 | 153.2 | 151.2 | 6.6 | 0 |
-| Via Meridian | 153.0 | 155.3 | 153.3 | 6.5 | 0 |
-| **Overhead** | **~1.9 ms** | **~2.1 ms** | **~2.1 ms** | — | — |
+| Direct → Ollama | 174.1 | 185.0 | 173.9 | 5.75 | 0 |
+| Via Meridian | 180.5 | 186.2 | 181.1 | 5.52 | 0 |
+| **Overhead** | **6.4 ms** | **1.3 ms** | **7.2 ms** | — | — |
 
-**Takeaway:** gateway adds ~**2 ms** (~**1.3%** of end-to-end p50). Engine time is the budget.
+**Takeaway:** this run added **6.4 ms** at p50, about **3.7%** of direct
+end-to-end p50. Engine generation remained the dominant latency component.
 
-### Light concurrent (`n=20`, `concurrency=4`)
+### Concurrent load (`n=40`, `concurrency=4`)
 
 | Path | p50 (ms) | p95 (ms) | mean (ms) | RPS | errors |
 |------|----------|----------|-----------|-----|--------|
-| Direct → Ollama | 180.7 | 243.1 | 189.1 | 20.2 | 0 |
-| Via Meridian | 186.7 | 235.5 | 192.8 | 19.9 | 0 |
-| **Delta p50** | **~5.9 ms** | (noisy) | — | ~same RPS | — |
+| Direct -> Ollama | 368.5 | 400.5 | 361.9 | 10.89 | 0 |
+| Via Meridian | 375.5 | 401.4 | 367.1 | 10.66 | 0 |
+| **Delta / ratio** | **7.0 ms** | **0.9 ms** | **5.2 ms** | **-2.2%** | — |
 
-Under concurrency, engine queueing dominates; Meridian RPS tracks direct within ~2%.
+### Concurrent load (`n=80`, `concurrency=8`)
+
+| Path | p50 (ms) | p95 (ms) | mean (ms) | RPS | errors |
+|------|----------|----------|-----------|-----|--------|
+| Direct -> Ollama | 243.0 | 321.5 | 252.9 | 30.44 | 0 |
+| Via Meridian | 247.2 | 337.8 | 257.4 | 29.92 | 0 |
+| **Delta / ratio** | **4.1 ms** | **16.3 ms** | **4.6 ms** | **-1.7%** | — |
+
+The concurrency runs show no material throughput loss through Meridian. The
+concurrency-8 p95 increase is more variable than the serial and concurrency-4
+runs, so it should be treated as a host and engine observation rather than a
+gateway capacity limit. Repeat this matrix on the target deployment hardware
+before making capacity commitments.
 
 ### Functional proof (same stack)
 
-`scripts/smoke_test.py --url http://127.0.0.1:18080 --model qwen2.5:0.5b` — pass
-(`/meridian/status`, `/meridian/version` **0.9.3**, non-stream + stream/`[DONE]`,
-`x-meridian-backend=ollama-4070`).
+The v0.12.0 profile passed direct models, non-stream, and stream checks, then
+passed gateway status/version/models, non-stream, stream/`[DONE]`, and required
+`x-request-id` / `x-meridian-backend` header checks.
 
 ### How to interpret for ~1000 users
 

@@ -28,6 +28,12 @@ audit = [
 docs = [
     "mkdocs-material>=9.5,<10",
 ]
+# meridian-control: the central node control plane (DESIGN in the meridian-node
+# repo). Isolated from the gateway install; only pulled in for the control
+# service. SQLite by default, Postgres via a connection URL.
+control = [
+    "sqlalchemy>=2.0",
+]
 dev = [
     "ruff",
     "mypy",
@@ -39,10 +45,16 @@ dev = [
     # keeps working on a plain `[dev]` install.
     "aiokafka",
     "boto3",
+    # Control-plane service is part of the test suite.
+    "sqlalchemy>=2.0",
 ]
 
 [project.scripts]
 meridian = "meridian.cli.main:cli"
+meridian-control = "meridian_control.cli:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["meridian", "meridian_control"]
 
 [tool.ruff]
 target-version = "py39"
