@@ -174,8 +174,25 @@ class BackendRegistry:
     """Registry of all backends with eligibility filtering."""
 
     def __init__(self, backends: Optional[List[Backend]] = None) -> None:
-        self.backends: List[Backend] = backends or []
+        # Static (config) backends never change at runtime; managed backends are
+        # synced from the control-plane projection (P1). `backends` is the merged
+        # view rebound atomically on each sync.
+        self._static: List[Backend] = list(backends or [])
+        self.backends: List[Backend] = list(self._static)
         self._by_name: dict[str, Backend] = {b.name: b for b in self.backends}
+
+    def set_managed(self, managed: List[Backend]) -> None:
+        """Replace the managed backend set, preserving static config backends
+        (DESIGN.md 24 P1). Managed names that collide with a static backend are
+        dropped so config always wins. Rebind is atomic within the event loop, so
+        a concurrent reader sees either the old or new list, never a partial one.
+        """
+        # ponytail: single-writer under the asyncio loop; add a lock only if a
+        # non-loop thread ever mutates the registry.
+        static_names = {b.name for b in self._static}
+        combined = self._static + [b for b in managed if b.name not in static_names]
+        self._by_name = {b.name: b for b in combined}
+        self.backends = combined
 
     def get(self, name: str) -> Optional[Backend]:
         return self._by_name.get(name)

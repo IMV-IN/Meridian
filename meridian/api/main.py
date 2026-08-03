@@ -25,7 +25,7 @@ from meridian.api.keys_admin import create_key, delete_key, list_keys
 from meridian.api.pipeline import ChatRequest, prepare_chat_request, reconcile_budget_usage
 from meridian.api.reload import reload_config
 from meridian.api.routing import route
-from meridian.api.state import AppState, build_app_state, shutdown_app_state
+from meridian.api.state import AppState, build_app_state, build_backend, shutdown_app_state
 from meridian.auth import AuthError, authenticate
 from meridian.config.models import MeridianConfig
 from meridian.cost.authz import clamp_window_days, require_usage_identity, resolve_usage_scope
@@ -141,12 +141,26 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 state.rate_limit.sweep()
         sweep_tasks.append(asyncio.create_task(_rl_sweep()))
 
+    managed_sync = None
+    if state.config.control_plane.enabled and state.config.control_plane.url:
+        from meridian.registry.managed import ManagedProjectionSync
+
+        # ponytail: bound to the current config; a SIGHUP that changes
+        # control_plane settings needs a restart to take effect.
+        managed_sync = ManagedProjectionSync(
+            state.registry, state.config.control_plane,
+            build_backend=lambda bc: build_backend(state.config, bc),
+        )
+        await managed_sync.start()
+
     yield
 
     try:
         loop.remove_signal_handler(signal.SIGHUP)
     except (NotImplementedError, RuntimeError):
         pass
+    if managed_sync is not None:
+        await managed_sync.stop()
     for task in sweep_tasks:
         task.cancel()
         try:
