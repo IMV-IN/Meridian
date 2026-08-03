@@ -38,6 +38,7 @@ meridian-control mint-token --auto-approve
 | `POST /control/v1/nodes/{id}/heartbeat` | Renew lease, get desired generation |
 | `GET /control/v1/nodes/{id}/desired-state` | Fetch the desired snapshot |
 | `POST /control/v1/nodes/{id}/observations` | Report observed state |
+| `POST /control/v1/nodes/{id}/certificate` | Rotate the node certificate (mTLS-gated) |
 | `POST /admin/tokens` · `/admin/claims/{id}/approve` · `/admin/nodes/{id}/desired` · `/admin/nodes/{id}/stop-authorize` · `/admin/nodes/{id}/revoke` · `/admin/restore` | Operator actions |
 | `GET /admin/projection` | Serving projection (gateway consumes read-only) |
 
@@ -54,14 +55,26 @@ regressed in restored data can never re-admit a previously fenced agent.
 pytest tests/control
 ```
 
-`tests/control/test_cross_repo.py` runs the **real meridian-node agent** against
-this service over a real HTTP socket — the cross-repository compatibility target
-from the node's DESIGN §20/§24. It is skipped unless `meridian-node` is
-installed (`pip install -e ../meridian-node[http]`).
+`tests/control/test_cross_repo.py` and `test_cross_repo_gateway.py` run the
+**real meridian-node agent** against this service over a real HTTP socket — the
+cross-repository compatibility target from the node's DESIGN §20/§24. They are
+skipped unless `meridian-node` is installed (`pip install -e ../meridian-node[http]`).
+
+### End-to-end connection (with numbers)
+
+`scripts/verify_connection.py` drives the full `node ↔ control ↔ gateway` path
+over a real socket with mTLS enforced (`require_mtls=True`) and prints measured
+latencies/counts: enrollment, the mTLS gate (no-cert rejected, cert accepted),
+50 heartbeats, desired publish/fetch, a Ready-engine observation, the serving
+projection, gateway backend registration via `ManagedProjectionSync`, and
+certificate rotation. `test_cross_repo_gateway.py` asserts the same chain.
+
+```bash
+python scripts/verify_connection.py   # prints a numbers report, exits 0 on PASS
+```
 
 ## Not yet included
 
 - Alembic migrations (schema is created via `create_all` for now).
-- Gateway wiring: the serving projection exists (`GET /admin/projection`); the
-  gateway registry integration is a separate, independently-reviewed change.
-- Certificate rotation/revocation automation and CRL distribution.
+- Certificate **revocation** automation / CRL distribution (rotation is
+  implemented: `POST /control/v1/nodes/{id}/certificate`).
