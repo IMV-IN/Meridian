@@ -250,6 +250,27 @@ class ControlService:
                 "NODE_NOT_AUTHORIZED", "certificate identity does not match node", http_status=403
             )
 
+    def rotate_certificate(self, node_id: str) -> dict:
+        """Re-issue a node cert for the node's registered public key (Phase 4).
+        Gated by the current cert (verify_node_identity) at the route. Safe to
+        expose: the new cert is bound to the on-record public key, so only the
+        holder of that private key can use it."""
+        with self._sf() as s:
+            node = s.get(Node, node_id)
+            if node is None:
+                raise ControlServiceError("NODE_NOT_FOUND", "unknown node", http_status=404)
+            if node.revoked:
+                raise ControlServiceError("NODE_NOT_AUTHORIZED", "node certificate revoked", http_status=403)
+            cert = self._ca.issue_node_cert(node_id, node.public_key, self._config.cert_lifetime_hours)
+            node.certificate_pem = cert
+            s.add(AuditEvent(node_id=node_id, kind="cert_rotated"))
+            s.commit()
+            return {
+                "certificate": cert,
+                "trust_bundle": self._ca.trust_bundle(),
+                "cert_lifetime_hours": self._config.cert_lifetime_hours,
+            }
+
     # --- session --------------------------------------------------------
     def establish_session(self, node_id: str, request: dict) -> dict:
         with self._sf() as s:
