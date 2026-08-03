@@ -463,6 +463,19 @@ class CostConfig(BaseModel):
         return v
 
 
+class ControlPlaneConfig(BaseModel):
+    """meridian-control integration (DESIGN.md 17, 24 P1). When enabled the
+    gateway polls the control plane's serving projection and registers routable
+    managed engines as dynamic backends alongside the static config backends.
+    Default off — existing static-only deployments are unaffected."""
+
+    enabled: bool = False
+    url: str = ""  # base URL of meridian-control, e.g. https://control:8443
+    poll_interval_s: float = Field(default=10.0, gt=0.0)
+    # Tag applied to every managed backend so operators can target/observe them.
+    tag: str = "managed"
+
+
 class MeridianConfig(BaseModel):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)
     health: HealthConfig = Field(default_factory=HealthConfig)
@@ -480,6 +493,7 @@ class MeridianConfig(BaseModel):
     resilience: ResilienceConfig = Field(default_factory=ResilienceConfig)
     isolation: IsolationConfig = Field(default_factory=IsolationConfig)
     canary: CanaryConfig = Field(default_factory=CanaryConfig)
+    control_plane: ControlPlaneConfig = Field(default_factory=ControlPlaneConfig)
 
     @classmethod
     def from_yaml(cls, path: str) -> MeridianConfig:

@@ -12,7 +12,7 @@ from typing import Any, Deque, Dict, Optional
 from meridian.api.ratelimitter import RateLimitStore
 from meridian.audit.publisher import AuditEventPublisher
 from meridian.auth import IdentityContext, build_key_index
-from meridian.config.models import MeridianConfig, TimeoutConfig, TimeoutOverride
+from meridian.config.models import BackendConfig, MeridianConfig, TimeoutConfig, TimeoutOverride
 from meridian.cost import CostLedger, InMemoryCostLedger, SqliteCostLedger
 from meridian.health.checker import HealthChecker
 from meridian.metrics.collectors import BACKEND_HEALTHY, BACKEND_INFLIGHT
@@ -105,18 +105,20 @@ def resolve_timeouts(
     return TimeoutConfig(**merged)
 
 
+def build_backend(cfg: MeridianConfig, bc: BackendConfig) -> Backend:
+    """Construct one Backend with effective timeouts + optional circuit breaker.
+    Shared by static config load and the managed-projection sync (P1)."""
+    cb_cfg = cfg.resilience.circuit_breaker
+    return Backend(
+        bc,
+        timeouts=resolve_timeouts(cfg.timeouts, bc.timeout),
+        circuit=CircuitBreaker(cb_cfg) if cb_cfg.enabled else None,
+    )
+
+
 def build_registry(cfg: MeridianConfig) -> BackendRegistry:
     """Construct backends with effective timeouts + optional circuit breakers."""
-    cb_cfg = cfg.resilience.circuit_breaker
-    backends = [
-        Backend(
-            bc,
-            timeouts=resolve_timeouts(cfg.timeouts, bc.timeout),
-            circuit=CircuitBreaker(cb_cfg) if cb_cfg.enabled else None,
-        )
-        for bc in cfg.backends
-    ]
-    return BackendRegistry(backends)
+    return BackendRegistry([build_backend(cfg, bc) for bc in cfg.backends])
 
 
 def warn_pool_tag_coverage(cfg: MeridianConfig, registry: BackendRegistry) -> None:

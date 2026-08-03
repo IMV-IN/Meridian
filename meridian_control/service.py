@@ -335,7 +335,8 @@ class ControlService:
                     if e.get("phase") == "Ready" and e.get("endpoint"):
                         out.append({
                             "engine_id": e["engine_id"], "node_id": node.node_id,
-                            "endpoint": e["endpoint"], "provider": "managed",
+                            "endpoint": e["endpoint"], "model": e.get("model", ""),
+                            "provider": "managed",
                             "routable": bool(lease_valid) and not node.revoked,
                         })
         return out
