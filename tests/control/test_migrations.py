@@ -6,9 +6,12 @@ fresh database and that the initial migration stays in sync with the ORM models.
 
 from __future__ import annotations
 
+import pytest
 from sqlalchemy import create_engine, inspect
 
 from meridian_control.db import Base, run_migrations
+
+pytest.importorskip("alembic")  # only in the [control] extra; skip in the gateway-only CI job
 
 
 def test_migrations_create_full_schema(tmp_path):
