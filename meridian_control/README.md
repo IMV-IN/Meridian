@@ -20,13 +20,19 @@ pip install -e ".[control]"          # from the Meridian repo root
 
 # Run the control plane (SQLite by default)
 meridian-control run --host 0.0.0.0 --port 8443
-# Or point at Postgres:
+# Or point at Postgres (apply the schema with Alembic first):
+MERIDIAN_CONTROL_DB_URL=postgresql+psycopg://user:pass@host/meridian_control \
+  meridian-control migrate
 MERIDIAN_CONTROL_DB_URL=postgresql+psycopg://user:pass@host/meridian_control \
   meridian-control run
 
 # Mint a one-time enrollment token for a node
 meridian-control mint-token --auto-approve
 ```
+
+Production manages the schema with **Alembic** (`meridian-control migrate`, or
+`alembic -c meridian_control/alembic.ini upgrade head`). `create_all` remains the
+zero-config default for local dev and tests.
 
 ## Endpoints
 
@@ -77,6 +83,5 @@ python scripts/verify_connection.py   # prints a numbers report, exits 0 on PASS
 
 ## Not yet included
 
-- Alembic migrations (schema is created via `create_all` for now).
 - Certificate **revocation** automation / CRL distribution (rotation is
   implemented: `POST /control/v1/nodes/{id}/certificate`).
