@@ -365,11 +365,17 @@ class ControlService:
             return {"received": True}
 
     # --- placement (Phase 5, control side) -----------------------------
-    def select_placement(self, required_vram_bytes: int) -> Optional[dict]:
-        """Pick a routable node + device with enough reported allocatable VRAM
-        (DESIGN.md 24 P3). Consumes the capacity nodes report in observations;
-        prefers the device with the most headroom (spread). None if nothing fits."""
-        best: Optional[tuple[int, str, str]] = None  # (allocatable, node_id, device_id)
+    def select_placement(
+        self, required_vram_bytes: int, count: int = 1, artifact_digest: Optional[str] = None
+    ) -> Optional[dict]:
+        """Pick a routable node + device(s) for a new engine (DESIGN.md 24 P3).
+        Consumes the capacity nodes report: allocatable VRAM, held artifacts,
+        running-engine load, and NVLink groups. Preference order: nodes that
+        already hold the artifact (locality) > lower load > more headroom. For
+        count>1, the devices must share an NVLink group when groups are declared.
+        Returns None if nothing fits."""
+        best_key: Optional[tuple] = None
+        best: Optional[tuple[str, list[str], int]] = None  # (node_id, device_ids, headroom)
         with self._sf() as s:
             for node in s.scalars(select(Node)):
                 lease_valid = node.lease_expires_at is not None and self._now() < _aware(node.lease_expires_at)
@@ -378,14 +384,23 @@ class ControlService:
                 obs = s.get(ObservationRow, node.node_id)
                 if obs is None:
                     continue
-                allocatable = obs.observation.get("capacity", {}).get("allocatable_vram_bytes", {})
-                for device_id, free in allocatable.items():
-                    free_i = int(free)
-                    if free_i >= required_vram_bytes and (best is None or free_i > best[0]):
-                        best = (free_i, node.node_id, device_id)
+                cap = obs.observation.get("capacity", {})
+                alloc = {d: int(v) for d, v in cap.get("allocatable_vram_bytes", {}).items()}
+                devices = _pick_devices(alloc, cap.get("nvlink_groups", {}), required_vram_bytes, count)
+                if devices is None:
+                    continue
+                headroom = sum(alloc[d] for d in devices)
+                artifact_hit = 1 if (artifact_digest and artifact_digest in cap.get("held_artifacts", [])) else 0
+                load = int(cap.get("running_engines", 0))
+                key = (artifact_hit, -load, headroom)  # maximize
+                if best_key is None or key > best_key:
+                    best_key, best = key, (node.node_id, devices, headroom)
         if best is None:
             return None
-        return {"node_id": best[1], "device_id": best[2], "allocatable_vram_bytes": best[0]}
+        return {
+            "node_id": best[0], "device_ids": best[1], "device_id": best[1][0],
+            "allocatable_vram_bytes": best[2],
+        }
 
     # --- read models (operator / gateway projection) -------------------
     def serving_projection(self) -> list[dict]:
@@ -410,3 +425,27 @@ class ControlService:
 
 def _aware(d: datetime) -> datetime:
     return d if d.tzinfo is not None else d.replace(tzinfo=timezone.utc)
+
+
+def _pick_devices(
+    alloc: dict[str, int], groups: dict, required: int, count: int
+) -> Optional[list[str]]:
+    """Choose `count` devices each with >= required allocatable VRAM. For count>1,
+    when NVLink groups are declared the devices must share one group (affinity)."""
+    fitting = [d for d, free in alloc.items() if free >= required]
+    if not fitting:
+        return None
+    ranked = sorted(fitting, key=lambda d: alloc[d], reverse=True)  # most headroom first
+    if count == 1:
+        return [ranked[0]]
+    if groups:
+        by_group: dict[str, list[str]] = {}
+        for d in ranked:
+            g = groups.get(d)
+            if g is not None:
+                by_group.setdefault(g, []).append(d)
+        for devs in by_group.values():
+            if len(devs) >= count:
+                return devs[:count]
+        return None  # no single NVLink group has enough fitting devices
+    return ranked[:count] if len(ranked) >= count else None
