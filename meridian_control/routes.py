@@ -130,6 +130,11 @@ def projection(request: Request):
     return {"endpoints": _svc(request).serving_projection()}
 
 
+@router.get("/admin/crl")
+def crl(request: Request):
+    return {"revoked": _svc(request).crl()}
+
+
 @router.post("/admin/place")
 def place(request: Request, body: dict = Body(...)):
     placement = _svc(request).select_placement(
