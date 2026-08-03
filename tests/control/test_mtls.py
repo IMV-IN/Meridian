@@ -136,3 +136,32 @@ def test_agent_presents_cert_end_to_end(live_mtls, tmp_path):
     agent.establish_session()
     assert agent.heartbeat_once()["accepted_sequence"] == 1
     assert node_id.startswith("node_")
+
+
+def test_certificate_rotation_end_to_end(live_mtls, tmp_path):
+    pytest.importorskip("meridian_node")
+    from cryptography import x509
+    from meridian_node.agent import Agent
+    from meridian_node.config import Config
+    from meridian_node.http_transport import HttpTransport
+    from meridian_node.wiring import upgrade_transport
+
+    app, url = live_mtls
+    token = app.state.control_service.create_token(auto_approve=True)
+    cfg = Config(control_plane_url=url, state_dir=tmp_path / "node", mode="observe-only")
+    agent = Agent(cfg, HttpTransport(url, enrollment_token=token))
+    node_id = agent.ensure_enrolled()
+    upgrade_transport(cfg, agent)
+
+    old_cert = agent.certificate
+    # Force rotation regardless of remaining lifetime; presents the current cert.
+    assert agent.maybe_rotate_certificate(renew_before_fraction=1.0) is True
+    assert agent.certificate != old_cert
+    cert = x509.load_pem_x509_certificate(agent.certificate.encode())
+    san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert f"meridian-node://{node_id}" in san.get_values_for_type(x509.UniformResourceIdentifier)
+
+    # The freshly rotated cert authorizes a new session.
+    upgrade_transport(cfg, agent)
+    agent.establish_session()
+    assert agent.heartbeat_once()["accepted_sequence"] == 1

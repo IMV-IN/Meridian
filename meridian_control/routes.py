@@ -72,6 +72,13 @@ def observations(request: Request, node_id: str, body: dict = Body(...)):
     return svc.post_observation(node_id, body)
 
 
+@router.post("/control/v1/nodes/{node_id}/certificate")
+def rotate_certificate(request: Request, node_id: str):
+    svc = _svc(request)
+    svc.verify_node_identity(node_id, _client_cert(request))
+    return svc.rotate_certificate(node_id)
+
+
 # --- operator admin -----------------------------------------------------
 @router.post("/admin/tokens")
 def create_token(request: Request, body: dict = Body(default={})):

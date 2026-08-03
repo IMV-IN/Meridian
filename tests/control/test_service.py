@@ -148,3 +148,28 @@ def test_serving_projection_reflects_ready_and_lease(tmp_path, clock, node_key):
 
     clock.advance(31)  # lease expired -> not routable
     assert svc.serving_projection()[0]["routable"] is False
+
+
+def test_rotate_certificate_reissues_for_same_key(tmp_path, clock, node_key):
+    from cryptography import x509
+
+    svc = make_service(tmp_path, clock)
+    resp = _enroll_auto(svc, node_key)
+    node_id, old_cert = resp["node_id"], resp["certificate"]
+
+    rotated = svc.rotate_certificate(node_id)
+    assert rotated["certificate"] != old_cert
+    cert = x509.load_pem_x509_certificate(rotated["certificate"].encode())
+    san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    assert f"meridian-node://{node_id}" in san.get_values_for_type(x509.UniformResourceIdentifier)
+    # the reissued cert still verifies against the same CA
+    svc._ca.verify_cert(rotated["certificate"])
+
+
+def test_rotate_certificate_rejects_revoked_node(tmp_path, clock, node_key):
+    svc = make_service(tmp_path, clock)
+    node_id = _enroll_auto(svc, node_key)["node_id"]
+    svc.revoke_node(node_id)
+    with pytest.raises(ControlServiceError) as exc:
+        svc.rotate_certificate(node_id)
+    assert exc.value.code == "NODE_NOT_AUTHORIZED"
