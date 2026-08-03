@@ -18,7 +18,18 @@ def main(argv: list[str] | None = None) -> int:
     tok.add_argument("--auto-approve", action="store_true")
     tok.add_argument("--ttl", type=int, default=3600)
 
+    sub.add_parser("migrate", help="apply Alembic migrations up to head")
+
     args = parser.parse_args(argv)
+
+    if args.command == "migrate":
+        from .config import ControlConfig
+        from .db import run_migrations
+
+        db_url = ControlConfig.from_env().db_url
+        run_migrations(db_url)
+        print(f"migrated {db_url} to head")
+        return 0
 
     if args.command == "run":
         import uvicorn
