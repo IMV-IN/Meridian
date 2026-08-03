@@ -40,24 +40,36 @@ def get_claim(request: Request, claim_id: str, x_possession_proof: Optional[str]
     return svc.resolve_claim(claim_id, _b64url_decode(x_possession_proof))
 
 
+def _client_cert(request: Request) -> Optional[str]:
+    return request.headers.get(_svc(request)._config.client_cert_header)
+
+
 @router.post("/control/v1/nodes/{node_id}/sessions")
 def establish_session(request: Request, node_id: str, body: dict = Body(...)):
-    return _svc(request).establish_session(node_id, body)
+    svc = _svc(request)
+    svc.verify_node_identity(node_id, _client_cert(request))
+    return svc.establish_session(node_id, body)
 
 
 @router.post("/control/v1/nodes/{node_id}/heartbeat")
 def heartbeat(request: Request, node_id: str, body: dict = Body(...)):
-    return _svc(request).heartbeat(node_id, body)
+    svc = _svc(request)
+    svc.verify_node_identity(node_id, _client_cert(request))
+    return svc.heartbeat(node_id, body)
 
 
 @router.get("/control/v1/nodes/{node_id}/desired-state")
 def desired_state(request: Request, node_id: str, generation: int = Query(0)):
-    return _svc(request).fetch_desired_state(node_id, generation)
+    svc = _svc(request)
+    svc.verify_node_identity(node_id, _client_cert(request))
+    return svc.fetch_desired_state(node_id, generation)
 
 
 @router.post("/control/v1/nodes/{node_id}/observations")
 def observations(request: Request, node_id: str, body: dict = Body(...)):
-    return _svc(request).post_observation(node_id, body)
+    svc = _svc(request)
+    svc.verify_node_identity(node_id, _client_cert(request))
+    return svc.post_observation(node_id, body)
 
 
 # --- operator admin -----------------------------------------------------

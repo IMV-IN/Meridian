@@ -13,6 +13,7 @@ import base64
 import hashlib
 import json
 import secrets
+import urllib.parse
 from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional, cast
 
@@ -20,7 +21,7 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from sqlalchemy import select
 
-from .ca import NodeCA
+from .ca import NodeCA, node_id_from_cert
 from .config import ControlConfig
 from .models import (
     AuditEvent,
@@ -227,6 +228,27 @@ class ControlService:
                 "lease_ttl_seconds": self._config.lease_ttl_seconds,
             },
         }
+
+    # --- transport auth -------------------------------------------------
+    def verify_node_identity(self, node_id: str, cert_header: Optional[str]) -> None:
+        """Bind the presented node certificate to the path node_id (DESIGN.md 15.6).
+        No-op unless `require_mtls`. The edge terminates mTLS and forwards the
+        url-escaped PEM; here we re-verify the chain and match the SAN node_id."""
+        if not self._config.require_mtls:
+            return
+        if not cert_header:
+            raise ControlServiceError(
+                "NODE_NOT_AUTHORIZED", "client certificate required", http_status=401
+            )
+        try:
+            cert = self._ca.verify_cert(urllib.parse.unquote(cert_header))
+            cert_node_id = node_id_from_cert(cert)
+        except ValueError as e:
+            raise ControlServiceError("NODE_NOT_AUTHORIZED", str(e), http_status=403) from e
+        if cert_node_id != node_id:
+            raise ControlServiceError(
+                "NODE_NOT_AUTHORIZED", "certificate identity does not match node", http_status=403
+            )
 
     # --- session --------------------------------------------------------
     def establish_session(self, node_id: str, request: dict) -> dict:
