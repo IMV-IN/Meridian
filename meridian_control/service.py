@@ -337,11 +337,20 @@ class ControlService:
                 "stop_authorized_engine_ids": sorted(stop_ids),
             }
 
+    def _active_node(self, s, node_id: str) -> Node:
+        """Fetch a node, rejecting unknown and revoked ones. Revocation is thus
+        enforced on every post-enrollment call, independent of the mTLS gate."""
+        node = s.get(Node, node_id)
+        if node is None:
+            raise ControlServiceError("NODE_NOT_FOUND", "unknown node", http_status=404)
+        if node.revoked:
+            raise ControlServiceError("NODE_NOT_AUTHORIZED", "node certificate revoked", http_status=403)
+        return cast(Node, node)
+
     # --- desired state / observations ----------------------------------
     def fetch_desired_state(self, node_id: str, generation: int) -> dict:
         with self._sf() as s:
-            if s.get(Node, node_id) is None:
-                raise ControlServiceError("NODE_NOT_FOUND", "unknown node", http_status=404)
+            self._active_node(s, node_id)
             row = s.scalar(
                 select(DesiredSnapshotRow).where(DesiredSnapshotRow.node_id == node_id)
                 .order_by(DesiredSnapshotRow.generation.desc())
@@ -352,8 +361,7 @@ class ControlService:
 
     def post_observation(self, node_id: str, observation: dict) -> dict:
         with self._sf() as s:
-            if s.get(Node, node_id) is None:
-                raise ControlServiceError("NODE_NOT_FOUND", "unknown node", http_status=404)
+            self._active_node(s, node_id)
             seq = int(observation.get("sequence", 0))
             row = s.get(ObservationRow, node_id)
             if row is None:
@@ -386,6 +394,23 @@ class ControlService:
         if best is None:
             return None
         return {"node_id": best[1], "device_id": best[2], "allocatable_vram_bytes": best[0]}
+
+    def crl(self) -> list[dict]:
+        """Certificate revocation list: revoked nodes with their cert serial, for
+        the TLS-terminating edge to reject at the handshake (DESIGN.md 15.6)."""
+        from cryptography import x509
+
+        out: list[dict] = []
+        with self._sf() as s:
+            for node in s.scalars(select(Node).where(Node.revoked.is_(True))):
+                serial: Optional[str] = None
+                if node.certificate_pem:
+                    try:
+                        serial = str(x509.load_pem_x509_certificate(node.certificate_pem.encode()).serial_number)
+                    except ValueError:
+                        serial = None
+                out.append({"node_id": node.node_id, "serial": serial})
+        return out
 
     # --- read models (operator / gateway projection) -------------------
     def serving_projection(self) -> list[dict]:

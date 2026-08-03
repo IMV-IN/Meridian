@@ -125,6 +125,28 @@ def test_revoked_node_cannot_heartbeat(tmp_path, clock, node_key):
     assert exc.value.code == "NODE_NOT_AUTHORIZED"
 
 
+def test_revocation_enforced_on_desired_and_observation(tmp_path, clock, node_key):
+    svc = make_service(tmp_path, clock)
+    node_id = _enroll_auto(svc, node_key)["node_id"]
+    svc.set_desired(node_id, {"node_id": node_id, "generation": 1, "snapshot_hash": "sha256:x", "assignments": []})
+    svc.revoke_node(node_id)
+    for call in (lambda: svc.fetch_desired_state(node_id, 1),
+                 lambda: svc.post_observation(node_id, {"sequence": 1, "engines": []})):
+        with pytest.raises(ControlServiceError) as exc:
+            call()
+        assert exc.value.code == "NODE_NOT_AUTHORIZED"
+
+
+def test_crl_lists_revoked_nodes_with_serial(tmp_path, clock, node_key):
+    svc = make_service(tmp_path, clock)
+    node_id = _enroll_auto(svc, node_key)["node_id"]
+    assert svc.crl() == []
+    svc.revoke_node(node_id)
+    crl = svc.crl()
+    assert len(crl) == 1 and crl[0]["node_id"] == node_id
+    assert crl[0]["serial"] and crl[0]["serial"].isdigit()
+
+
 def test_desired_state_generation_and_fetch(tmp_path, clock, node_key):
     svc = make_service(tmp_path, clock)
     node_id = _enroll_auto(svc, node_key)["node_id"]

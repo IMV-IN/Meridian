@@ -42,6 +42,7 @@ meridian-control mint-token --auto-approve
 | `POST /admin/tokens` · `/admin/claims/{id}/approve` · `/admin/nodes/{id}/desired` · `/admin/nodes/{id}/stop-authorize` · `/admin/nodes/{id}/revoke` · `/admin/restore` | Operator actions |
 | `GET /admin/projection` | Serving projection (gateway consumes read-only) |
 | `POST /admin/place` | Capacity-aware placement: pick a node/device with enough allocatable VRAM |
+| `GET /admin/crl` | Certificate revocation list (revoked node ids + cert serials) for the edge |
 
 ## Restore safety
 
