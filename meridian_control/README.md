@@ -41,6 +41,7 @@ meridian-control mint-token --auto-approve
 | `POST /control/v1/nodes/{id}/certificate` | Rotate the node certificate (mTLS-gated) |
 | `POST /admin/tokens` · `/admin/claims/{id}/approve` · `/admin/nodes/{id}/desired` · `/admin/nodes/{id}/stop-authorize` · `/admin/nodes/{id}/revoke` · `/admin/restore` | Operator actions |
 | `GET /admin/projection` | Serving projection (gateway consumes read-only) |
+| `POST /admin/place` | Capacity-aware placement: pick a node/device with enough allocatable VRAM |
 
 ## Restore safety
 

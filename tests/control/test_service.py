@@ -166,6 +166,37 @@ def test_rotate_certificate_reissues_for_same_key(tmp_path, clock, node_key):
     svc._ca.verify_cert(rotated["certificate"])
 
 
+def _ready_node_with_capacity(svc, node_key, allocatable):
+    node_id = _enroll_auto(svc, node_key)["node_id"]
+    svc.establish_session(node_id, {"agent_session_id": "s-" + node_id})
+    svc.heartbeat(node_id, {"agent_session_id": "s-" + node_id, "fencing_epoch": 1, "sequence": 1})
+    svc.post_observation(node_id, {"sequence": 1, "engines": [],
+                                   "capacity": {"allocatable_vram_bytes": allocatable}})
+    return node_id
+
+
+def test_select_placement_prefers_most_headroom(tmp_path, clock, node_key):
+    g = 1024**3
+    svc = make_service(tmp_path, clock)
+    _ready_node_with_capacity(svc, node_key, {"GPU-0": 8 * g})
+    big = _ready_node_with_capacity(svc, node_key, {"GPU-0": 40 * g, "GPU-1": 20 * g})
+
+    pick = svc.select_placement(10 * g)
+    assert pick is not None
+    assert pick["node_id"] == big and pick["device_id"] == "GPU-0"  # most headroom that fits
+    assert pick["allocatable_vram_bytes"] == 40 * g
+
+    assert svc.select_placement(100 * g) is None  # nothing fits
+
+
+def test_select_placement_skips_expired_lease(tmp_path, clock, node_key):
+    g = 1024**3
+    svc = make_service(tmp_path, clock)
+    _ready_node_with_capacity(svc, node_key, {"GPU-0": 40 * g})
+    clock.advance(31)  # lease (ttl 30) expired -> node not eligible
+    assert svc.select_placement(10 * g) is None
+
+
 def test_rotate_certificate_rejects_revoked_node(tmp_path, clock, node_key):
     svc = make_service(tmp_path, clock)
     node_id = _enroll_auto(svc, node_key)["node_id"]

@@ -130,6 +130,12 @@ def projection(request: Request):
     return {"endpoints": _svc(request).serving_projection()}
 
 
+@router.post("/admin/place")
+def place(request: Request, body: dict = Body(...)):
+    placement = _svc(request).select_placement(int(body.get("required_vram_bytes", 0)))
+    return {"placement": placement}
+
+
 def register_error_handler(app) -> None:
     @app.exception_handler(ControlServiceError)
     async def _handle(request: Request, exc: ControlServiceError):
