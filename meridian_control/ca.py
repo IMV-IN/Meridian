@@ -81,3 +81,31 @@ class NodeCA:
 
     def trust_bundle(self) -> str:
         return self._cert.public_bytes(serialization.Encoding.PEM).decode()
+
+    def verify_cert(self, cert_pem: str) -> x509.Certificate:
+        """Verify a presented node cert chains to this CA and is currently valid.
+        Raises ValueError on any failure. Defense-in-depth behind the edge that
+        already terminated mTLS (DESIGN.md 15.6)."""
+        try:
+            cert = x509.load_pem_x509_certificate(cert_pem.encode())
+        except ValueError as e:
+            raise ValueError(f"unparseable client certificate: {e}") from e
+        now = dt.datetime.now(dt.timezone.utc)
+        if now < cert.not_valid_before_utc or now > cert.not_valid_after_utc:
+            raise ValueError("client certificate is expired or not yet valid")
+        pub = self._cert.public_key()
+        assert isinstance(pub, Ed25519PublicKey)
+        try:
+            pub.verify(cert.signature, cert.tbs_certificate_bytes)
+        except Exception as e:  # InvalidSignature
+            raise ValueError("client certificate is not signed by this CA") from e
+        return cert
+
+
+def node_id_from_cert(cert: x509.Certificate) -> str:
+    """Extract the node_id from the cert SAN URI `meridian-node://{node_id}`."""
+    san = cert.extensions.get_extension_for_class(x509.SubjectAlternativeName).value
+    for uri in san.get_values_for_type(x509.UniformResourceIdentifier):
+        if uri.startswith("meridian-node://"):
+            return uri[len("meridian-node://"):]
+    raise ValueError("client certificate has no meridian-node SAN")
