@@ -132,7 +132,11 @@ def projection(request: Request):
 
 @router.post("/admin/place")
 def place(request: Request, body: dict = Body(...)):
-    placement = _svc(request).select_placement(int(body.get("required_vram_bytes", 0)))
+    placement = _svc(request).select_placement(
+        int(body.get("required_vram_bytes", 0)),
+        count=int(body.get("count", 1)),
+        artifact_digest=body.get("artifact_digest"),
+    )
     return {"placement": placement}
 
 

@@ -166,13 +166,16 @@ def test_rotate_certificate_reissues_for_same_key(tmp_path, clock, node_key):
     svc._ca.verify_cert(rotated["certificate"])
 
 
-def _ready_node_with_capacity(svc, node_key, allocatable):
+def _ready_node(svc, node_key, capacity):
     node_id = _enroll_auto(svc, node_key)["node_id"]
     svc.establish_session(node_id, {"agent_session_id": "s-" + node_id})
     svc.heartbeat(node_id, {"agent_session_id": "s-" + node_id, "fencing_epoch": 1, "sequence": 1})
-    svc.post_observation(node_id, {"sequence": 1, "engines": [],
-                                   "capacity": {"allocatable_vram_bytes": allocatable}})
+    svc.post_observation(node_id, {"sequence": 1, "engines": [], "capacity": capacity})
     return node_id
+
+
+def _ready_node_with_capacity(svc, node_key, allocatable):
+    return _ready_node(svc, node_key, {"allocatable_vram_bytes": allocatable})
 
 
 def test_select_placement_prefers_most_headroom(tmp_path, clock, node_key):
@@ -195,6 +198,38 @@ def test_select_placement_skips_expired_lease(tmp_path, clock, node_key):
     _ready_node_with_capacity(svc, node_key, {"GPU-0": 40 * g})
     clock.advance(31)  # lease (ttl 30) expired -> node not eligible
     assert svc.select_placement(10 * g) is None
+
+
+def test_placement_prefers_artifact_locality(tmp_path, clock, node_key):
+    g = 1024**3
+    svc = make_service(tmp_path, clock)
+    holder = _ready_node(svc, node_key, {"allocatable_vram_bytes": {"GPU-0": 20 * g},
+                                         "held_artifacts": ["sha256:aa"]})
+    _ready_node(svc, node_key, {"allocatable_vram_bytes": {"GPU-0": 40 * g}})  # more headroom, no artifact
+    pick = svc.select_placement(10 * g, artifact_digest="sha256:aa")
+    assert pick["node_id"] == holder  # locality beats headroom
+
+
+def test_placement_load_tiebreak(tmp_path, clock, node_key):
+    g = 1024**3
+    svc = make_service(tmp_path, clock)
+    _ready_node(svc, node_key, {"allocatable_vram_bytes": {"GPU-0": 40 * g}, "running_engines": 3})
+    idle = _ready_node(svc, node_key, {"allocatable_vram_bytes": {"GPU-0": 40 * g}, "running_engines": 0})
+    assert svc.select_placement(10 * g)["node_id"] == idle  # equal headroom -> lower load
+
+
+def test_placement_multi_gpu_requires_nvlink_group(tmp_path, clock, node_key):
+    g = 1024**3
+    svc = make_service(tmp_path, clock)
+    affine = _ready_node(svc, node_key, {
+        "allocatable_vram_bytes": {"GPU-0": 10 * g, "GPU-1": 10 * g},
+        "nvlink_groups": {"GPU-0": "nv0", "GPU-1": "nv0"}})
+    _ready_node(svc, node_key, {  # two devices, but split across groups
+        "allocatable_vram_bytes": {"GPU-0": 10 * g, "GPU-1": 10 * g},
+        "nvlink_groups": {"GPU-0": "a", "GPU-1": "b"}})
+    pick = svc.select_placement(5 * g, count=2)
+    assert pick["node_id"] == affine
+    assert len(pick["device_ids"]) == 2
 
 
 def test_rotate_certificate_rejects_revoked_node(tmp_path, clock, node_key):
