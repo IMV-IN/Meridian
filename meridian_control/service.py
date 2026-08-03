@@ -364,6 +364,29 @@ class ControlService:
             s.commit()
             return {"received": True}
 
+    # --- placement (Phase 5, control side) -----------------------------
+    def select_placement(self, required_vram_bytes: int) -> Optional[dict]:
+        """Pick a routable node + device with enough reported allocatable VRAM
+        (DESIGN.md 24 P3). Consumes the capacity nodes report in observations;
+        prefers the device with the most headroom (spread). None if nothing fits."""
+        best: Optional[tuple[int, str, str]] = None  # (allocatable, node_id, device_id)
+        with self._sf() as s:
+            for node in s.scalars(select(Node)):
+                lease_valid = node.lease_expires_at is not None and self._now() < _aware(node.lease_expires_at)
+                if node.revoked or not lease_valid:
+                    continue
+                obs = s.get(ObservationRow, node.node_id)
+                if obs is None:
+                    continue
+                allocatable = obs.observation.get("capacity", {}).get("allocatable_vram_bytes", {})
+                for device_id, free in allocatable.items():
+                    free_i = int(free)
+                    if free_i >= required_vram_bytes and (best is None or free_i > best[0]):
+                        best = (free_i, node.node_id, device_id)
+        if best is None:
+            return None
+        return {"node_id": best[1], "device_id": best[2], "allocatable_vram_bytes": best[0]}
+
     # --- read models (operator / gateway projection) -------------------
     def serving_projection(self) -> list[dict]:
         """Read-only projection the gateway consumes (DESIGN.md 17). Routable
