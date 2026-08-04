@@ -240,6 +240,17 @@ def test_placement_load_tiebreak(tmp_path, clock, node_key):
     assert svc.select_placement(10 * g)["node_id"] == idle  # equal headroom -> lower load
 
 
+def test_placement_prefers_lower_queue_depth(tmp_path, clock, node_key):
+    g = 1024**3
+    svc = make_service(tmp_path, clock)
+    # Busy node has fewer engines but a deeper queue; queue depth wins over count.
+    _ready_node(svc, node_key, {"allocatable_vram_bytes": {"GPU-0": 40 * g},
+                                "running_engines": 1, "queue_depth": 12})
+    quiet = _ready_node(svc, node_key, {"allocatable_vram_bytes": {"GPU-0": 40 * g},
+                                        "running_engines": 4, "queue_depth": 2})
+    assert svc.select_placement(10 * g)["node_id"] == quiet
+
+
 def test_placement_multi_gpu_requires_nvlink_group(tmp_path, clock, node_key):
     g = 1024**3
     svc = make_service(tmp_path, clock)

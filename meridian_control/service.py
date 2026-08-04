@@ -399,7 +399,9 @@ class ControlService:
                     continue
                 headroom = sum(alloc[d] for d in devices)
                 artifact_hit = 1 if (artifact_digest and artifact_digest in cap.get("held_artifacts", [])) else 0
-                load = int(cap.get("running_engines", 0))
+                # Prefer live queue depth (real serving load) when the node reports
+                # it; fall back to the running-engine count otherwise.
+                load = int(cap["queue_depth"]) if "queue_depth" in cap else int(cap.get("running_engines", 0))
                 key = (artifact_hit, -load, headroom)  # maximize
                 if best_key is None or key > best_key:
                     best_key, best = key, (node.node_id, devices, headroom)
