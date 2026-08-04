@@ -20,7 +20,9 @@ from .service import ControlService
 
 def create_app(config: Optional[ControlConfig] = None, now: Optional[Callable] = None) -> FastAPI:
     config = config or ControlConfig.from_env()
-    session_factory = make_session_factory(config.db_url)
+    session_factory = make_session_factory(
+        config.db_url, pool_size=config.db_pool_size, max_overflow=config.db_max_overflow
+    )
     ca = NodeCA.load_or_create(config.ca_dir)
     service_kwargs = {"now": now} if now is not None else {}
     service = ControlService(session_factory, ca, config, **service_kwargs)

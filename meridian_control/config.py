@@ -20,6 +20,9 @@ class ControlConfig:
     # must be reachable only through that edge. Default off for dev/private nets.
     require_mtls: bool = False
     client_cert_header: str = "x-client-cert"
+    # SQLAlchemy connection pool (Postgres at fleet scale; ignored for SQLite).
+    db_pool_size: int = 5
+    db_max_overflow: int = 10
 
     @classmethod
     def from_env(cls) -> "ControlConfig":
@@ -29,4 +32,6 @@ class ControlConfig:
             lease_ttl_seconds=int(os.environ.get("MERIDIAN_CONTROL_LEASE_TTL", "30")),
             require_mtls=os.environ.get("MERIDIAN_CONTROL_REQUIRE_MTLS", "").lower() in ("1", "true", "yes"),
             client_cert_header=os.environ.get("MERIDIAN_CONTROL_CLIENT_CERT_HEADER", cls.client_cert_header),
+            db_pool_size=int(os.environ.get("MERIDIAN_CONTROL_DB_POOL_SIZE", "5")),
+            db_max_overflow=int(os.environ.get("MERIDIAN_CONTROL_DB_MAX_OVERFLOW", "10")),
         )
