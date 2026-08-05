@@ -34,6 +34,10 @@ Production manages the schema with **Alembic** (`meridian-control migrate`, or
 `alembic -c meridian_control/alembic.ini upgrade head`). `create_all` remains the
 zero-config default for local dev and tests.
 
+Container image (separate from the gateway image): `deploy/control/Dockerfile`.
+See [docs/CONTROL_PLANE.md](../docs/CONTROL_PLANE.md) for the full deploy flow and
+the production-readiness checklist.
+
 ## Endpoints
 
 | Method + path | Purpose |
