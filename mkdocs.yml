@@ -70,6 +70,7 @@ nav:
       - Air-gapped installs: AIRGAP.md
       - Load and overhead: LOAD.md
       - Real-engine validation: REAL_ENGINE_VALIDATION.md
+      - Experimental KV routing: KV_CACHE_ROUTING.md
   - Operate:
       - Operations runbook: OPS_RUNBOOK.md
       - Cost and usage: ENTERPRISE_COST.md

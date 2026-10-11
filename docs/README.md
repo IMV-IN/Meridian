@@ -23,6 +23,7 @@ Start here if you are not sure which file to open.
 | **[scans/IMAGE_SCAN_0.9.3.md](./scans/IMAGE_SCAN_0.9.3.md)** | Container vulnerability scan notes |
 | **[KNOWN_ISSUES.md](./KNOWN_ISSUES.md)** | Residual engineering notes |
 | **[AUDIT_E2E.md](./AUDIT_E2E.md)** | Optional tamper-evident audit pipeline |
+| **[KV_CACHE_ROUTING.md](./KV_CACHE_ROUTING.md)** | Experimental prefix routing, benchmark and GPU validation recipe |
 
 ## Project status (public)
 
@@ -44,6 +45,7 @@ These live under **[`internal/`](./internal/)** so they do not look like product
 | [internal/POC_REPORT.md](./internal/POC_REPORT.md) | Design-partner PoC evidence |
 | [internal/V1_GATE.md](./internal/V1_GATE.md) | v1.0 release gate checklist |
 | [internal/V1_ROADMAP.md](./internal/V1_ROADMAP.md) | Detailed remaining plans |
+| [internal/IMPLEMENTATION_PLAN.md](./internal/IMPLEMENTATION_PLAN.md) | Current implementation order and acceptance gates (2026-10-11) |
 | [internal/ENTERPRISE_PROPOSAL.md](./internal/ENTERPRISE_PROPOSAL.md) | Longer enterprise narrative |
 | [internal/FEATURES.md](./internal/FEATURES.md) | Post-v1.0 ideas |
 | [internal/UNDERSTANDING.md](./internal/UNDERSTANDING.md) | Deep codebase notes |

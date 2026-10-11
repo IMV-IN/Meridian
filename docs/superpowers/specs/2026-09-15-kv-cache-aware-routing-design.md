@@ -1,7 +1,8 @@
 # KV-Cache-Aware Routing — Design
 
 **Date:** 2026-09-15
-**Status:** Approved, pending implementation plan
+**Status:** Implemented on capstone branch (2026-10-11); mock validation complete,
+real-vLLM cache/TTFT evidence pending. Operator recipe: [KV_CACHE_ROUTING.md](../../KV_CACHE_ROUTING.md).
 **Author:** Capstone project
 **Repo:** Meridian (`IMV-IN/Meridian`)
 

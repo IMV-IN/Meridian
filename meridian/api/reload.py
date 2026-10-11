@@ -90,6 +90,7 @@ async def reload_config(state: "AppState") -> Dict[str, Any]:
             default_max_tokens=new_cfg.gateway.default_max_tokens,
             queue_weight=new_cfg.gateway.queue_weight,
             mem_weight=new_cfg.gateway.mem_weight,
+            cache_affinity=new_cfg.gateway.cache_affinity,
         )
 
         old_cfg = state.config

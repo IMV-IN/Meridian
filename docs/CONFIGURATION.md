@@ -8,6 +8,10 @@ export MERIDIAN_CONFIG=/path/to/config.yaml   # always UPPERCASE
 
 See also: [QUICKSTART.md](./QUICKSTART.md), [enterprise_example.yaml](https://github.com/IMV-IN/Meridian/blob/main/configs/enterprise_example.yaml).
 
+The development branch also supports experimental `gateway.strategy:
+cache_affinity`. Its settings, fallback behavior and required engine telemetry
+are documented in [KV_CACHE_ROUTING.md](./KV_CACHE_ROUTING.md); it is unreleased.
+
 ---
 
 ## Configuration

@@ -22,7 +22,8 @@ from meridian.metrics.collectors import (
     RATELIMIT_REJECTIONS,
 )
 from meridian.pii import apply_pii_policy, resolve_policy
-from meridian.router.strategies import RequestContext
+from meridian.router.cache_key import prefix_keys
+from meridian.router.strategies import CacheAffinity, RequestContext
 from meridian.router.token_estimator import estimate_prompt_tokens, extract_max_tokens
 from meridian.usage import MeterKey, build_meter_keys
 
@@ -40,6 +41,7 @@ class ChatRequest:
     org_id: Optional[str]
     team_id: Optional[str]
     request_ctx: RequestContext
+    cache_router: Optional[CacheAffinity] = None
     pii_counts: Optional[Dict[str, int]] = None
     request_id: str = ""
     start_ms: float = 0.0
@@ -98,13 +100,20 @@ async def read_json_body(request: Request, max_body: int) -> Dict[str, Any]:
     return body
 
 
-def build_request_context(state: AppState, body: Dict[str, Any]) -> RequestContext:
+def build_request_context(state: AppState, body: Dict[str, Any], *, scope: str = "public") -> RequestContext:
     gw = state.config.gateway
     prompt_tokens = estimate_prompt_tokens(body.get("messages"))
     max_tokens = extract_max_tokens(body, gw.default_max_tokens)
     cost = prompt_tokens * gw.prefill_weight + max_tokens * gw.decode_weight
+    keys: tuple[str, ...] = ()
+    prediction = None
+    if isinstance(state.strategy, CacheAffinity):
+        cache = state.strategy.config
+        keys = prefix_keys(body, scope=scope, block_chars=cache.block_chars, max_checkpoints=cache.max_checkpoints)
+        prediction = state.strategy.index.lookup(keys)
     return RequestContext(
-        prompt_tokens=prompt_tokens, max_tokens=max_tokens, cost=cost
+        prompt_tokens=prompt_tokens, max_tokens=max_tokens, cost=cost,
+        prefix_keys=keys, cache_prediction=prediction,
     )
 
 
@@ -315,7 +324,11 @@ async def prepare_chat_request(
             403,
         )
     body, pii_counts = apply_pii(state, body, identity, request_id, org_id)
-    request_ctx = build_request_context(state, body)
+    scope = f"org:{org_id}" if org_id else (f"key:{identity.key_id}" if identity else "public")
+    request_ctx = build_request_context(state, body, scope=scope)
+    # Keep the owning strategy for the entire request: config reload may replace
+    # state.strategy while a stream is still in flight.
+    cache_router = state.strategy if isinstance(state.strategy, CacheAffinity) else None
     meter_keys = apply_budgets(
         state, identity, request_ctx, request_id, org_id, team_id
     )
@@ -333,6 +346,7 @@ async def prepare_chat_request(
         org_id=org_id,
         team_id=team_id,
         request_ctx=request_ctx,
+        cache_router=cache_router,
         pii_counts=pii_counts,
         request_id=request_id,
         start_ms=start_ms,

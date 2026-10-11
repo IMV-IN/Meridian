@@ -207,6 +207,12 @@ async def forward_stream(
                 _circuit_success(backend)
             else:
                 _circuit_failure(backend)
+            if resp.status_code >= 400:
+                for event in _stream_error_events("meridian_backend_error", "upstream rejected streaming request"):
+                    yield event
+                raise StreamUpstreamError(
+                    backend.name, "upstream_5xx" if resp.status_code >= 500 else "upstream_4xx",
+                )
             # (b) Stream phase — never retried.
             try:
                 async for chunk in resp.aiter_bytes():

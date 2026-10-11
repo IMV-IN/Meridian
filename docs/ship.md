@@ -11,7 +11,8 @@ A scannable record of **what's shipped** and **what's next**.
 | Release-note detail | [`CHANGELOG.md`](https://github.com/IMV-IN/Meridian/blob/main/CHANGELOG.md) |
 | Pitchable claims only | [`internal/PITCH.md`](./internal/PITCH.md) |
 
-_Last updated: 2026-07-28 — **v0.11.0 in tree**; Grafana dashboards, Helm hardening + KEDA scaffolding, scale-to-zero idle marker; next: Phase 3 platform depth (v0.12.0)._
+_Last updated: 2026-10-11 — **v0.12.0 tagged**; control service on main;
+experimental cache-aware routing implemented on the capstone branch, GPU proof pending._
 
 ---
 
@@ -45,7 +46,16 @@ Also: optional audit pipeline; Ollama load numbers ([`LOAD.md`](./LOAD.md)); har
 
 ---
 
-## Next (features paused)
+## Unreleased development
+
+- Main includes the separate control service and gateway serving-projection sync.
+- Capstone branch: prefix predictions, feedback-corrected cache-affinity routing,
+  usage parsing, metrics, unit/API tests, and an executable three-arm benchmark.
+  Real-vLLM telemetry and performance validation remain pending.
+- [KV validation recipe](./KV_CACHE_ROUTING.md) ·
+  [Current remaining implementation plan](./internal/IMPLEMENTATION_PLAN.md).
+
+## Release gate
 
 | Track | Status | Focus |
 |---|---|---|

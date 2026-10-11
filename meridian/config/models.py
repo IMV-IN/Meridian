@@ -7,6 +7,19 @@ from typing import Dict, List, Optional
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 
+class CacheAffinityConfig(BaseModel):
+    """Bounded, process-local prefix predictions; only used by cache_affinity."""
+
+    block_chars: int = Field(default=256, ge=1, le=4096)
+    max_checkpoints: int = Field(default=16, ge=1, le=256)
+    ttl_s: float = Field(default=300.0, gt=0, allow_inf_nan=False)
+    max_entries: int = Field(default=100_000, ge=1)
+    locality_weight: float = Field(default=1000.0, ge=0, allow_inf_nan=False)
+    hit_threshold: float = Field(default=0.5, gt=0, le=1)
+    min_trust: float = Field(default=0.15, ge=0, lt=0.5)
+    feedback_correction: bool = True
+
+
 class GatewayConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8080
@@ -17,6 +30,7 @@ class GatewayConfig(BaseModel):
     decode_weight: float = Field(default=4.0, ge=0.0)
     default_max_tokens: int = Field(default=256, ge=1)
     token_estimator: str = "heuristic"
+    cache_affinity: CacheAffinityConfig = Field(default_factory=CacheAffinityConfig)
 
     # Capacity-aware penalties. Added to the token_aware base score when the
     # corresponding telemetry signal is present. Defaults of 0.0 mean the

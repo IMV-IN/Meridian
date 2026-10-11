@@ -50,7 +50,7 @@ from meridian.util.helpers import generate_request_id, now_ms
 
 def _wants_usage_scrape(state: AppState, chat: ChatRequest) -> bool:
     """Scrape backend usage for cost ledger and/or budget reconcile."""
-    return state.cost_ledger is not None or bool(chat.meter_keys)
+    return state.cost_ledger is not None or bool(chat.meter_keys) or chat.cache_router is not None
 
 
 def _apply_actual_usage(
@@ -223,6 +223,11 @@ async def chat_completions(request: Request) -> Response:
     status_code = 200
     error_type: Optional[str] = None
     is_stream = chat.is_stream
+    if is_stream and chat.cache_router is not None and chat.request_ctx.prefix_keys:
+        options = chat.body.get("stream_options")
+        chat.body["stream_options"] = {
+            **(options if isinstance(options, dict) else {}), "include_usage": True,
+        }
 
     try:
         if is_stream:
@@ -249,6 +254,8 @@ async def chat_completions(request: Request) -> Response:
                     # Client already got error event + [DONE]; account + end quietly.
                     error_type = exc.error_type
                     status_code = 504 if exc.error_type == "stream_read_timeout" else 502
+                    if exc.error_type == "upstream_5xx":
+                        state.health_checker.check_passive_failure(backend)
                 except httpx.RequestError as exc:
                     state.health_checker.check_passive_failure(backend)
                     error_type = type(exc).__name__
@@ -262,7 +269,10 @@ async def chat_completions(request: Request) -> Response:
                     if status_code < 400 and _wants_usage_scrape(state, chat):
                         found = usage_from_sse_bytes(bytes(tail))
                         if found is not None:
-                            _apply_actual_usage(state, chat, found[0], found[1])
+                            _apply_actual_usage(state, chat, found.prompt_tokens, found.completion_tokens)
+                        if chat.cache_router is not None:
+                            complete = any(line.strip() == b"data: [DONE]" for line in tail.split(b"\n"))
+                            chat.cache_router.observe(chat.request_ctx, backend.name, found if complete else None)
                     finalize_request(
                         state,
                         request_id=request_id,
@@ -306,7 +316,9 @@ async def chat_completions(request: Request) -> Response:
             except Exception:
                 found = None
             if found is not None:
-                _apply_actual_usage(state, chat, found[0], found[1])
+                _apply_actual_usage(state, chat, found.prompt_tokens, found.completion_tokens)
+            if chat.cache_router is not None:
+                chat.cache_router.observe(chat.request_ctx, backend.name, found)
         stamp_meridian_headers(
             non_stream_resp.headers,
             request_id=request_id,
