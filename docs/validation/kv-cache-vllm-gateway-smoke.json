@@ -1,0 +1,54 @@
+{
+  "schema_version": 1,
+  "recorded_at": "2026-10-11T18:30:08.997473+00:00",
+  "meridian_version": "0.12.0",
+  "engine": "vllm",
+  "engine_version": "0.24.0",
+  "backend_url": "http://127.0.0.1:18000",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "model_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+  "host": {
+    "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+    "python": "3.12.11",
+    "gpu": {
+      "name": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "memory_mib": "8188",
+      "driver": "580.178.04"
+    }
+  },
+  "checks": {
+    "direct_models": "passed",
+    "direct_chat": "passed",
+    "direct_stream": "passed",
+    "gateway_smoke": "passed"
+  },
+  "benchmark": {
+    "mode": "external",
+    "backend_url": "http://127.0.0.1:18000",
+    "gateway_url": "http://127.0.0.1:18080",
+    "requests": 20,
+    "concurrency": 1,
+    "direct": {
+      "n": 20,
+      "p50_ms": 65.39939899994351,
+      "p95_ms": 68.12978755006043,
+      "p99_ms": 68.65203750952787,
+      "mean_ms": 65.43773400007922,
+      "rps": 15.276867567153337,
+      "errors": 0
+    },
+    "via_meridian": {
+      "n": 20,
+      "p50_ms": 68.26646399986203,
+      "p95_ms": 76.59900089865914,
+      "p99_ms": 82.43377777909699,
+      "mean_ms": 69.4503689497651,
+      "rps": 14.394905338976411,
+      "errors": 0
+    },
+    "overhead_p50_ms": 2.867,
+    "overhead_p95_ms": 8.469
+  },
+  "git_revision": "bbdd62cab26437a1e5fd57902e542454f8119d98",
+  "scope": "Development branch smoke; not a published v0.12.0 image validation."
+}

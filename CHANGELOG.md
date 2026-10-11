@@ -12,8 +12,10 @@ All notable changes to this project will be documented in this file.
 - Upstream HTTP errors opening a stream now produce SSE error termination and
   failed request accounting, so failed streams cannot train cache predictions.
 - Three-arm cache-routing benchmark with synthetic engines, metadata-only
-  CSV/JSON exports, and a real-engine prerequisite probe. GPU evidence remains
-  pending; see [KV cache routing](docs/KV_CACHE_ROUTING.md).
+  CSV/JSON exports, and a reset-aware cold/hit prerequisite probe for JSON/SSE.
+  [Local vLLM 0.24.0 evidence](docs/validation/KV_CACHE_VLLM.md) covers 6,336
+  measured requests with zero failures; correction shows no consistent benefit.
+  The strategy remains experimental and opt-in.
 - [Remaining implementation plan](docs/internal/IMPLEMENTATION_PLAN.md) covering
   release consistency, control deployment validation, the partner RC and later
   capabilities selected by measured need.

@@ -1,0 +1,137 @@
+{
+  "engine_version": "vllm-0.24.0",
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "seed": 42,
+  "prompt_chars": 2048,
+  "max_tokens": 8,
+  "cache_tokens_per_engine": 8192,
+  "procedure": "Reset; send unique-0 twice; send N distinct unique-1..N prefixes; resend unique-0. Workload uses scripts.bench_cache_routing.workload, 0% sharing, temperature 0, sync responses with stream_options omitted.",
+  "results": [
+    {
+      "backend_port": 18000,
+      "intervening_unique_prompts": 4,
+      "cold": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 0,
+        "hit_ratio": 0.0
+      },
+      "warm": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 1136,
+        "hit_ratio": 0.9991204925241864
+      },
+      "after_pressure": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 1136,
+        "hit_ratio": 0.9991204925241864
+      },
+      "pressure_elapsed_s": 0.2203672940013348,
+      "sequential_requests_per_s": 18.15151389922577
+    },
+    {
+      "backend_port": 18000,
+      "intervening_unique_prompts": 16,
+      "cold": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 0,
+        "hit_ratio": 0.0
+      },
+      "warm": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 1136,
+        "hit_ratio": 0.9991204925241864
+      },
+      "after_pressure": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 16,
+        "hit_ratio": 0.014072119613016711
+      },
+      "pressure_elapsed_s": 0.8857867659990006,
+      "sequential_requests_per_s": 18.063037984040115
+    },
+    {
+      "backend_port": 18000,
+      "intervening_unique_prompts": 64,
+      "cold": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 0,
+        "hit_ratio": 0.0
+      },
+      "warm": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 1136,
+        "hit_ratio": 0.9991204925241864
+      },
+      "after_pressure": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 16,
+        "hit_ratio": 0.014072119613016711
+      },
+      "pressure_elapsed_s": 3.523686770000495,
+      "sequential_requests_per_s": 18.162794872936736
+    },
+    {
+      "backend_port": 18001,
+      "intervening_unique_prompts": 4,
+      "cold": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 0,
+        "hit_ratio": 0.0
+      },
+      "warm": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 1136,
+        "hit_ratio": 0.9991204925241864
+      },
+      "after_pressure": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 1136,
+        "hit_ratio": 0.9991204925241864
+      },
+      "pressure_elapsed_s": 0.2274057630002062,
+      "sequential_requests_per_s": 17.589703740253817
+    },
+    {
+      "backend_port": 18001,
+      "intervening_unique_prompts": 16,
+      "cold": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 0,
+        "hit_ratio": 0.0
+      },
+      "warm": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 1136,
+        "hit_ratio": 0.9991204925241864
+      },
+      "after_pressure": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 16,
+        "hit_ratio": 0.014072119613016711
+      },
+      "pressure_elapsed_s": 0.8947591399992234,
+      "sequential_requests_per_s": 17.881907303024462
+    },
+    {
+      "backend_port": 18001,
+      "intervening_unique_prompts": 64,
+      "cold": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 0,
+        "hit_ratio": 0.0
+      },
+      "warm": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 1136,
+        "hit_ratio": 0.9991204925241864
+      },
+      "after_pressure": {
+        "prompt_tokens": 1137,
+        "cached_tokens": 16,
+        "hit_ratio": 0.014072119613016711
+      },
+      "pressure_elapsed_s": 3.538076037000792,
+      "sequential_requests_per_s": 18.088927239181793
+    }
+  ]
+}

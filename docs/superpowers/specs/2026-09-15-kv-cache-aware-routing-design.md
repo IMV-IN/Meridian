@@ -1,8 +1,9 @@
 # KV-Cache-Aware Routing — Design
 
 **Date:** 2026-09-15
-**Status:** Implemented on capstone branch (2026-10-11); mock validation complete,
-real-vLLM cache/TTFT evidence pending. Operator recipe: [KV_CACHE_ROUTING.md](../../KV_CACHE_ROUTING.md).
+**Status:** Implemented and locally validated (2026-10-12). The
+[real-vLLM report](../../validation/KV_CACHE_VLLM.md) records mixed results; the
+performance hypothesis remains unproven. Operator recipe: [KV_CACHE_ROUTING.md](../../KV_CACHE_ROUTING.md).
 **Author:** Capstone project
 **Repo:** Meridian (`IMV-IN/Meridian`)
 
@@ -34,8 +35,9 @@ prefix index looks superficially similar and is not the same problem:
 2. **Matching is fuzzy.** APC is a radix tree with longest-prefix match. Request B sharing a
    prefix with A should hit A's cached span up to the divergence point. An exact-prompt hash
    cannot express this.
-3. **There is ground truth available.** vLLM reports `prompt_tokens_details.cached_tokens`
-   on every response. Most gateway-side caching schemes have no way to know whether their
+3. **There is ground truth available on compatible builds.** With prompt-token
+   details enabled, vLLM 0.24.0 reports `prompt_tokens_details.cached_tokens`.
+   v0.10.2 omits zero counts and failed the cold-cache prerequisite. Most gateway-side caching schemes have no way to know whether their
    prediction was right. Here we can *close the loop*.
 
 That last point is the contribution. This design predicts, measures whether the prediction

@@ -5,9 +5,11 @@ token-aware load score. The gateway stores bounded prefix hashes and predictions
 the inference engine owns the actual KV cache. This is distinct from session
 affinity and does not require client session headers.
 
-Implementation and mock validation are available on the capstone branch. Real
-vLLM validation and a measured performance benefit are **pending**. Do not present
-the synthetic benchmark as GPU evidence or as a released v0.12.0 capability.
+Implementation, mock tests and [local vLLM validation](./validation/KV_CACHE_VLLM.md)
+are available on the capstone branch. Both vLLM 0.24.0 engines passed cold/hit
+telemetry checks; 6,336 measured requests completed without failures. The sweeps
+do **not** establish a consistent performance benefit from correction. Keep this
+experimental and opt-in; it is not a released v0.12.0 capability.
 
 ## Configure
 
@@ -170,6 +172,11 @@ with measured zeroes.
 
 ## Three-arm sweep
 
+The [executed local report](./validation/KV_CACHE_VLLM.md) contains pressure
+calibration, two full sharing sweeps, a locality-weight sensitivity check, raw
+rows, per-repeat spread, limitations and the exact commands. The larger recipe
+below is available for subsequent experiments.
+
 Arms are A = least-inflight, B = static prefix affinity, C = feedback-corrected
 affinity. Every arm gets the same seeded workload and starts with a fresh gateway
 index and reset engine caches. Repetitions rotate arm order. Warmup is excluded
@@ -232,7 +239,8 @@ To run the gateway interactively after the probe:
 MERIDIAN_CONFIG=configs/cache_affinity.yaml .venv/bin/uvicorn meridian.api.main:app --port 8080
 ```
 
-Stop only the two experiment containers when finished:
+For native servers, stop each experiment terminal with Ctrl-C. For containers,
+stop only the two experiment containers when finished:
 
 ```bash
 docker stop meridian-cache-vllm-a meridian-cache-vllm-b

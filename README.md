@@ -22,7 +22,8 @@ It is **not** an inference engine — no GPU scheduling, no KV-cache allocator.
 Full feature history: [`docs/MILESTONES.md`](docs/MILESTONES.md) · Status: [`docs/ship.md`](docs/ship.md)
 
 Development branch: experimental [KV-cache-aware routing](docs/KV_CACHE_ROUTING.md)
-is implemented with mock validation; real-vLLM performance evidence is pending.
+has [local vLLM validation](docs/validation/KV_CACHE_VLLM.md). The measurements
+do not establish a consistent performance benefit.
 It is not included in the published v0.12.0 release.
 
 ## 5-minute quickstart

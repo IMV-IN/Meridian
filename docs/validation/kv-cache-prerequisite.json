@@ -1,0 +1,66 @@
+{
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "status": "passed",
+  "checks": [
+    {
+      "backend_url": "http://127.0.0.1:18000",
+      "status": "passed",
+      "samples": [
+        {
+          "stream": false,
+          "phase": "cold",
+          "prompt_tokens": 599,
+          "cached_tokens": 0
+        },
+        {
+          "stream": false,
+          "phase": "repeat",
+          "prompt_tokens": 599,
+          "cached_tokens": 592
+        },
+        {
+          "stream": true,
+          "phase": "cold",
+          "prompt_tokens": 599,
+          "cached_tokens": 0
+        },
+        {
+          "stream": true,
+          "phase": "repeat",
+          "prompt_tokens": 599,
+          "cached_tokens": 592
+        }
+      ]
+    },
+    {
+      "backend_url": "http://127.0.0.1:18001",
+      "status": "passed",
+      "samples": [
+        {
+          "stream": false,
+          "phase": "cold",
+          "prompt_tokens": 599,
+          "cached_tokens": 0
+        },
+        {
+          "stream": false,
+          "phase": "repeat",
+          "prompt_tokens": 599,
+          "cached_tokens": 592
+        },
+        {
+          "stream": true,
+          "phase": "cold",
+          "prompt_tokens": 599,
+          "cached_tokens": 0
+        },
+        {
+          "stream": true,
+          "phase": "repeat",
+          "prompt_tokens": 599,
+          "cached_tokens": 592
+        }
+      ]
+    }
+  ]
+}

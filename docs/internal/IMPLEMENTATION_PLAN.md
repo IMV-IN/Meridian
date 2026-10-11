@@ -1,6 +1,6 @@
 # Remaining implementation plan
 
-Updated 2026-10-11 after local and GitHub inspection. This plan supersedes stale
+Updated 2026-10-12 after local and GitHub inspection. This plan supersedes stale
 "next milestone" statuses in the July roadmap documents. It does not authorize
 automatic releases or expand the v1.0 gate to require every future feature.
 
@@ -13,9 +13,12 @@ automatic releases or expand the v1.0 gate to require every future feature.
 - Cache-aware routing is implemented locally on `capstone/kv-cache-aware-routing`:
   prefix index, correction, usage extraction, sync/SSE feedback, metrics,
   executable three-arm harness, and GPU prerequisite probe.
-- Real cache-hit and TTFT results are pending. The available GPU is an 8 GiB RTX
-  4060 Laptop; Docker was stopped, and no live endpoints were supplied. The user
-  selected preparation of a local validation recipe.
+- [Local GPU validation](../validation/KV_CACHE_VLLM.md) is complete: both native
+  vLLM 0.24.0 engines passed cold/hit JSON/SSE checks; cache eviction was verified;
+  6,336 measured requests completed without failures across two full sweeps and
+  a higher-weight check. Correction shows mixed performance, so KV stays
+  experimental and opt-in. Docker Desktop is stopped; the system daemon lacks
+  an NVIDIA runtime. The native experiment engines have been stopped.
 - v1.0 still requires a partner-run RC PoC, current security/image evidence,
   synchronized claims, and written sign-off.
 
@@ -23,7 +26,7 @@ automatic releases or expand the v1.0 gate to require every future feature.
 
 | Order | Work package | Dependency | Exit condition |
 |---|---|---|---|
-| 1 | Finish KV engine evidence | Docker/NVIDIA runtime and two dedicated vLLM instances | Probe passes; controlled three-arm sweep and raw rows published, including null results |
+| 1 | KV engine evidence — complete locally | Two dedicated native vLLM 0.24.0 instances | Probe, eviction calibration, two full sweeps, weight check and raw rows published; benefit remains unproven |
 | 2 | Reconcile release and documentation metadata | Decide which tested commits belong in the next RC | Package, chart, image, release links and status docs agree; clean install/smoke passes |
 | 3 | Close control deployment validation gaps | Complete control dependencies; access to meridian-node | Cross-repo CI actually runs; migration, edge identity, revocation and restore drills pass |
 | 4 | Validate a partner RC and close v1.0 | Packages 2–3; package 1 if KV is included in the RC | Partner PoC, scan, claims and sign-offs attached to the exact RC |
@@ -33,7 +36,14 @@ Packages 1–3 can progress independently where dependencies allow. Keep KV
 experimental if live feedback is unavailable or results do not justify enabling
 it. It must not silently become a v1.0 blocker for the already-shipped gateway.
 
-## 1. KV evidence and release readiness
+## 1. KV evidence — locally complete; keep experimental
+
+The [executed report](../validation/KV_CACHE_VLLM.md) satisfies the local evidence
+checklist below, including null/adverse results and a locality-weight sensitivity
+check. Do not enable KV by default or claim a performance win. A separate-GPU,
+representative workload study is needed before making those decisions. Next
+implementation work is package 2 (release consistency), then package 3 (control
+deployment validation); partner sign-off remains the v1.0 gate.
 
 Use [`../KV_CACHE_ROUTING.md`](../KV_CACHE_ROUTING.md) for the executable recipe.
 
@@ -44,7 +54,7 @@ Use [`../KV_CACHE_ROUTING.md`](../KV_CACHE_ROUTING.md) for the executable recipe
    engine versions, model revision, GPU layout and all launch flags.
 3. Run arms A/B/C across 0/25/50/75/100% prefix sharing, with identical workloads,
    fixed offered load below saturation, excluded warmup, cache resets and at
-   least three repetitions. Repeat with a saturated load separately.
+   least three repetitions. Include a separate closed-loop contention run.
 4. Publish per-repeat TTFT p50/p95, cache-hit ratio, prediction accuracy and raw
    metadata rows. Report spread and whether C improves over B. A result where
    the arms tie is valid evidence, not permission to claim a benefit.
