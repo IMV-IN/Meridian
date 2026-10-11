@@ -97,9 +97,15 @@ Run the following in two terminals, using port `18000` in the first and `18001`
 in the second. Request-content logging is disabled by default in this version.
 The explicit 512 × 16-token cache bounds create controlled cache pressure; they
 are experiment settings, not production tuning recommendations.
+`VLLM_SERVER_DEV_MODE=1` enables the cache-reset endpoint in v0.24.0; keep these
+dedicated experiment servers bound to loopback.
+`VLLM_USE_FLASHINFER_SAMPLER=0` selects the supported PyTorch sampler, avoiding
+FlashInfer's native-extension compilation against this machine's older CUDA
+toolkit and newer default GCC. Both engines use the same setting.
 
 ```bash
-OMP_NUM_THREADS=2 .venv-vllm/bin/vllm serve Qwen/Qwen2.5-0.5B-Instruct \
+OMP_NUM_THREADS=2 VLLM_SERVER_DEV_MODE=1 VLLM_USE_FLASHINFER_SAMPLER=0 \
+  .venv-vllm/bin/vllm serve Qwen/Qwen2.5-0.5B-Instruct \
   --host 127.0.0.1 --port 18000 \
   --revision 7ae557604adf67be50417f59c2c2f167def9a775 \
   --gpu-memory-utilization 0.40 --max-model-len 2048 --max-num-seqs 8 \
@@ -110,13 +116,16 @@ OMP_NUM_THREADS=2 .venv-vllm/bin/vllm serve Qwen/Qwen2.5-0.5B-Instruct \
 Alternatively, ensure Docker and the NVIDIA Container Toolkit work (`docker info` and
 `nvidia-smi`). The KV validation recipe pins vLLM v0.24.0 and the
 model revision below. vLLM v0.10.2 failed the [cold-cache probe](./validation/kv-cache-vllm-0.10.2-prerequisite.json):
-it omits zero cached-token details. The upstream fix is included in v0.24.0.
+it omits zero cached-token details. The [upstream fix](https://github.com/vllm-project/vllm/pull/44383)
+is included in v0.24.0.
 Verify cache telemetry with the probe before running
 the sweep; a documented API field is not proof that a particular engine build
 populates it.
 
 ```bash
 docker run -d --name meridian-cache-vllm-a --gpus all --ipc=host \
+  -e VLLM_SERVER_DEV_MODE=1 \
+  -e VLLM_USE_FLASHINFER_SAMPLER=0 \
   -p 127.0.0.1:18000:8000 \
   -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
   vllm/vllm-openai:v0.24.0 \
@@ -127,6 +136,8 @@ docker run -d --name meridian-cache-vllm-a --gpus all --ipc=host \
   --enforce-eager --enable-prefix-caching --enable-prompt-tokens-details
 
 docker run -d --name meridian-cache-vllm-b --gpus all --ipc=host \
+  -e VLLM_SERVER_DEV_MODE=1 \
+  -e VLLM_USE_FLASHINFER_SAMPLER=0 \
   -p 127.0.0.1:18001:8000 \
   -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
   vllm/vllm-openai:v0.24.0 \
