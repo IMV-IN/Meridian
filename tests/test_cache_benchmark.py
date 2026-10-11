@@ -39,9 +39,45 @@ async def test_probe_requires_sync_and_stream_cache_hits(monkeypatch):
                         client_class(**kwargs, transport=httpx.ASGITransport(app=app)))
     report = await probe("http://engine", "cache-demo")
     assert report["status"] == "passed"
+    assert report["samples"][0]["cached_tokens"] == 0
     assert report["samples"][1]["cached_tokens"] > 0
-    assert report["samples"][2]["cached_tokens"] > 0
+    assert report["samples"][2]["cached_tokens"] == 0
+    assert report["samples"][3]["cached_tokens"] > 0
+    # Re-running a warm engine must still exercise explicit zero feedback.
+    repeated = await probe("http://engine", "cache-demo")
+    assert repeated["samples"][0]["cached_tokens"] == 0
     assert "river" not in json.dumps(report)
+
+
+@pytest.mark.asyncio
+async def test_probe_rejects_missing_cold_stream_feedback(monkeypatch):
+    client_class = httpx.AsyncClient
+
+    def handle(request):
+        if request.url.path == "/reset_prefix_cache":
+            return httpx.Response(200, json={"success": True})
+        body = json.loads(request.content)
+        if body.get("stream"):
+            return httpx.Response(200, text=(
+                'data: {"usage":{"prompt_tokens":100,"completion_tokens":1}}\n\n'
+                'data: [DONE]\n\n'
+            ))
+        return httpx.Response(200, json={"usage": {
+            "prompt_tokens": 100, "completion_tokens": 1,
+            "prompt_tokens_details": {"cached_tokens": 80 if handle.warm else 0},
+        }})
+
+    handle.warm = False
+
+    def transport_handler(request):
+        response = handle(request)
+        handle.warm = request.url.path != "/reset_prefix_cache"
+        return response
+
+    monkeypatch.setattr("scripts.validate_cache_backend.httpx.AsyncClient", lambda **kwargs:
+                        client_class(**kwargs, transport=httpx.MockTransport(transport_handler)))
+    with pytest.raises(ValueError, match="missing/invalid cached_tokens.*stream"):
+        await probe("http://engine", "m")
 
 
 @pytest.mark.asyncio

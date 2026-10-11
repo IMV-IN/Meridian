@@ -79,14 +79,39 @@ not a direct measurement of whether an unselected engine still holds a prefix.
 
 ## Local prerequisite: two dedicated vLLM instances
 
-The current machine has an RTX 4060 Laptop GPU with 8 GiB VRAM. Docker was stopped
-during implementation. The following is a **recipe**, not an executed GPU result.
+The current machine has an RTX 4060 Laptop GPU with 8 GiB VRAM. Docker Desktop
+is stopped; the system Docker daemon runs but lacks an NVIDIA runtime. A native
+vLLM environment avoids requiring system configuration changes. The following
+container commands are a **recipe**, not an executed container result.
 Two instances on one GPU emulate a fleet and contend for GPU resources; use
 separate GPUs for production-representative results.
 
-Ensure Docker and the NVIDIA Container Toolkit work first (`docker info` and
-`nvidia-smi`). The existing validation image is pinned to vLLM v0.10.2 and the
-model revision below. Verify its cache telemetry with the probe before running
+For a native installation, create a separate environment:
+
+```bash
+uv venv .venv-vllm --python 3.12
+uv pip install --python .venv-vllm/bin/python 'vllm==0.24.0'
+```
+
+Run the following in two terminals, using port `18000` in the first and `18001`
+in the second. Request-content logging is disabled by default in this version.
+The explicit 512 × 16-token cache bounds create controlled cache pressure; they
+are experiment settings, not production tuning recommendations.
+
+```bash
+OMP_NUM_THREADS=2 .venv-vllm/bin/vllm serve Qwen/Qwen2.5-0.5B-Instruct \
+  --host 127.0.0.1 --port 18000 \
+  --revision 7ae557604adf67be50417f59c2c2f167def9a775 \
+  --gpu-memory-utilization 0.40 --max-model-len 2048 --max-num-seqs 8 \
+  --block-size 16 --num-gpu-blocks-override 512 \
+  --enforce-eager --enable-prefix-caching --enable-prompt-tokens-details
+```
+
+Alternatively, ensure Docker and the NVIDIA Container Toolkit work (`docker info` and
+`nvidia-smi`). The KV validation recipe pins vLLM v0.24.0 and the
+model revision below. vLLM v0.10.2 failed the [cold-cache probe](./validation/kv-cache-vllm-0.10.2-prerequisite.json):
+it omits zero cached-token details. The upstream fix is included in v0.24.0.
+Verify cache telemetry with the probe before running
 the sweep; a documented API field is not proof that a particular engine build
 populates it.
 
@@ -94,36 +119,40 @@ populates it.
 docker run -d --name meridian-cache-vllm-a --gpus all --ipc=host \
   -p 127.0.0.1:18000:8000 \
   -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
-  vllm/vllm-openai:v0.10.2 \
+  vllm/vllm-openai:v0.24.0 \
   --model Qwen/Qwen2.5-0.5B-Instruct \
   --revision 7ae557604adf67be50417f59c2c2f167def9a775 \
   --gpu-memory-utilization 0.40 --max-model-len 2048 --max-num-seqs 8 \
-  --enforce-eager --enable-prefix-caching --enable-prompt-tokens-details --disable-log-requests
+  --block-size 16 --num-gpu-blocks-override 512 \
+  --enforce-eager --enable-prefix-caching --enable-prompt-tokens-details
 
 docker run -d --name meridian-cache-vllm-b --gpus all --ipc=host \
   -p 127.0.0.1:18001:8000 \
   -v "$HOME/.cache/huggingface:/root/.cache/huggingface" \
-  vllm/vllm-openai:v0.10.2 \
+  vllm/vllm-openai:v0.24.0 \
   --model Qwen/Qwen2.5-0.5B-Instruct \
   --revision 7ae557604adf67be50417f59c2c2f167def9a775 \
   --gpu-memory-utilization 0.40 --max-model-len 2048 --max-num-seqs 8 \
-  --enforce-eager --enable-prefix-caching --enable-prompt-tokens-details --disable-log-requests
+  --block-size 16 --num-gpu-blocks-override 512 \
+  --enforce-eager --enable-prefix-caching --enable-prompt-tokens-details
 ```
 
 Wait for `/v1/models` on both ports. If startup fails, inspect their logs and
 reduce memory utilization or sequence count. The vLLM CLI documents
-[`--enable-prompt-tokens-details`](https://docs.vllm.ai/en/v0.10.2/cli/serve.html);
+[`--enable-prompt-tokens-details`](https://docs.vllm.ai/en/v0.24.0/cli/serve.html);
 the telemetry probe remains mandatory:
 
 ```bash
 .venv/bin/python scripts/validate_cache_backend.py \
   --backend-url http://127.0.0.1:18000 --backend-url http://127.0.0.1:18001 \
-  --model Qwen/Qwen2.5-0.5B-Instruct \
+  --reset-caches --model Qwen/Qwen2.5-0.5B-Instruct \
   --output docs/validation/kv-cache-prerequisite.json
 ```
 
-The probe fails unless both sync and stream responses contain valid cache counts
-and repeated prefixes produce nonzero hits. If it fails on this pinned engine,
+The probe requires `--reset-caches` and dedicated experiment engines. It resets
+the cache before each mode, requires explicit zero counts for cold sync and SSE
+responses, then requires nonzero repeated-prefix hits in both modes. It saves
+failed checks as well as successful ones to the JSON output. If it fails on this pinned engine,
 record that failure, select a compatible version, and repeat the probe before
 changing the benchmark image/version metadata. Do not substitute missing values
 with measured zeroes.
@@ -164,7 +193,7 @@ before each arm. It refuses real mode without explicit `--reset-caches`.
 .venv/bin/python scripts/bench_cache_routing.py \
   --backend-url http://127.0.0.1:18000 --backend-url http://127.0.0.1:18001 \
   --reset-caches --model Qwen/Qwen2.5-0.5B-Instruct \
-  --engine-version vllm-0.10.2 \
+  --engine-version vllm-0.24.0 \
   --model-revision 7ae557604adf67be50417f59c2c2f167def9a775 \
   --gpu-description 'RTX 4060 Laptop 8 GiB; two instances on one GPU' \
   --requests 200 --warmup 20 --repetitions 3 --concurrency 4 --request-rate 4 \

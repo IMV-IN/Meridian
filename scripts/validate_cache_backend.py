@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed unless each backend reports cache details in sync and SSE usage."""
+"""Reset dedicated engines and require cold/hit cache details in sync and SSE."""
 
 from __future__ import annotations
 
@@ -21,21 +21,29 @@ async def probe(url: str, model: str) -> dict:
     )}], "max_tokens": 1, "temperature": 0}
     samples = []
     async with httpx.AsyncClient(base_url=url, timeout=120) as client:
-        for stream in (False, False, True):
-            payload = {**body, "stream": stream}
-            if stream:
-                payload["stream_options"] = {"include_usage": True}
-            response = await client.post("/v1/chat/completions", json=payload)
-            response.raise_for_status()
-            usage = usage_from_sse_bytes(response.content) if stream else usage_from_dict(response.json())
-            if usage is None or not usage.cache_details_available or usage.prompt_tokens <= 0:
-                raise ValueError(f"{url}: missing/invalid cached_tokens ({'stream' if stream else 'sync'})")
-            if stream and not response.content.rstrip().endswith(b"data: [DONE]"):
-                raise ValueError(f"{url}: stream did not terminate with [DONE]")
-            samples.append({"stream": stream, "prompt_tokens": usage.prompt_tokens,
-                            "cached_tokens": usage.cached_tokens})
-        if samples[1]["cached_tokens"] <= 0 or samples[2]["cached_tokens"] <= 0:
-            raise ValueError(f"{url}: repeated prefixes did not hit cache in sync and stream modes")
+        for stream in (False, True):
+            reset = await client.post("/reset_prefix_cache")
+            reset.raise_for_status()
+            if reset.content and reset.json().get("success") is False:
+                raise ValueError(f"{url}: prefix cache reset failed")
+            for repeated in (False, True):
+                payload = {**body, "stream": stream}
+                if stream:
+                    payload["stream_options"] = {"include_usage": True}
+                response = await client.post("/v1/chat/completions", json=payload)
+                response.raise_for_status()
+                usage = usage_from_sse_bytes(response.content) if stream else usage_from_dict(response.json())
+                mode = 'stream' if stream else 'sync'
+                if usage is None or not usage.cache_details_available or usage.prompt_tokens <= 0:
+                    raise ValueError(f"{url}: missing/invalid cached_tokens ({mode})")
+                if stream and not response.content.rstrip().endswith(b"data: [DONE]"):
+                    raise ValueError(f"{url}: stream did not terminate with [DONE]")
+                if not repeated and usage.cached_tokens != 0:
+                    raise ValueError(f"{url}: cache reset did not produce a cold {mode} response")
+                if repeated and usage.cached_tokens <= 0:
+                    raise ValueError(f"{url}: repeated prefix did not hit cache ({mode})")
+                samples.append({"stream": stream, "phase": "repeat" if repeated else "cold",
+                                "prompt_tokens": usage.prompt_tokens, "cached_tokens": usage.cached_tokens})
     return {"backend_url": url, "status": "passed", "samples": samples}
 
 
@@ -43,8 +51,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend-url", action="append", required=True)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--reset-caches", action="store_true", help="Allow resets on dedicated test engines")
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
+    if not args.reset_caches:
+        parser.error("--reset-caches is required; use dedicated experiment engines")
 
     report = asyncio.run(validate(args.backend_url, args.model))
     rendered = json.dumps(report, indent=2)
