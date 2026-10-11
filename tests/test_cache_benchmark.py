@@ -13,7 +13,7 @@ import pytest
 
 from mock_backend.cache_server import create_app
 from scripts.bench_cache_routing import workload
-from scripts.validate_cache_backend import probe
+from scripts.validate_cache_backend import probe, validate
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -54,6 +54,24 @@ async def test_probe_rejects_missing_cache_signal(monkeypatch):
                         client_class(**kwargs, transport=transport))
     with pytest.raises(ValueError, match="missing/invalid cached_tokens"):
         await probe("http://engine", "m")
+
+
+@pytest.mark.asyncio
+async def test_validation_preserves_failures_and_checks_remaining_backends(monkeypatch):
+    checked = []
+
+    async def fake_probe(url, model):
+        checked.append((url, model))
+        if url == "http://unsupported":
+            raise ValueError(f"{url}: missing/invalid cached_tokens (sync)")
+        return {"backend_url": url, "status": "passed", "samples": []}
+
+    monkeypatch.setattr("scripts.validate_cache_backend.probe", fake_probe)
+    report = await validate(["http://unsupported", "http://compatible"], "m")
+    assert report["status"] == "failed"
+    assert [check["status"] for check in report["checks"]] == ["failed", "passed"]
+    assert report["checks"][0]["error"].endswith("missing/invalid cached_tokens (sync)")
+    assert checked == [("http://unsupported", "m"), ("http://compatible", "m")]
 
 
 def test_three_arm_benchmark_exports_metadata_only(tmp_path):

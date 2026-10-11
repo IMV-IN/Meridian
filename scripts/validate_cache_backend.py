@@ -46,20 +46,25 @@ def main() -> int:
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
-    async def run():
-        return [await probe(url, args.model) for url in args.backend_url]
-
-    try:
-        report = {"model": args.model, "checks": asyncio.run(run())}
-    except (httpx.HTTPError, ValueError) as exc:
-        print(str(exc), file=sys.stderr)
-        return 1
+    report = asyncio.run(validate(args.backend_url, args.model))
     rendered = json.dumps(report, indent=2)
     if args.output:
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(rendered + "\n")
     print(rendered)
-    return 0
+    return 0 if report["status"] == "passed" else 1
+
+
+async def validate(urls: list[str], model: str) -> dict:
+    checks = []
+    for url in urls:
+        try:
+            checks.append(await probe(url, model))
+        except (httpx.HTTPError, ValueError) as exc:
+            checks.append({"backend_url": url, "status": "failed", "error": str(exc)})
+    return {"model": model, "status": "passed" if all(
+        check["status"] == "passed" for check in checks
+    ) else "failed", "checks": checks}
 
 
 if __name__ == "__main__":
