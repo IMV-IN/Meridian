@@ -2,10 +2,32 @@
 
 Single source of truth for **ordering**. Narrative history (what + why) lives in
 [`MILESTONES.md`](./MILESTONES.md); one-line status in [`ship.md`](./ship.md);
-remaining plans in [`V1_ROADMAP.md`](./internal/V1_ROADMAP.md). When ordering conflicts,
-this file wins.
+current implementation detail in [`IMPLEMENTATION_PLAN.md`](./internal/IMPLEMENTATION_PLAN.md).
+The July [`V1_ROADMAP.md`](./internal/V1_ROADMAP.md) is historical milestone detail.
+The current sequence below supersedes the older phase statuses further down.
 
-_Last reconciled: 2026-07-28 (v0.11.0 in tree: Phase 2 observability/elasticity; see [`FULL.md`](./FULL.md))._
+_Current snapshot: 2026-10-11. The historical phase descriptions below were last
+reconciled in July and are retained for context._
+
+## Current implementation order
+
+Gateway phases through **v0.12.0 are tagged**. The separate control service is on
+main after that release. The capstone branch implements experimental cache-aware
+routing; real-vLLM evidence remains pending.
+
+1. Complete the [KV engine prerequisite and three-arm sweep](./KV_CACHE_ROUTING.md).
+   Keep performance claims experimental until live evidence supports them.
+2. Reconcile chart/package/image versions, release links and status documents.
+3. Complete control deployment validation: required cross-repo CI, operator
+   authentication boundary, real mTLS/CRL, Postgres migration and restore tests.
+4. Validate the exact partner RC and close the v1.0 evidence/sign-off gate.
+5. Select later implementations from measured partner needs: shared governance
+   state, billing, batch, semantic caching, identity, response PII and advanced
+   fleet capabilities. These are separate milestones, not all v1.0 requirements.
+
+Dependencies and acceptance criteria: [current implementation plan](./internal/IMPLEMENTATION_PLAN.md).
+KV engine evidence can progress independently of release/control maintenance;
+unproven experimental KV routing need not block a gateway-only RC.
 
 ---
 

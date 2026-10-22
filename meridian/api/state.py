@@ -239,6 +239,7 @@ async def build_app_state(
         default_max_tokens=cfg.gateway.default_max_tokens,
         queue_weight=cfg.gateway.queue_weight,
         mem_weight=cfg.gateway.mem_weight,
+        cache_affinity=cfg.gateway.cache_affinity,
     )
     logger.info("Routing strategy: %s", cfg.gateway.strategy)
 

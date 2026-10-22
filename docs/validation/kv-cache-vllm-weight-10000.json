@@ -1,0 +1,173 @@
+{
+  "mode": "real",
+  "seed": 42,
+  "meridian_version": "0.12.0",
+  "git_revision": "bbdd62cab26437a1e5fd57902e542454f8119d98",
+  "tracked_changes": false,
+  "python": "3.12.11",
+  "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+  "engine_version": "vllm-0.24.0",
+  "model_revision": "7ae557604adf67be50417f59c2c2f167def9a775",
+  "gpu_description": "RTX 4060 Laptop 8 GiB; two instances on one GPU; eager; 512x16 KV tokens each; PyTorch sampler",
+  "settings": {
+    "requests": 64,
+    "warmup": 8,
+    "concurrency": 8,
+    "repetitions": 3,
+    "sharing_ratios": [
+      100
+    ],
+    "working_set": 16,
+    "prompt_chars": 2048,
+    "locality_weight": 10000.0,
+    "mock_cache_entries": 4,
+    "request_rate": null
+  },
+  "model": "Qwen/Qwen2.5-0.5B-Instruct",
+  "summaries": [
+    {
+      "arm": "A",
+      "sharing_ratio": 100,
+      "repeat": 0,
+      "requests": 64,
+      "cache_hit_ratio": 0.3844134423750945,
+      "ttft_p50_ms": 187.68825749975804,
+      "ttft_p95_ms": 265.4149735500141,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 0,
+        "predicted_miss": 0,
+        "no_prediction": 0
+      },
+      "prediction_accuracy": null
+    },
+    {
+      "arm": "B",
+      "sharing_ratio": 100,
+      "repeat": 0,
+      "requests": 64,
+      "cache_hit_ratio": 0.4616040134698646,
+      "ttft_p50_ms": 127.5486844997431,
+      "ttft_p95_ms": 275.01761200037436,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 21,
+        "predicted_miss": 26,
+        "no_prediction": 17
+      },
+      "prediction_accuracy": 0.44680851063829785
+    },
+    {
+      "arm": "C",
+      "sharing_ratio": 100,
+      "repeat": 0,
+      "requests": 64,
+      "cache_hit_ratio": 0.3747371314686276,
+      "ttft_p50_ms": 186.683780999374,
+      "ttft_p95_ms": 324.4151550491551,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 14,
+        "predicted_miss": 33,
+        "no_prediction": 17
+      },
+      "prediction_accuracy": 0.2978723404255319
+    },
+    {
+      "arm": "B",
+      "sharing_ratio": 100,
+      "repeat": 1,
+      "requests": 64,
+      "cache_hit_ratio": 0.3390937916077581,
+      "ttft_p50_ms": 198.54674249927484,
+      "ttft_p95_ms": 333.2030447003489,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 15,
+        "predicted_miss": 37,
+        "no_prediction": 12
+      },
+      "prediction_accuracy": 0.28846153846153844
+    },
+    {
+      "arm": "C",
+      "sharing_ratio": 100,
+      "repeat": 1,
+      "requests": 64,
+      "cache_hit_ratio": 0.44033876436111075,
+      "ttft_p50_ms": 183.15899150002224,
+      "ttft_p95_ms": 274.4414486994174,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 15,
+        "predicted_miss": 37,
+        "no_prediction": 12
+      },
+      "prediction_accuracy": 0.28846153846153844
+    },
+    {
+      "arm": "A",
+      "sharing_ratio": 100,
+      "repeat": 1,
+      "requests": 64,
+      "cache_hit_ratio": 0.44604889297626726,
+      "ttft_p50_ms": 182.05933199988067,
+      "ttft_p95_ms": 283.4010949503863,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 0,
+        "predicted_miss": 0,
+        "no_prediction": 0
+      },
+      "prediction_accuracy": null
+    },
+    {
+      "arm": "C",
+      "sharing_ratio": 100,
+      "repeat": 2,
+      "requests": 64,
+      "cache_hit_ratio": 0.41160804985860583,
+      "ttft_p50_ms": 190.61848150067817,
+      "ttft_p95_ms": 296.715935400607,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 20,
+        "predicted_miss": 32,
+        "no_prediction": 12
+      },
+      "prediction_accuracy": 0.38461538461538464
+    },
+    {
+      "arm": "A",
+      "sharing_ratio": 100,
+      "repeat": 2,
+      "requests": 64,
+      "cache_hit_ratio": 0.517255580265217,
+      "ttft_p50_ms": 176.63719249958376,
+      "ttft_p95_ms": 281.10919349956015,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 0,
+        "predicted_miss": 0,
+        "no_prediction": 0
+      },
+      "prediction_accuracy": null
+    },
+    {
+      "arm": "B",
+      "sharing_ratio": 100,
+      "repeat": 2,
+      "requests": 64,
+      "cache_hit_ratio": 0.4878236279274085,
+      "ttft_p50_ms": 181.33907599985832,
+      "ttft_p95_ms": 303.91057380093105,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 29,
+        "predicted_miss": 24,
+        "no_prediction": 11
+      },
+      "prediction_accuracy": 0.5471698113207547
+    }
+  ]
+}

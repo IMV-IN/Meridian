@@ -1,0 +1,126 @@
+{
+  "mode": "synthetic_mock",
+  "seed": 42,
+  "meridian_version": "0.12.0",
+  "git_revision": "4c23d7029f4ed1925ccab30905db5f3bf8d02c17",
+  "tracked_changes": true,
+  "python": "3.12.11",
+  "platform": "Linux-7.0.0-38-generic-x86_64-with-glibc2.43",
+  "engine_version": "synthetic-lru",
+  "model_revision": "unrecorded",
+  "gpu_description": "unrecorded",
+  "settings": {
+    "requests": 12,
+    "warmup": 2,
+    "concurrency": 1,
+    "repetitions": 1,
+    "sharing_ratios": [
+      0,
+      100
+    ],
+    "working_set": 8,
+    "prompt_chars": 2048,
+    "locality_weight": 1000,
+    "mock_cache_entries": 4,
+    "request_rate": null
+  },
+  "model": "cache-demo",
+  "summaries": [
+    {
+      "arm": "A",
+      "sharing_ratio": 0,
+      "repeat": 0,
+      "requests": 12,
+      "cache_hit_ratio": 0.0,
+      "ttft_p50_ms": 18.442737500663497,
+      "ttft_p95_ms": 19.50544524943325,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 0,
+        "predicted_miss": 0,
+        "no_prediction": 0
+      },
+      "prediction_accuracy": null
+    },
+    {
+      "arm": "B",
+      "sharing_ratio": 0,
+      "repeat": 0,
+      "requests": 12,
+      "cache_hit_ratio": 0.0,
+      "ttft_p50_ms": 18.331800499254314,
+      "ttft_p95_ms": 19.310034899262973,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 0,
+        "predicted_miss": 0,
+        "no_prediction": 12
+      },
+      "prediction_accuracy": null
+    },
+    {
+      "arm": "C",
+      "sharing_ratio": 0,
+      "repeat": 0,
+      "requests": 12,
+      "cache_hit_ratio": 0.0,
+      "ttft_p50_ms": 18.433951500810508,
+      "ttft_p95_ms": 18.93126065051547,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 0,
+        "predicted_miss": 0,
+        "no_prediction": 12
+      },
+      "prediction_accuracy": null
+    },
+    {
+      "arm": "A",
+      "sharing_ratio": 100,
+      "repeat": 0,
+      "requests": 12,
+      "cache_hit_ratio": 0.3326745718050066,
+      "ttft_p50_ms": 17.305691500041576,
+      "ttft_p95_ms": 17.73341890057054,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 0,
+        "predicted_miss": 0,
+        "no_prediction": 0
+      },
+      "prediction_accuracy": null
+    },
+    {
+      "arm": "B",
+      "sharing_ratio": 100,
+      "repeat": 0,
+      "requests": 12,
+      "cache_hit_ratio": 0.3326745718050066,
+      "ttft_p50_ms": 17.27360599943495,
+      "ttft_p95_ms": 17.751846049941378,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 5,
+        "predicted_miss": 2,
+        "no_prediction": 5
+      },
+      "prediction_accuracy": 0.7142857142857143
+    },
+    {
+      "arm": "C",
+      "sharing_ratio": 100,
+      "repeat": 0,
+      "requests": 12,
+      "cache_hit_ratio": 0.26613965744400525,
+      "ttft_p50_ms": 17.33885849989747,
+      "ttft_p95_ms": 18.32000824961142,
+      "errors": 0,
+      "decisions": {
+        "predicted_hit": 4,
+        "predicted_miss": 3,
+        "no_prediction": 5
+      },
+      "prediction_accuracy": 0.5714285714285714
+    }
+  ]
+}

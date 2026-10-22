@@ -16,6 +16,14 @@ The vLLM profile pins model revision
 `7ae557604adf67be50417f59c2c2f167def9a775` so a later model update cannot
 silently change release evidence.
 
+## Unreleased KV-routing validation
+
+The capstone branch has separate [local vLLM 0.24.0 evidence](./validation/KV_CACHE_VLLM.md):
+two-engine cache telemetry, controlled eviction, JSON/SSE gateway smoke and
+three-arm routing comparisons. This is development-branch evidence; it does not
+change the v0.12.0 release matrix above. Correction did not show a consistent
+performance benefit and remains experimental.
+
 ## Checks performed
 
 Each profile verifies:

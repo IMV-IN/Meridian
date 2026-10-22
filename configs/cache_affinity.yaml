@@ -1,0 +1,22 @@
+# Experimental: requires engine-reported prompt_tokens_details.cached_tokens.
+# Start the two dedicated vLLM instances described in docs/KV_CACHE_ROUTING.md.
+gateway:
+  strategy: cache_affinity
+  cache_affinity:
+    block_chars: 256
+    max_checkpoints: 16
+    ttl_s: 300
+    max_entries: 100000
+    locality_weight: 1000
+    hit_threshold: 0.5
+    min_trust: 0.15
+    feedback_correction: true
+backends:
+  - name: vllm-a
+    url: http://127.0.0.1:18000
+    model: Qwen/Qwen2.5-0.5B-Instruct
+    engine: vllm
+  - name: vllm-b
+    url: http://127.0.0.1:18001
+    model: Qwen/Qwen2.5-0.5B-Instruct
+    engine: vllm

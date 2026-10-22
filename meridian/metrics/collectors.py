@@ -4,6 +4,20 @@ from __future__ import annotations
 
 from prometheus_client import Counter, Gauge, Histogram
 
+CACHE_AFFINITY_DECISIONS = Counter(
+    "meridian_cache_affinity_decisions_total", "Cache predictions evaluated against engine feedback", ["outcome"],
+)
+CACHE_FEEDBACK_UNAVAILABLE = Counter(
+    "meridian_cache_feedback_unavailable_total", "Successful requests without usable engine cache feedback",
+)
+CACHE_HIT_RATIO = Histogram(
+    "meridian_cache_hit_ratio", "Engine-reported cached/prompt token ratio", buckets=[0, .1, .25, .5, .75, .9, 1],
+)
+PREFIX_INDEX_ENTRIES = Gauge("meridian_prefix_index_entries", "Current prefix prediction entries")
+PREFIX_INDEX_TRUST = Histogram(
+    "meridian_prefix_index_trust", "Trust of evaluated prefix predictions", buckets=[0, .15, .25, .5, .75, .9, 1],
+)
+
 REQUESTS_TOTAL = Counter(
     "meridian_requests_total",
     "Total requests proxied",

@@ -14,7 +14,7 @@ from meridian.api.main import get_state, init_app
 from meridian.auth.models import IdentityContext
 from meridian.config.models import MeridianConfig
 from meridian.cost.authz import clamp_window_days, resolve_usage_scope
-from meridian.cost.extract import compute_cost, usage_from_dict, usage_from_sse_bytes
+from meridian.cost.extract import Usage, compute_cost, usage_from_dict, usage_from_sse_bytes
 from meridian.cost.ledger import InMemoryCostLedger
 from meridian.cost.record import record_actual_usage
 
@@ -25,7 +25,7 @@ KEY_TEAM = "mrdn_2Bb3Cc4Dd5Ee6Ff7Gg8Hh9Ii"
 
 
 def test_usage_from_dict():
-    assert usage_from_dict({"usage": {"prompt_tokens": 3, "completion_tokens": 7}}) == (3, 7)
+    assert usage_from_dict({"usage": {"prompt_tokens": 3, "completion_tokens": 7}}) == Usage(3, 7)
     assert usage_from_dict({}) is None
 
 
@@ -40,7 +40,7 @@ def test_usage_from_sse_last_wins():
         f"data: {json.dumps(late)}\n\n"
         "data: [DONE]\n\n"
     ).encode()
-    assert usage_from_sse_bytes(raw) == (10, 5)
+    assert usage_from_sse_bytes(raw) == Usage(10, 5)
 
 
 def test_compute_cost():

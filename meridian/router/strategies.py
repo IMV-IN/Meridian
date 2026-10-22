@@ -8,7 +8,18 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import List, Optional
 
+from meridian.config.models import CacheAffinityConfig
+from meridian.cost.extract import Usage
+from meridian.metrics.collectors import (
+    CACHE_AFFINITY_DECISIONS,
+    CACHE_FEEDBACK_UNAVAILABLE,
+    CACHE_HIT_RATIO,
+    PREFIX_INDEX_ENTRIES,
+    PREFIX_INDEX_TRUST,
+)
 from meridian.registry.backend import Backend
+from meridian.router.prefix_index import Prediction, PrefixIndex
+from meridian.util.helpers import now_ms
 
 
 @dataclass(frozen=True)
@@ -22,6 +33,8 @@ class RequestContext:
     prompt_tokens: int
     max_tokens: int
     cost: float # (prompt_tokens * prefill_weight) + (max_tokens * decode_weight)
+    prefix_keys: tuple[str, ...] = ()
+    cache_prediction: Optional[Prediction] = None
 
 
 class RoutingStrategy(ABC):
@@ -134,6 +147,10 @@ class TokenAware(RoutingStrategy):
             p += b.gpu_mem_util * self.mem_weight
         return p
 
+    def score(self, b: Backend, ctx: RequestContext) -> float:
+        latency = b.ewma_latency_ms if b.ewma_latency_ms > 0 else 1.0
+        return (b.inflight_cost + ctx.cost) * latency + self._penalty(b)
+
     def select(
         self,
         backends: List[Backend],
@@ -146,14 +163,58 @@ class TokenAware(RoutingStrategy):
         if request_ctx is None:
             return min(backends, key=lambda b: (b.inflight, b.name))
 
-        cost = request_ctx.cost
-
         def score(b: Backend) -> tuple[float, int, str]:
-            latency_factor = b.ewma_latency_ms if b.ewma_latency_ms > 0 else 1.0
-            base = (b.inflight_cost + cost) * latency_factor
-            return (base + self._penalty(b), b.inflight, b.name)
+            return (self.score(b, request_ctx), b.inflight, b.name)
 
         return min(backends, key=score)
+
+
+class CacheAffinity(RoutingStrategy):
+    """Token-aware load scoring with a bounded, feedback-adjusted locality bonus."""
+
+    def __init__(self, baseline: TokenAware, config: CacheAffinityConfig) -> None:
+        self.baseline = baseline
+        self.config = config
+        self.index = PrefixIndex(
+            ttl_ms=config.ttl_s * 1000, max_entries=config.max_entries, clock=now_ms,
+            hit_threshold=config.hit_threshold, min_trust=config.min_trust,
+            feedback_correction=config.feedback_correction,
+        )
+
+    def select(
+        self, backends: List[Backend], request_ctx: Optional[RequestContext] = None,
+    ) -> Optional[Backend]:
+        if not backends:
+            return None
+        if request_ctx is None or request_ctx.cache_prediction is None or not self.config.locality_weight:
+            return self.baseline.select(backends, request_ctx)
+        prediction = request_ctx.cache_prediction
+
+        def score(b: Backend) -> tuple[float, int, str]:
+            base = self.baseline.score(b, request_ctx)
+            locality = self.config.locality_weight * prediction.trust if prediction.backend == b.name else 0.0
+            return base - locality, b.inflight, b.name
+
+        return min(backends, key=score)
+
+    def observe(self, ctx: RequestContext, backend: str, usage: Optional[Usage]) -> None:
+        if not ctx.prefix_keys:
+            return
+        if usage is None or not usage.cache_details_available or usage.prompt_tokens <= 0:
+            CACHE_FEEDBACK_UNAVAILABLE.inc()
+            return
+        ratio = usage.cached_tokens / usage.prompt_tokens
+        prediction = ctx.cache_prediction
+        outcome = "no_prediction" if prediction is None else (
+            "predicted_hit" if prediction.backend == backend and ratio >= self.config.hit_threshold
+            else "predicted_miss"
+        )
+        CACHE_AFFINITY_DECISIONS.labels(outcome=outcome).inc()
+        CACHE_HIT_RATIO.observe(ratio)
+        if prediction is not None:
+            PREFIX_INDEX_TRUST.observe(prediction.trust)
+        self.index.record(ctx.prefix_keys, backend, ratio)
+        PREFIX_INDEX_ENTRIES.set(self.index.size())
 
 
 def create_strategy(
@@ -164,15 +225,19 @@ def create_strategy(
     default_max_tokens: int = 256,
     queue_weight: float = 0.0,
     mem_weight: float = 0.0,
+    cache_affinity: Optional[CacheAffinityConfig] = None,
 ) -> RoutingStrategy:
-    if name == "token_aware":
-        return TokenAware(
+    if name in ("token_aware", "cache_affinity"):
+        baseline = TokenAware(
             prefill_weight=prefill_weight,
             decode_weight=decode_weight,
             default_max_tokens=default_max_tokens,
             queue_weight=queue_weight,
             mem_weight=mem_weight,
         )
+        if name == "cache_affinity":
+            return CacheAffinity(baseline, cache_affinity or CacheAffinityConfig())
+        return baseline
     strategies: dict[str, type[RoutingStrategy]] = {
         "weighted_round_robin": WeightedRoundRobin,
         "least_inflight": LeastInflight,
@@ -180,6 +245,6 @@ def create_strategy(
     }
     cls = strategies.get(name)
     if cls is None:
-        known = ["weighted_round_robin", "least_inflight", "ewma_latency", "token_aware"]
+        known = ["weighted_round_robin", "least_inflight", "ewma_latency", "token_aware", "cache_affinity"]
         raise ValueError(f"Unknown strategy: {name!r}. Choose from: {known}")
     return cls()
