@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import mimetypes
 import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -19,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from prometheus_client import generate_latest
 
 from meridian.api.authz import require_key_admin, require_ops_view, require_reload
+from meridian.api.console import budget_snapshot, config_summary, whoami_view
 from meridian.api.errors import GatewayError
 from meridian.api.finalize import finalize_request, stamp_meridian_headers
 from meridian.api.keys_admin import create_key, delete_key, list_keys
@@ -424,6 +426,53 @@ async def version() -> JSONResponse:
     })
 
 
+@app.get("/meridian/whoami")
+async def whoami(request: Request) -> Response:
+    """Identity + rights of the presenting key (console bootstrap).
+
+    Any valid key may read its own identity — no ops right required. When
+    auth is disabled this reports open mode. Never echoes the raw key.
+    """
+    state = get_state()
+    if not state.config.auth.enabled:
+        return JSONResponse(whoami_view(state, None))
+    try:
+        identity = authenticate(request.headers.get("authorization"), state.key_index)
+    except AuthError as exc:
+        return GatewayError(exc.message, exc.error_type, 401).to_response()
+    return JSONResponse(whoami_view(state, identity))
+
+
+@app.get("/meridian/config")
+async def config_view(request: Request) -> Response:
+    """Effective routing/policy config, allowlisted (no keys, no secrets)."""
+    state = get_state()
+    try:
+        require_ops_view(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+    except GatewayError as exc:
+        return exc.to_response()
+    return JSONResponse(config_summary(state))
+
+
+@app.get("/meridian/budgets")
+async def budgets_view(request: Request) -> Response:
+    """Current-period consumption against every configured budget cap."""
+    state = get_state()
+    try:
+        require_ops_view(
+            auth_enabled=state.config.auth.enabled,
+            key_index=state.key_index,
+            authorization=request.headers.get("authorization"),
+        )
+    except GatewayError as exc:
+        return exc.to_response()
+    return JSONResponse(budget_snapshot(state))
+
+
 @app.get("/meridian/requests")
 async def recent_requests(request: Request) -> Response:
     state = get_state()
@@ -674,8 +723,56 @@ async def metrics() -> Response:
 
 
 _UI_DIR = Path(__file__).resolve().parent.parent / "ui"
+# Built operator console (web/ → `npm run build`). Absent in a plain source
+# checkout, in which case /ui keeps serving the single-file legacy dashboard.
+_UI_DIST = _UI_DIR / "dist"
+_UI_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+}
+
+mimetypes.add_type("font/woff2", ".woff2")
+mimetypes.add_type("image/svg+xml", ".svg")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
+
+
+def _console_index() -> Path:
+    built = _UI_DIST / "index.html"
+    return built if built.is_file() else _UI_DIR / "index.html"
+
+
+def _ui_index_response() -> FileResponse:
+    return FileResponse(
+        _console_index(),
+        media_type="text/html",
+        headers={**_UI_HEADERS, "Cache-Control": "no-cache"},
+    )
 
 
 @app.get("/ui")
 async def ui() -> FileResponse:
-    return FileResponse(_UI_DIR / "index.html", media_type="text/html")
+    return _ui_index_response()
+
+
+@app.get("/ui/{path:path}")
+async def ui_path(path: str) -> Response:
+    """Console static assets + SPA fallback (client-side routes → index.html).
+
+    Files resolve strictly inside ``ui/dist`` (no traversal). Hashed bundles
+    under ``assets/`` are immutable; a missing asset is a real 404 so a stale
+    tab never parses index.html as JavaScript.
+    """
+    if _UI_DIST.is_dir() and path:
+        root = _UI_DIST.resolve()
+        candidate = (root / path).resolve()
+        if candidate.is_file() and root in candidate.parents:
+            cache = (
+                "public, max-age=31536000, immutable"
+                if path.startswith("assets/")
+                else "no-cache"
+            )
+            return FileResponse(candidate, headers={**_UI_HEADERS, "Cache-Control": cache})
+        if path.startswith("assets/"):
+            return Response(status_code=404, headers=_UI_HEADERS)
+    return _ui_index_response()
