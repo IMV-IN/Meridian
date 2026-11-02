@@ -10,6 +10,7 @@ Start here if you are not sure which file to open.
 | **[../README.md](../README.md)** | Elevator pitch + short links (not a full manual) |
 | **[assets/architecture_diagram.png](./assets/architecture_diagram.png)** | Full L7 gateway architecture (detailed) |
 | **[CONFIGURATION.md](./CONFIGURATION.md)** | Config reference after the quickstart works |
+| **[CONSOLE.md](./CONSOLE.md)** | Operator console at `/ui`: pages, roles, fleet connection, development |
 
 ## Operators
 

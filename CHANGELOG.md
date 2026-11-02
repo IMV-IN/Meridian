@@ -4,6 +4,26 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Operator console** (`web/`, served at `/ui`): a React + TypeScript +
+  shadcn/ui application replacing the single-file dashboard (which remains the
+  fallback when the console is not built). It covers live overview, request
+  explorer, observability, backends, routing & rollout, a streaming
+  playground, API key lifecycle with show-once secrets, usage & cost with CSV
+  export, budgets / rate limits / PII, and GPU fleet pages (nodes, enrollment,
+  desired state, stop authorization, revocation, placement, CRL, restore). It
+  is role-aware via `/meridian/whoami`. Fonts are self-hosted, so it works
+  air-gapped. Built in the Docker image and shipped in the wheel. See
+  [`docs/CONSOLE.md`](docs/CONSOLE.md).
+- Gateway read models for the console: `GET /meridian/whoami`,
+  `GET /meridian/config` (allowlisted, secret-free effective config) and
+  `GET /meridian/budgets` (consumption against every cap with reset times).
+- meridian-control read models: `GET /admin/overview`, `/admin/nodes`,
+  `/admin/nodes/{id}`, `/admin/claims`, `/admin/tokens`, `/admin/audit`, plus
+  opt-in CORS (`MERIDIAN_CONTROL_CORS_ORIGINS`). Observation rows now record
+  their update time.
+- `scripts/console_demo.py`: one-command local stack (mock backends, control
+  plane with simulated GPU nodes, fully-featured gateway, traffic) for console
+  development and demos.
 - Experimental `cache_affinity` routing: bounded tenant/model-scoped prefix
   predictions, engine-feedback correction, load-aware selection, and cache
   metrics. Streaming requests collect upstream usage without requiring client

@@ -17,6 +17,7 @@ It is **not** an inference engine — no GPU scheduling, no KV-cache allocator.
 - **Key lifecycle API** — create/delete API keys live (`/meridian/keys`), per-key budgets and usage export
 - **Compliance hooks** — India PII pack (request path); optional tamper-evident audit; metadata-only logs
 - **Cost** — actual `usage` ledger + org-scoped + per-key export (`docs/ENTERPRISE_COST.md`)
+- **Operator console** — `/ui`: live fleet health, routing & canary state, request log, chat playground, key lifecycle, usage & budgets, GPU node enrollment and desired state ([`docs/CONSOLE.md`](docs/CONSOLE.md))
 - **Ops** — Prometheus, Helm, air-gap packaging, non-root image
 
 Full feature history: [`docs/MILESTONES.md`](docs/MILESTONES.md) · Status: [`docs/ship.md`](docs/ship.md)
@@ -42,7 +43,7 @@ curl -i http://localhost:8080/v1/chat/completions \
 ```
 
 Look for **`x-meridian-backend`** (`fast` or `slow`) and **`x-request-id`**.  
-Dashboard: http://localhost:8080/ui  
+Operator console: http://localhost:8080/ui — live health, routing, request log, playground, keys, usage, policies and GPU fleet ([`docs/CONSOLE.md`](docs/CONSOLE.md))  
 
 **Details, smoke test, stop/start:** [`docs/QUICKSTART.md`](docs/QUICKSTART.md)
 
@@ -105,6 +106,7 @@ GPU warm state and dynamic batching affect absolute latency. See the
 | Path | Audience |
 |------|----------|
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | First successful run |
+| [`docs/CONSOLE.md`](docs/CONSOLE.md) | Operator console: pages, roles, control-plane connection, development |
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | Full config + auth/budgets/PII examples |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) · [`docs/OPS_RUNBOOK.md`](docs/OPS_RUNBOOK.md) | Production |
 | [`docs/README.md`](docs/README.md) | **Index of all docs** |
@@ -117,7 +119,8 @@ GPU warm state and dynamic batching affect absolute latency. See the
 | `POST /v1/chat/completions` | Chat (stream + non-stream) |
 | `GET /v1/models` | Models |
 | `GET /meridian/status` · `/meridian/version` | Ops |
-| `GET /metrics` · `/ui` | Prometheus + dashboard |
+| `GET /meridian/whoami` · `/meridian/config` · `/meridian/budgets` | Console read models (identity + rights, effective config, budget consumption) |
+| `GET /metrics` · `/ui` | Prometheus + operator console |
 
 Proxied responses include `x-request-id` and `x-meridian-backend`.
 
@@ -137,6 +140,10 @@ Detailed diagram (pipeline, core components, policy, observability, audit):
 ```bash
 pip install -e ".[dev]"
 ruff check . && mypy meridian && pytest -q
+
+# Operator console (web/) — React + TypeScript + Vite + shadcn/ui
+cd web && npm ci && npm run check && npm run build   # → meridian/ui/dist
+python scripts/console_demo.py                       # full local stack for UI work
 ```
 
 ## License
