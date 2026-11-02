@@ -260,7 +260,7 @@ def traffic_loop(gateway: str, stop: threading.Event) -> None:
             headers["x-meridian-session"] = f"conv-{random.randint(1, 12)}"
         # The mock streams at ~50ms/token: keep long generations non-streaming
         # so a few 800-token streams don't stall the generator threads.
-        if random.random() < 0.35 and body["max_tokens"] <= 128:
+        if random.random() < 0.35 and body["max_tokens"] <= 64:
             body["stream"] = True
         try:
             req = urllib.request.Request(f"{gateway}/v1/chat/completions", data=json.dumps(body).encode(),
