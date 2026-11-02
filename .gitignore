@@ -48,3 +48,8 @@ config_real.yaml
 poc_meridian_requests.jsonl
 docs/scans/*.json
 .phase3_demo_keys/
+
+# Operator console (web/) — built into the package by `npm run build`,
+# the Dockerfile and CI; never committed.
+web/node_modules/
+meridian/ui/dist/
