@@ -23,10 +23,15 @@ class ControlConfig:
     # SQLAlchemy connection pool (Postgres at fleet scale; ignored for SQLite).
     db_pool_size: int = 5
     db_max_overflow: int = 10
+    # Browser origins allowed to call the API (the operator console when it is
+    # served from the gateway's origin). Empty = no CORS headers (default).
+    cors_origins: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "ControlConfig":
+        cors = os.environ.get("MERIDIAN_CONTROL_CORS_ORIGINS", "")
         return cls(
+            cors_origins=tuple(o.strip() for o in cors.split(",") if o.strip()),
             db_url=os.environ.get("MERIDIAN_CONTROL_DB_URL", cls.db_url),
             ca_dir=Path(os.environ.get("MERIDIAN_CONTROL_CA_DIR", "./ca")),
             lease_ttl_seconds=int(os.environ.get("MERIDIAN_CONTROL_LEASE_TTL", "30")),

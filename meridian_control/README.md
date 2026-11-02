@@ -53,6 +53,12 @@ the production-readiness checklist.
 | `GET /admin/projection` | Serving projection (gateway consumes read-only) |
 | `POST /admin/place` | Capacity-aware placement: pick a node/device with enough allocatable VRAM |
 | `GET /admin/crl` | Certificate revocation list (revoked node ids + cert serials) for the edge |
+| `GET /admin/overview` · `/admin/nodes` · `/admin/nodes/{id}` · `/admin/claims` · `/admin/tokens` · `/admin/audit` | Read models for the operator console (no private keys, nonces or raw tokens) |
+
+Set `MERIDIAN_CONTROL_CORS_ORIGINS` (comma-separated) to let the operator
+console call these from the gateway's origin. Off by default. The `/admin/*`
+routes are not authenticated: keep them on a private network or behind an
+authenticating proxy.
 
 ## Restore safety
 

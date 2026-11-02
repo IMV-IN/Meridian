@@ -29,6 +29,15 @@ def create_app(config: Optional[ControlConfig] = None, now: Optional[Callable] =
 
     app = FastAPI(title="meridian-control", version="0.1.0")
     app.state.control_service = service
+    if config.cors_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(config.cors_origins),
+            allow_methods=["GET", "POST"],
+            allow_headers=["content-type", "authorization"],
+        )
     app.include_router(router)
     register_error_handler(app)
 

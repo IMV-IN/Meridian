@@ -365,10 +365,13 @@ class ControlService:
             seq = int(observation.get("sequence", 0))
             row = s.get(ObservationRow, node_id)
             if row is None:
-                s.add(ObservationRow(node_id=node_id, sequence=seq, observation=observation))
+                s.add(ObservationRow(
+                    node_id=node_id, sequence=seq, observation=observation, updated_at=self._now(),
+                ))
             elif seq >= row.sequence:
                 row.sequence = seq
                 row.observation = observation
+                row.updated_at = self._now()
             s.commit()
             return {"received": True}
 
@@ -448,6 +451,194 @@ class ControlService:
                             "routable": bool(lease_valid) and not node.revoked,
                         })
         return out
+
+
+    # --- operator console read models ----------------------------------
+    # Read-only views for the operator console. They expose identity, lease,
+    # generation and capacity metadata only — never private material (public
+    # keys, claim nonces, session assertions, raw token values).
+    _FAILED_PHASES = frozenset({"Failed", "Quarantined", "Orphaned"})
+
+    def _node_status(self, node: Node) -> str:
+        if node.revoked:
+            return "revoked"
+        if node.lease_expires_at is None:
+            return "enrolled"  # approved, no session established yet
+        return "online" if self._now() < _aware(node.lease_expires_at) else "offline"
+
+    def _node_summary(self, node: Node, obs: Optional[ObservationRow]) -> dict:
+        observation = obs.observation if obs is not None else {}
+        engines = observation.get("engines", []) or []
+        cap = observation.get("capacity", {}) or {}
+        by_phase: dict[str, int] = {}
+        for e in engines:
+            phase = str(e.get("phase", "Unknown"))
+            by_phase[phase] = by_phase.get(phase, 0) + 1
+        alloc = {d: int(v) for d, v in (cap.get("allocatable_vram_bytes", {}) or {}).items()}
+        return {
+            "node_id": node.node_id,
+            "display_name": node.display_name,
+            "labels": dict(node.labels or {}),
+            "status": self._node_status(node),
+            "revoked": node.revoked,
+            "fencing_epoch": node.fencing_epoch,
+            "incarnation": node.incarnation,
+            "highest_sequence": node.highest_sequence,
+            "active_session_id": node.active_session_id,
+            "lease_expires_at": _iso(node.lease_expires_at) if node.lease_expires_at else None,
+            "desired_generation": node.desired_generation,
+            "observed_generation": observation.get("observed_generation") if obs is not None else None,
+            "observed_at": _iso(obs.updated_at) if obs is not None and obs.updated_at else None,
+            "created_at": _iso(node.created_at) if node.created_at else None,
+            "engines": {
+                "total": len(engines),
+                "ready": by_phase.get("Ready", 0),
+                "failed": sum(n for p, n in by_phase.items() if p in self._FAILED_PHASES),
+                "by_phase": by_phase,
+            },
+            "capacity": {
+                "devices": len(alloc),
+                "allocatable_vram_bytes": sum(alloc.values()),
+                "free_ports": cap.get("free_ports"),
+                "running_engines": cap.get("running_engines"),
+                "queue_depth": cap.get("queue_depth"),
+                "held_artifacts": len(cap.get("held_artifacts", []) or []),
+            } if cap else None,
+        }
+
+    def list_nodes(self) -> list[dict]:
+        with self._sf() as s:
+            nodes = list(s.scalars(select(Node).order_by(Node.created_at)))
+            return [self._node_summary(n, s.get(ObservationRow, n.node_id)) for n in nodes]
+
+    def node_detail(self, node_id: str, audit_limit: int = 50) -> dict:
+        from cryptography import x509
+
+        with self._sf() as s:
+            node = s.get(Node, node_id)
+            if node is None:
+                raise ControlServiceError("NODE_NOT_FOUND", "unknown node", http_status=404)
+            obs = s.get(ObservationRow, node_id)
+            detail = self._node_summary(node, obs)
+            cert: Optional[dict] = None
+            if node.certificate_pem:
+                try:
+                    c = x509.load_pem_x509_certificate(node.certificate_pem.encode())
+                    cert = {
+                        "serial": str(c.serial_number),
+                        "not_valid_before": _iso(c.not_valid_before_utc),
+                        "not_valid_after": _iso(c.not_valid_after_utc),
+                    }
+                except ValueError:
+                    cert = None
+            desired = s.scalar(
+                select(DesiredSnapshotRow).where(DesiredSnapshotRow.node_id == node_id)
+                .order_by(DesiredSnapshotRow.generation.desc())
+            )
+            stops = sorted(
+                r.engine_id for r in s.scalars(
+                    select(StopAuthorization).where(StopAuthorization.node_id == node_id)
+                )
+            )
+            events = s.scalars(
+                select(AuditEvent).where(AuditEvent.node_id == node_id)
+                .order_by(AuditEvent.id.desc()).limit(audit_limit)
+            )
+            detail.update({
+                "certificate": cert,
+                "observation": dict(obs.observation) if obs is not None else None,
+                "desired": {
+                    "generation": desired.generation,
+                    "created_at": _iso(desired.created_at) if desired.created_at else None,
+                    "snapshot": dict(desired.snapshot),
+                } if desired is not None else None,
+                "stop_authorized_engine_ids": stops,
+                "audit": [_audit_view(e) for e in events],
+            })
+            return detail
+
+    def list_claims(self, status: Optional[str] = None) -> list[dict]:
+        with self._sf() as s:
+            q = select(Claim).order_by(Claim.created_at.desc())
+            if status:
+                q = q.where(Claim.status == status)
+            return [
+                {
+                    "claim_id": c.claim_id,
+                    "node_id": c.node_id,
+                    "status": c.status,
+                    "created_at": _iso(c.created_at) if c.created_at else None,
+                }
+                for c in s.scalars(q)
+            ]
+
+    def list_tokens(self) -> list[dict]:
+        """Enrollment tokens by non-reversible reference (hash prefix) only."""
+        now = self._now()
+        with self._sf() as s:
+            out = []
+            for t in s.scalars(select(EnrollmentToken)):
+                expired = t.expires_at is not None and now > _aware(t.expires_at)
+                out.append({
+                    "token_ref": t.token_hash[:12],
+                    "auto_approve": t.auto_approve,
+                    "status": "used" if t.used else ("expired" if expired else "active"),
+                    "expires_at": _iso(t.expires_at) if t.expires_at else None,
+                })
+            out.sort(key=lambda r: r["expires_at"] or "", reverse=True)
+            return out
+
+    def list_audit(self, limit: int = 100, node_id: Optional[str] = None) -> list[dict]:
+        limit = max(1, min(int(limit), 1000))
+        with self._sf() as s:
+            q = select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit)
+            if node_id:
+                q = q.where(AuditEvent.node_id == node_id)
+            return [_audit_view(e) for e in s.scalars(q)]
+
+    def overview(self) -> dict:
+        with self._sf() as s:
+            inc = self._incarnation(s)
+            s.commit()
+            incarnation, floor = inc.value, inc.epoch_floor
+            pending = len(list(s.scalars(select(Claim).where(Claim.status == "pending"))))
+        nodes = self.list_nodes()
+        projection = self.serving_projection()
+        by_status: dict[str, int] = {}
+        for n in nodes:
+            by_status[n["status"]] = by_status.get(n["status"], 0) + 1
+        return {
+            "incarnation": incarnation,
+            "epoch_floor": floor,
+            "nodes": {"total": len(nodes), "by_status": by_status},
+            "claims_pending": pending,
+            "engines": {
+                "total": sum(n["engines"]["total"] for n in nodes),
+                "ready": sum(n["engines"]["ready"] for n in nodes),
+                "failed": sum(n["engines"]["failed"] for n in nodes),
+            },
+            "allocatable_vram_bytes": sum(
+                n["capacity"]["allocatable_vram_bytes"] for n in nodes
+                if n["capacity"] is not None and n["status"] == "online"
+            ),
+            "routable_endpoints": sum(1 for p in projection if p["routable"]),
+            "settings": {
+                "lease_ttl_seconds": self._config.lease_ttl_seconds,
+                "heartbeat_interval_seconds": self._config.heartbeat_interval_seconds,
+                "cert_lifetime_hours": self._config.cert_lifetime_hours,
+                "require_mtls": self._config.require_mtls,
+            },
+        }
+
+
+def _audit_view(e: AuditEvent) -> dict:
+    return {
+        "id": e.id,
+        "node_id": e.node_id,
+        "kind": e.kind,
+        "detail": e.detail,
+        "created_at": _iso(e.created_at) if e.created_at else None,
+    }
 
 
 def _aware(d: datetime) -> datetime:

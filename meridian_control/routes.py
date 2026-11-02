@@ -135,6 +135,37 @@ def crl(request: Request):
     return {"revoked": _svc(request).crl()}
 
 
+# --- operator console read models (read-only) ---------------------------
+@router.get("/admin/overview")
+def overview(request: Request):
+    return _svc(request).overview()
+
+
+@router.get("/admin/nodes")
+def list_nodes(request: Request):
+    return {"nodes": _svc(request).list_nodes()}
+
+
+@router.get("/admin/nodes/{node_id}")
+def node_detail(request: Request, node_id: str):
+    return _svc(request).node_detail(node_id)
+
+
+@router.get("/admin/claims")
+def list_claims(request: Request, status: Optional[str] = Query(None)):
+    return {"claims": _svc(request).list_claims(status)}
+
+
+@router.get("/admin/tokens")
+def list_tokens(request: Request):
+    return {"tokens": _svc(request).list_tokens()}
+
+
+@router.get("/admin/audit")
+def list_audit(request: Request, limit: int = Query(100), node_id: Optional[str] = Query(None)):
+    return {"events": _svc(request).list_audit(limit=limit, node_id=node_id)}
+
+
 @router.post("/admin/place")
 def place(request: Request, body: dict = Body(...)):
     placement = _svc(request).select_placement(
