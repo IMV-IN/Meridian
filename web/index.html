@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en" suppressHydrationWarning>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="referrer" content="no-referrer" />
+    <meta name="description" content="Meridian operator console — routing, health, governance and fleet control for self-hosted inference." />
+    <title>Meridian Console</title>
+    <script>
+      // Apply the saved theme before first paint (no light/dark flash).
+      try {
+        var t = localStorage.getItem("meridian.console.theme") || "system";
+        var d = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+        document.documentElement.classList.toggle("dark", d);
+        document.documentElement.style.colorScheme = d ? "dark" : "light";
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <div id="root"></div>
+    <noscript>The Meridian console requires JavaScript. Raw data: /meridian/status, /meridian/requests, /metrics.</noscript>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
