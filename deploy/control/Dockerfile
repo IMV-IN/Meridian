@@ -20,7 +20,10 @@ COPY web/ ./
 RUN npm run build
 
 
-FROM python:3.12-slim-trixie AS builder
+# Python 3.14 is the project's runtime everywhere (images, CI, docs). 3.15 is
+# not used yet: PyYAML has no prebuilt 3.15 wheels and this slim image has no
+# compiler.
+FROM python:3.14-slim-trixie AS builder
 
 WORKDIR /build
 RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
@@ -35,7 +38,7 @@ RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir ".[control]"
 
 
-FROM python:3.12-slim-trixie AS runtime
+FROM python:3.14-slim-trixie AS runtime
 RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10002 --create-home meridian-control
 

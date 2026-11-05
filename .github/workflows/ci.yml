@@ -18,7 +18,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.9", "3.11", "3.12"]
+        # From the oldest supported Python (requires-python; 3.10 reached end
+        # of life in October 2026) up to 3.14, the version everything runs on.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       # Retry checkout once — GitHub occasionally returns Service Unavailable resolving actions.
@@ -85,7 +87,7 @@ jobs:
           exit "$ec"
 
       - name: Bench harness smoke (mock overhead script)
-        if: matrix.python-version == '3.11'
+        if: matrix.python-version == '3.14'
         run: python scripts/bench_overhead.py --requests 40 --concurrency 8 --warmup 5 --json
 
   # Operator console (web/): typecheck, lint, unit tests, production build,
@@ -122,7 +124,7 @@ jobs:
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.14"
       - name: Gateway serves the built console
         working-directory: .
         run: |
@@ -169,12 +171,12 @@ jobs:
         uses: actions/setup-python@v5
         continue-on-error: true
         with:
-          python-version: "3.11"
+          python-version: "3.14"
       - name: Set up Python (retry)
         if: steps.setup-python.outcome != 'success'
         uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.14"
       - name: Install
         run: pip install -e ".[dev]"
       - name: Start mock backend
