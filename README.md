@@ -53,6 +53,8 @@ Optional Kafka/audit: `docker compose -f docker-compose.kafka-demo.yml up --buil
 
 ## Install without Docker
 
+Requires **Python 3.11 or newer** (CI tests 3.11 through 3.15; the images use 3.14).
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"          # or: pip install -e .

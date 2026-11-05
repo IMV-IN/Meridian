@@ -8,7 +8,7 @@ version = "0.12.0"
 description = "On-soil AI inference gateway for Indian enterprises"
 license = {text = "MIT"}
 readme = "README.md"
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 dependencies = [
     "fastapi[standard]",
     "uvicorn",
@@ -62,7 +62,7 @@ packages = ["meridian", "meridian_control"]
 artifacts = ["meridian/ui/dist/**"]
 
 [tool.ruff]
-target-version = "py39"
+target-version = "py311"
 line-length = 120
 # Alembic autogenerates migration scripts; don't lint their generated style.
 extend-exclude = ["meridian_control/migrations/versions"]
@@ -71,9 +71,8 @@ extend-exclude = ["meridian_control/migrations/versions"]
 select = ["E", "F", "I", "W"]
 
 [tool.mypy]
-# Newer mypy no longer supports targeting 3.9. Ruff's py39 target keeps the code
-# 3.9-compatible at the syntax level; mypy checks against 3.10 semantics.
-python_version = "3.10"
+# Check against the oldest supported Python (requires-python).
+python_version = "3.11"
 warn_return_any = true
 warn_unused_configs = true
 disallow_untyped_defs = false
@@ -81,4 +80,5 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
 testpaths = ["tests"]

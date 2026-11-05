@@ -14,7 +14,10 @@ COPY web/ ./
 RUN npm run build
 
 
-FROM python:3.12-slim-trixie AS builder
+# Python 3.14: the newest release with prebuilt wheels for every runtime
+# dependency on amd64 and arm64 (PyYAML has none for 3.15 yet, and this slim
+# image has no compiler). CI also tests 3.15; move up once those wheels ship.
+FROM python:3.14-slim-trixie AS builder
 
 WORKDIR /build
 
@@ -41,7 +44,7 @@ RUN python -m venv /opt/venv \
     || true
 
 
-FROM python:3.12-slim-trixie AS runtime
+FROM python:3.14-slim-trixie AS runtime
 
 # Distro security updates, then drop packages Meridian never uses at runtime.
 # perl-base is Essential on Debian but unused by the gateway; removing it clears

@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Python support is now 3.11 – 3.15** (`requires-python >= 3.11`). 3.9 and
+  3.10 are end-of-life upstream and 3.9 can no longer be installed on GitHub's
+  Ubuntu 26.04 runners. CI tests every supported version. The gateway,
+  control-plane and mock-backend images move to `python:3.14-slim-trixie`, the
+  newest Python with prebuilt wheels for every runtime dependency on amd64 and
+  arm64 (PyYAML has no 3.15 wheels yet).
+
 - **Meridian Cloud** (`meridian-control` with `MERIDIAN_CONTROL_CLOUD=1`):
   accounts with **Sign in with Google** (authorization code + PKCE, state,
   nonce) and **6-digit email codes** (HMAC-stored, attempt- and rate-limited,

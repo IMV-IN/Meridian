@@ -20,7 +20,10 @@ COPY web/ ./
 RUN npm run build
 
 
-FROM python:3.12-slim-trixie AS builder
+# Python 3.14: the newest release with prebuilt wheels for every runtime
+# dependency on amd64 and arm64 (PyYAML has none for 3.15 yet, and this slim
+# image has no compiler). CI also tests 3.15; move up once those wheels ship.
+FROM python:3.14-slim-trixie AS builder
 
 WORKDIR /build
 RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/*
@@ -35,7 +38,7 @@ RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir ".[control]"
 
 
-FROM python:3.12-slim-trixie AS runtime
+FROM python:3.14-slim-trixie AS runtime
 RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10002 --create-home meridian-control
 
