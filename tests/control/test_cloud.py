@@ -378,6 +378,7 @@ def test_der_base64_client_cert_header_is_accepted(tmp_path, clock):
 
 def test_migrate_initialises_the_node_ca(tmp_path, monkeypatch, capsys):
     """The TLS edge loads ca_cert.pem for client_auth before the first `run`."""
+    pytest.importorskip("alembic")  # only in the [control] extra; skip in the gateway-only CI job
     from meridian_control.cli import main
 
     monkeypatch.setenv("MERIDIAN_CONTROL_DB_URL", f"sqlite:///{tmp_path}/control.db")
