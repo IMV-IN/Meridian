@@ -23,6 +23,10 @@ def _svc(request: Request) -> ControlService:
 
 
 router = APIRouter()
+# Unauthenticated operator API. Standalone deployments rely on network
+# placement; cloud mode disables it (tenants use the session-authenticated
+# /api/w/{workspace}/* routes instead).
+admin_router = APIRouter()
 
 
 # --- node protocol ------------------------------------------------------
@@ -80,7 +84,7 @@ def rotate_certificate(request: Request, node_id: str):
 
 
 # --- operator admin -----------------------------------------------------
-@router.post("/admin/tokens")
+@admin_router.post("/admin/tokens")
 def create_token(request: Request, body: dict = Body(default={})):
     token = _svc(request).create_token(
         auto_approve=bool(body.get("auto_approve", False)),
@@ -89,84 +93,84 @@ def create_token(request: Request, body: dict = Body(default={})):
     return {"token": token}
 
 
-@router.post("/admin/claims/{claim_id}/approve")
+@admin_router.post("/admin/claims/{claim_id}/approve")
 def approve_claim(request: Request, claim_id: str):
     _svc(request).approve_claim(claim_id)
     return {"ok": True}
 
 
-@router.post("/admin/claims/{claim_id}/deny")
+@admin_router.post("/admin/claims/{claim_id}/deny")
 def deny_claim(request: Request, claim_id: str):
     _svc(request).deny_claim(claim_id)
     return {"ok": True}
 
 
-@router.post("/admin/nodes/{node_id}/desired")
+@admin_router.post("/admin/nodes/{node_id}/desired")
 def set_desired(request: Request, node_id: str, body: dict = Body(...)):
     _svc(request).set_desired(node_id, body)
     return {"ok": True}
 
 
-@router.post("/admin/nodes/{node_id}/stop-authorize")
+@admin_router.post("/admin/nodes/{node_id}/stop-authorize")
 def stop_authorize(request: Request, node_id: str, body: dict = Body(...)):
     _svc(request).authorize_stop(node_id, list(body.get("engine_ids", [])))
     return {"ok": True}
 
 
-@router.post("/admin/nodes/{node_id}/revoke")
+@admin_router.post("/admin/nodes/{node_id}/revoke")
 def revoke(request: Request, node_id: str):
     _svc(request).revoke_node(node_id)
     return {"ok": True}
 
 
-@router.post("/admin/restore")
+@admin_router.post("/admin/restore")
 def restore(request: Request, body: dict = Body(...)):
     incarnation = _svc(request).record_restore(int(body.get("high_water_epoch", 0)))
     return {"incarnation": incarnation}
 
 
-@router.get("/admin/projection")
+@admin_router.get("/admin/projection")
 def projection(request: Request):
     return {"endpoints": _svc(request).serving_projection()}
 
 
-@router.get("/admin/crl")
+@admin_router.get("/admin/crl")
 def crl(request: Request):
     return {"revoked": _svc(request).crl()}
 
 
 # --- operator console read models (read-only) ---------------------------
-@router.get("/admin/overview")
+@admin_router.get("/admin/overview")
 def overview(request: Request):
     return _svc(request).overview()
 
 
-@router.get("/admin/nodes")
+@admin_router.get("/admin/nodes")
 def list_nodes(request: Request):
     return {"nodes": _svc(request).list_nodes()}
 
 
-@router.get("/admin/nodes/{node_id}")
+@admin_router.get("/admin/nodes/{node_id}")
 def node_detail(request: Request, node_id: str):
     return _svc(request).node_detail(node_id)
 
 
-@router.get("/admin/claims")
+@admin_router.get("/admin/claims")
 def list_claims(request: Request, status: Optional[str] = Query(None)):
     return {"claims": _svc(request).list_claims(status)}
 
 
-@router.get("/admin/tokens")
+@admin_router.get("/admin/tokens")
 def list_tokens(request: Request):
     return {"tokens": _svc(request).list_tokens()}
 
 
-@router.get("/admin/audit")
+@admin_router.get("/admin/audit")
 def list_audit(request: Request, limit: int = Query(100), node_id: Optional[str] = Query(None)):
     return {"events": _svc(request).list_audit(limit=limit, node_id=node_id)}
 
 
-@router.post("/admin/place")
+@admin_router.post("/admin/place")
 def place(request: Request, body: dict = Body(...)):
     placement = _svc(request).select_placement(
         int(body.get("required_vram_bytes", 0)),
