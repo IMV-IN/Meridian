@@ -1,7 +1,18 @@
 # Multi-stage runtime image.
+# - Console: build the operator console (web/) into meridian/ui/dist.
 # - Builder: install Meridian into a venv, drop pip/setuptools/wheel.
 # - Runtime: Debian trixie slim + security upgrades; strip base-image packaging
 #   tools so Trivy does not report HIGH CVEs from pip/wheel left on the PATH.
+
+FROM --platform=$BUILDPLATFORM node:22-slim AS console
+
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+# vite.config.ts writes to ../meridian/ui/dist → /src/meridian/ui/dist
+RUN npm run build
+
 
 FROM python:3.12-slim-trixie AS builder
 
@@ -13,6 +24,7 @@ RUN apt-get update \
 
 COPY pyproject.toml README.md ./
 COPY meridian/ meridian/
+COPY --from=console /src/meridian/ui/dist meridian/ui/dist
 
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade "pip>=26.1.2" \

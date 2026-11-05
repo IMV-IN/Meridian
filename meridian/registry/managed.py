@@ -62,9 +62,15 @@ class ManagedProjectionSync:
 
     async def sync_once(self) -> None:
         assert self._client is not None
-        url = self._config.url.rstrip("/") + "/admin/projection"
+        token = self._config.resolved_token()
+        if token:  # Meridian Cloud: workspace-scoped, token-authenticated
+            url = self._config.url.rstrip("/") + "/api/gateway/v1/projection"
+            headers = {"Authorization": f"Bearer {token}"}
+        else:  # standalone meridian-control on a private network
+            url = self._config.url.rstrip("/") + "/admin/projection"
+            headers = {}
         try:
-            resp = await self._client.get(url)
+            resp = await self._client.get(url, headers=headers)
             resp.raise_for_status()
             endpoints = resp.json().get("endpoints", [])
         except (httpx.HTTPError, ValueError) as exc:

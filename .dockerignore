@@ -43,3 +43,7 @@ docker-compose.yml
 # Docs not needed at runtime
 CLAUDE.md
 CHANGELOG.md
+
+# Console: the image builds web/ from source in its own stage.
+web/node_modules
+meridian/ui/dist

@@ -64,6 +64,8 @@ nav:
   - Start here:
       - Quickstart: QUICKSTART.md
       - Configuration: CONFIGURATION.md
+      - Operator console: CONSOLE.md
+      - Meridian Cloud (free hosting): CLOUD.md
       - Flagship Phase 3 demo: https://github.com/IMV-IN/Meridian/blob/main/scripts/demo_phase3.sh
   - Deploy:
       - Deployment guide: DEPLOY.md

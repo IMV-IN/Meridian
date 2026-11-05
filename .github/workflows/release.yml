@@ -46,6 +46,12 @@ jobs:
           OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "owner_lc=${OWNER_LC}" >> "$GITHUB_OUTPUT"
+          {
+            echo "control_tags<<EOF"
+            echo "ghcr.io/${OWNER_LC}/meridian-control:${VERSION}"
+            echo "ghcr.io/${OWNER_LC}/meridian-control:latest"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
           # GHCR always publishes (built-in GITHUB_TOKEN). Docker Hub only when
           # the secret is configured, so forks / unconfigured repos don't fail.
@@ -101,3 +107,22 @@ jobs:
             org.opencontainers.image.licenses=MIT
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      # meridian-control (node control plane + Meridian Cloud console).
+      # arm64 so it runs on small boards (e.g. Arduino UNO Q, Raspberry Pi)
+      # and Oracle Ampere free-tier VMs.
+      - name: Build and push meridian-control
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./deploy/control/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.control_tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.licenses=MIT
+          cache-from: type=gha,scope=control
+          cache-to: type=gha,scope=control,mode=max

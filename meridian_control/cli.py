@@ -20,15 +20,27 @@ def main(argv: list[str] | None = None) -> int:
 
     sub.add_parser("migrate", help="apply Alembic migrations up to head")
 
+    rst = sub.add_parser("restore", help="record a restore-from-backup (raises the fencing-epoch floor)")
+    rst.add_argument("--high-water-epoch", type=int, required=True)
+
+    bak = sub.add_parser("backup", help="online backup of a SQLite control-plane database")
+    bak.add_argument("--out", required=True, help="destination file, e.g. /backups/control-$(date +%%F).db")
+
     args = parser.parse_args(argv)
 
     if args.command == "migrate":
+        from .ca import NodeCA
         from .config import ControlConfig
         from .db import run_migrations
 
-        db_url = ControlConfig.from_env().db_url
-        run_migrations(db_url)
-        print(f"migrated {db_url} to head")
+        cfg = ControlConfig.from_env()
+        run_migrations(cfg.db_url)
+        print(f"migrated {cfg.db_url} to head")
+        # Create the node CA up front so a TLS edge that verifies node client
+        # certificates (Caddy `client_auth`) can load ca_cert.pem before the
+        # server's first start.
+        NodeCA.load_or_create(cfg.ca_dir)
+        print(f"node CA ready: {cfg.ca_dir / 'ca_cert.pem'}")
         return 0
 
     if args.command == "run":
@@ -37,6 +49,32 @@ def main(argv: list[str] | None = None) -> int:
         from .app import create_app
 
         uvicorn.run(create_app(), host=args.host, port=args.port)
+        return 0
+
+    if args.command == "restore":
+        from .app import create_app
+
+        app = create_app()
+        inc = app.state.control_service.record_restore(args.high_water_epoch)
+        print(f"restore recorded: incarnation={inc}")
+        return 0
+
+    if args.command == "backup":
+        import sqlite3
+
+        from .config import ControlConfig
+
+        db_url = ControlConfig.from_env().db_url
+        if not db_url.startswith("sqlite:///"):
+            print("backup supports SQLite only; use pg_dump for Postgres", file=sys.stderr)
+            return 2
+        src = sqlite3.connect(db_url[len("sqlite:///"):])
+        dst = sqlite3.connect(args.out)
+        with dst:
+            src.backup(dst)  # consistent snapshot while the server keeps running
+        src.close()
+        dst.close()
+        print(f"backed up to {args.out}")
         return 0
 
     if args.command == "mint-token":

@@ -10,6 +10,7 @@ process memory across requests, so control replicas are stateless.
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import json
 import secrets
@@ -81,35 +82,56 @@ class ControlService:
         return cast(Incarnation, inc)
 
     # --- admin ----------------------------------------------------------
-    def create_token(self, auto_approve: bool = False, ttl_seconds: int = 3600) -> str:
+    # Every admin method takes an optional `workspace_id`. None = standalone
+    # (unscoped legacy /admin API); a value scopes reads and rejects writes to
+    # rows of another workspace with the same 404 as a missing row.
+    def create_token(
+        self, auto_approve: bool = False, ttl_seconds: int = 3600,
+        workspace_id: Optional[str] = None, actor: str = "",
+    ) -> str:
         token = "enr_" + secrets.token_urlsafe(24)
         with self._sf() as s:
             s.add(EnrollmentToken(
                 token_hash=_hash_token(token), auto_approve=auto_approve,
-                expires_at=self._now() + timedelta(seconds=ttl_seconds),
+                expires_at=self._now() + timedelta(seconds=ttl_seconds), workspace_id=workspace_id,
             ))
+            if workspace_id:
+                s.add(AuditEvent(
+                    workspace_id=workspace_id, actor=actor, kind="enrollment_token_minted",
+                    detail=f"auto_approve={auto_approve} ttl={ttl_seconds}s",
+                ))
             s.commit()
         return token
 
-    def approve_claim(self, claim_id: str) -> None:
-        self._set_claim_status(claim_id, "approved")
+    def approve_claim(self, claim_id: str, workspace_id: Optional[str] = None, actor: str = "") -> None:
+        self._set_claim_status(claim_id, "approved", workspace_id, actor)
 
-    def deny_claim(self, claim_id: str) -> None:
-        self._set_claim_status(claim_id, "denied")
+    def deny_claim(self, claim_id: str, workspace_id: Optional[str] = None, actor: str = "") -> None:
+        self._set_claim_status(claim_id, "denied", workspace_id, actor)
 
-    def _set_claim_status(self, claim_id: str, status: str) -> None:
+    def _set_claim_status(
+        self, claim_id: str, status: str, workspace_id: Optional[str] = None, actor: str = ""
+    ) -> None:
         with self._sf() as s:
             claim = s.get(Claim, claim_id)
-            if claim is None:
+            if claim is None or (workspace_id is not None and claim.workspace_id != workspace_id):
                 raise ControlServiceError("NODE_NOT_FOUND", "unknown claim", http_status=404)
             claim.status = status
+            s.add(AuditEvent(
+                node_id=claim.node_id, workspace_id=claim.workspace_id, actor=actor,
+                kind=f"claim_{status}", detail=claim_id,
+            ))
             s.commit()
 
-    def set_desired(self, node_id: str, snapshot: dict) -> None:
+    def _scoped_node(self, s, node_id: str, workspace_id: Optional[str]) -> Node:
+        node = s.get(Node, node_id)
+        if node is None or (workspace_id is not None and node.workspace_id != workspace_id):
+            raise ControlServiceError("NODE_NOT_FOUND", "unknown node", http_status=404)
+        return cast(Node, node)
+
+    def set_desired(self, node_id: str, snapshot: dict, workspace_id: Optional[str] = None, actor: str = "") -> None:
         with self._sf() as s:
-            node = s.get(Node, node_id)
-            if node is None:
-                raise ControlServiceError("NODE_NOT_FOUND", "unknown node", http_status=404)
+            node = self._scoped_node(s, node_id, workspace_id)
             generation = int(snapshot["generation"])
             existing = s.scalar(
                 select(DesiredSnapshotRow).where(
@@ -122,22 +144,34 @@ class ControlService:
                 existing.snapshot = snapshot
             if generation > node.desired_generation:
                 node.desired_generation = generation
+            if actor or workspace_id:
+                s.add(AuditEvent(
+                    node_id=node_id, workspace_id=node.workspace_id, actor=actor,
+                    kind="desired_published", detail=f"generation={generation}",
+                ))
             s.commit()
 
-    def authorize_stop(self, node_id: str, engine_ids: list[str]) -> None:
+    def authorize_stop(
+        self, node_id: str, engine_ids: list[str], workspace_id: Optional[str] = None, actor: str = ""
+    ) -> None:
         with self._sf() as s:
+            if workspace_id is not None:
+                self._scoped_node(s, node_id, workspace_id)
             s.query(StopAuthorization).filter(StopAuthorization.node_id == node_id).delete()
             for eid in engine_ids:
                 s.add(StopAuthorization(node_id=node_id, engine_id=eid))
+            if actor or workspace_id:
+                s.add(AuditEvent(
+                    node_id=node_id, workspace_id=workspace_id, actor=actor,
+                    kind="stop_authorized", detail=",".join(engine_ids)[:1000],
+                ))
             s.commit()
 
-    def revoke_node(self, node_id: str) -> None:
+    def revoke_node(self, node_id: str, workspace_id: Optional[str] = None, actor: str = "") -> None:
         with self._sf() as s:
-            node = s.get(Node, node_id)
-            if node is None:
-                raise ControlServiceError("NODE_NOT_FOUND", "unknown node", http_status=404)
+            node = self._scoped_node(s, node_id, workspace_id)
             node.revoked = True
-            s.add(AuditEvent(node_id=node_id, kind="node_revoked"))
+            s.add(AuditEvent(node_id=node_id, workspace_id=node.workspace_id, actor=actor, kind="node_revoked"))
             s.commit()
 
     def record_restore(self, high_water_epoch: int) -> int:
@@ -166,16 +200,20 @@ class ControlService:
 
             node_id = "node_" + secrets.token_hex(12)
             public_key = _b64url_decode(request["node_public_key"])
+            ws = row.workspace_id
             if row.auto_approve:
-                self._create_node(s, node_id, public_key, request)
+                self._create_node(s, node_id, public_key, request, workspace_id=ws)
                 resp = self._approved_response(s, node_id)
-                s.add(AuditEvent(node_id=node_id, kind="enrolled_auto"))
+                s.add(AuditEvent(node_id=node_id, workspace_id=ws, kind="enrolled_auto"))
                 s.commit()
                 return resp
 
             claim_id = "claim_" + secrets.token_hex(12)
-            s.add(Claim(claim_id=claim_id, node_id=node_id, public_key=public_key, nonce=secrets.token_hex(32)))
-            s.add(AuditEvent(node_id=node_id, kind="claim_created", detail=claim_id))
+            s.add(Claim(
+                claim_id=claim_id, node_id=node_id, public_key=public_key,
+                nonce=secrets.token_hex(32), workspace_id=ws,
+            ))
+            s.add(AuditEvent(node_id=node_id, workspace_id=ws, kind="claim_created", detail=claim_id))
             s.commit()
             return {"status": "pending", "claim_id": claim_id}
 
@@ -200,18 +238,20 @@ class ControlService:
             if claim.status != "approved":
                 return {"status": "pending", "claim_id": claim_id}
             if s.get(Node, claim.node_id) is None:
-                self._create_node(s, claim.node_id, claim.public_key, {})
+                self._create_node(s, claim.node_id, claim.public_key, {}, workspace_id=claim.workspace_id)
             resp = self._approved_response(s, claim.node_id)
-            s.add(AuditEvent(node_id=claim.node_id, kind="enrolled_approved"))
+            s.add(AuditEvent(node_id=claim.node_id, workspace_id=claim.workspace_id, kind="enrolled_approved"))
             s.commit()
             return resp
 
-    def _create_node(self, s, node_id: str, public_key: bytes, request: dict) -> None:
+    def _create_node(
+        self, s, node_id: str, public_key: bytes, request: dict, workspace_id: Optional[str] = None
+    ) -> None:
         cert = self._ca.issue_node_cert(node_id, public_key, self._config.cert_lifetime_hours)
         host_claims = request.get("host_claims", {}) if request else {}
         s.add(Node(
             node_id=node_id, public_key=public_key, certificate_pem=cert,
-            display_name=host_claims.get("hostname", ""),
+            display_name=host_claims.get("hostname", ""), workspace_id=workspace_id,
         ))
         s.flush()
 
@@ -233,7 +273,9 @@ class ControlService:
     def verify_node_identity(self, node_id: str, cert_header: Optional[str]) -> None:
         """Bind the presented node certificate to the path node_id (DESIGN.md 15.6).
         No-op unless `require_mtls`. The edge terminates mTLS and forwards the
-        url-escaped PEM; here we re-verify the chain and match the SAN node_id."""
+        cert (url-escaped PEM, or base64 DER as Caddy's
+        {http.request.tls.client.certificate_der_base64} emits it); here we
+        re-verify the chain and match the SAN node_id."""
         if not self._config.require_mtls:
             return
         if not cert_header:
@@ -241,7 +283,7 @@ class ControlService:
                 "NODE_NOT_AUTHORIZED", "client certificate required", http_status=401
             )
         try:
-            cert = self._ca.verify_cert(urllib.parse.unquote(cert_header))
+            cert = self._ca.verify_cert(_cert_pem_from_header(cert_header))
             cert_node_id = node_id_from_cert(cert)
         except ValueError as e:
             raise ControlServiceError("NODE_NOT_AUTHORIZED", str(e), http_status=403) from e
@@ -263,7 +305,7 @@ class ControlService:
                 raise ControlServiceError("NODE_NOT_AUTHORIZED", "node certificate revoked", http_status=403)
             cert = self._ca.issue_node_cert(node_id, node.public_key, self._config.cert_lifetime_hours)
             node.certificate_pem = cert
-            s.add(AuditEvent(node_id=node_id, kind="cert_rotated"))
+            s.add(AuditEvent(node_id=node_id, workspace_id=node.workspace_id, kind="cert_rotated"))
             s.commit()
             return {
                 "certificate": cert,
@@ -293,7 +335,10 @@ class ControlService:
             node.incarnation = inc.value
             node.active_session_id = session_id
             node.lease_expires_at = self._now() + self._ttl()
-            s.add(AuditEvent(node_id=node_id, kind="session_established", detail=f"epoch={new_epoch}"))
+            s.add(AuditEvent(
+                node_id=node_id, workspace_id=node.workspace_id,
+                kind="session_established", detail=f"epoch={new_epoch}",
+            ))
             s.commit()
             return {
                 "fencing_epoch": new_epoch,
@@ -365,16 +410,20 @@ class ControlService:
             seq = int(observation.get("sequence", 0))
             row = s.get(ObservationRow, node_id)
             if row is None:
-                s.add(ObservationRow(node_id=node_id, sequence=seq, observation=observation))
+                s.add(ObservationRow(
+                    node_id=node_id, sequence=seq, observation=observation, updated_at=self._now(),
+                ))
             elif seq >= row.sequence:
                 row.sequence = seq
                 row.observation = observation
+                row.updated_at = self._now()
             s.commit()
             return {"received": True}
 
     # --- placement (Phase 5, control side) -----------------------------
     def select_placement(
-        self, required_vram_bytes: int, count: int = 1, artifact_digest: Optional[str] = None
+        self, required_vram_bytes: int, count: int = 1, artifact_digest: Optional[str] = None,
+        workspace_id: Optional[str] = None,
     ) -> Optional[dict]:
         """Pick a routable node + device(s) for a new engine (DESIGN.md 24 P3).
         Consumes the capacity nodes report: allocatable VRAM, held artifacts,
@@ -385,7 +434,7 @@ class ControlService:
         best_key: Optional[tuple] = None
         best: Optional[tuple[str, list[str], int]] = None  # (node_id, device_ids, headroom)
         with self._sf() as s:
-            for node in s.scalars(select(Node)):
+            for node in s.scalars(self._nodes_q(workspace_id)):
                 lease_valid = node.lease_expires_at is not None and self._now() < _aware(node.lease_expires_at)
                 if node.revoked or not lease_valid:
                     continue
@@ -412,14 +461,19 @@ class ControlService:
             "allocatable_vram_bytes": best[2],
         }
 
-    def crl(self) -> list[dict]:
+    @staticmethod
+    def _nodes_q(workspace_id: Optional[str]):
+        q = select(Node)
+        return q if workspace_id is None else q.where(Node.workspace_id == workspace_id)
+
+    def crl(self, workspace_id: Optional[str] = None) -> list[dict]:
         """Certificate revocation list: revoked nodes with their cert serial, for
         the TLS-terminating edge to reject at the handshake (DESIGN.md 15.6)."""
         from cryptography import x509
 
         out: list[dict] = []
         with self._sf() as s:
-            for node in s.scalars(select(Node).where(Node.revoked.is_(True))):
+            for node in s.scalars(self._nodes_q(workspace_id).where(Node.revoked.is_(True))):
                 serial: Optional[str] = None
                 if node.certificate_pem:
                     try:
@@ -430,12 +484,12 @@ class ControlService:
         return out
 
     # --- read models (operator / gateway projection) -------------------
-    def serving_projection(self) -> list[dict]:
+    def serving_projection(self, workspace_id: Optional[str] = None) -> list[dict]:
         """Read-only projection the gateway consumes (DESIGN.md 17). Routable
         endpoints are those with a valid lease and a Ready engine observation."""
         out: list[dict] = []
         with self._sf() as s:
-            for node in s.scalars(select(Node)):
+            for node in s.scalars(self._nodes_q(workspace_id)):
                 lease_valid = node.lease_expires_at is not None and self._now() < _aware(node.lease_expires_at)
                 obs = s.get(ObservationRow, node.node_id)
                 engines = (obs.observation.get("engines", []) if obs else [])
@@ -448,6 +502,219 @@ class ControlService:
                             "routable": bool(lease_valid) and not node.revoked,
                         })
         return out
+
+
+    # --- operator console read models ----------------------------------
+    # Read-only views for the operator console. They expose identity, lease,
+    # generation and capacity metadata only — never private material (public
+    # keys, claim nonces, session assertions, raw token values).
+    _FAILED_PHASES = frozenset({"Failed", "Quarantined", "Orphaned"})
+
+    def _node_status(self, node: Node) -> str:
+        if node.revoked:
+            return "revoked"
+        if node.lease_expires_at is None:
+            return "enrolled"  # approved, no session established yet
+        return "online" if self._now() < _aware(node.lease_expires_at) else "offline"
+
+    def _node_summary(self, node: Node, obs: Optional[ObservationRow]) -> dict:
+        observation = obs.observation if obs is not None else {}
+        engines = observation.get("engines", []) or []
+        cap = observation.get("capacity", {}) or {}
+        by_phase: dict[str, int] = {}
+        for e in engines:
+            phase = str(e.get("phase", "Unknown"))
+            by_phase[phase] = by_phase.get(phase, 0) + 1
+        alloc = {d: int(v) for d, v in (cap.get("allocatable_vram_bytes", {}) or {}).items()}
+        return {
+            "node_id": node.node_id,
+            "display_name": node.display_name,
+            "labels": dict(node.labels or {}),
+            "status": self._node_status(node),
+            "revoked": node.revoked,
+            "fencing_epoch": node.fencing_epoch,
+            "incarnation": node.incarnation,
+            "highest_sequence": node.highest_sequence,
+            "active_session_id": node.active_session_id,
+            "lease_expires_at": _iso(node.lease_expires_at) if node.lease_expires_at else None,
+            "desired_generation": node.desired_generation,
+            "observed_generation": observation.get("observed_generation") if obs is not None else None,
+            "observed_at": _iso(obs.updated_at) if obs is not None and obs.updated_at else None,
+            "created_at": _iso(node.created_at) if node.created_at else None,
+            "engines": {
+                "total": len(engines),
+                "ready": by_phase.get("Ready", 0),
+                "failed": sum(n for p, n in by_phase.items() if p in self._FAILED_PHASES),
+                "by_phase": by_phase,
+            },
+            "capacity": {
+                "devices": len(alloc),
+                "allocatable_vram_bytes": sum(alloc.values()),
+                "free_ports": cap.get("free_ports"),
+                "running_engines": cap.get("running_engines"),
+                "queue_depth": cap.get("queue_depth"),
+                "held_artifacts": len(cap.get("held_artifacts", []) or []),
+            } if cap else None,
+        }
+
+    def list_nodes(self, workspace_id: Optional[str] = None) -> list[dict]:
+        with self._sf() as s:
+            nodes = list(s.scalars(self._nodes_q(workspace_id).order_by(Node.created_at)))
+            return [self._node_summary(n, s.get(ObservationRow, n.node_id)) for n in nodes]
+
+    def node_detail(self, node_id: str, audit_limit: int = 50, workspace_id: Optional[str] = None) -> dict:
+        from cryptography import x509
+
+        with self._sf() as s:
+            node = self._scoped_node(s, node_id, workspace_id)
+            obs = s.get(ObservationRow, node_id)
+            detail = self._node_summary(node, obs)
+            cert: Optional[dict] = None
+            if node.certificate_pem:
+                try:
+                    c = x509.load_pem_x509_certificate(node.certificate_pem.encode())
+                    cert = {
+                        "serial": str(c.serial_number),
+                        "not_valid_before": _iso(c.not_valid_before_utc),
+                        "not_valid_after": _iso(c.not_valid_after_utc),
+                    }
+                except ValueError:
+                    cert = None
+            desired = s.scalar(
+                select(DesiredSnapshotRow).where(DesiredSnapshotRow.node_id == node_id)
+                .order_by(DesiredSnapshotRow.generation.desc())
+            )
+            stops = sorted(
+                r.engine_id for r in s.scalars(
+                    select(StopAuthorization).where(StopAuthorization.node_id == node_id)
+                )
+            )
+            events = s.scalars(
+                select(AuditEvent).where(AuditEvent.node_id == node_id)
+                .order_by(AuditEvent.id.desc()).limit(audit_limit)
+            )
+            detail.update({
+                "certificate": cert,
+                "observation": dict(obs.observation) if obs is not None else None,
+                "desired": {
+                    "generation": desired.generation,
+                    "created_at": _iso(desired.created_at) if desired.created_at else None,
+                    "snapshot": dict(desired.snapshot),
+                } if desired is not None else None,
+                "stop_authorized_engine_ids": stops,
+                "audit": [_audit_view(e) for e in events],
+            })
+            return detail
+
+    def list_claims(self, status: Optional[str] = None, workspace_id: Optional[str] = None) -> list[dict]:
+        with self._sf() as s:
+            q = select(Claim).order_by(Claim.created_at.desc())
+            if workspace_id is not None:
+                q = q.where(Claim.workspace_id == workspace_id)
+            if status:
+                q = q.where(Claim.status == status)
+            return [
+                {
+                    "claim_id": c.claim_id,
+                    "node_id": c.node_id,
+                    "status": c.status,
+                    "created_at": _iso(c.created_at) if c.created_at else None,
+                }
+                for c in s.scalars(q)
+            ]
+
+    def list_tokens(self, workspace_id: Optional[str] = None) -> list[dict]:
+        """Enrollment tokens by non-reversible reference (hash prefix) only."""
+        now = self._now()
+        with self._sf() as s:
+            out = []
+            q = select(EnrollmentToken)
+            if workspace_id is not None:
+                q = q.where(EnrollmentToken.workspace_id == workspace_id)
+            for t in s.scalars(q):
+                expired = t.expires_at is not None and now > _aware(t.expires_at)
+                out.append({
+                    "token_ref": t.token_hash[:12],
+                    "auto_approve": t.auto_approve,
+                    "status": "used" if t.used else ("expired" if expired else "active"),
+                    "expires_at": _iso(t.expires_at) if t.expires_at else None,
+                })
+            out.sort(key=lambda r: r["expires_at"] or "", reverse=True)
+            return out
+
+    def list_audit(
+        self, limit: int = 100, node_id: Optional[str] = None, workspace_id: Optional[str] = None
+    ) -> list[dict]:
+        limit = max(1, min(int(limit), 1000))
+        with self._sf() as s:
+            q = select(AuditEvent).order_by(AuditEvent.id.desc()).limit(limit)
+            if node_id:
+                q = q.where(AuditEvent.node_id == node_id)
+            if workspace_id is not None:
+                q = q.where(AuditEvent.workspace_id == workspace_id)
+            return [_audit_view(e) for e in s.scalars(q)]
+
+    def overview(self, workspace_id: Optional[str] = None) -> dict:
+        with self._sf() as s:
+            inc = self._incarnation(s)
+            s.commit()
+            incarnation, floor = inc.value, inc.epoch_floor
+            claims_q = select(Claim).where(Claim.status == "pending")
+            if workspace_id is not None:
+                claims_q = claims_q.where(Claim.workspace_id == workspace_id)
+            pending = len(list(s.scalars(claims_q)))
+        nodes = self.list_nodes(workspace_id)
+        projection = self.serving_projection(workspace_id)
+        by_status: dict[str, int] = {}
+        for n in nodes:
+            by_status[n["status"]] = by_status.get(n["status"], 0) + 1
+        return {
+            "incarnation": incarnation,
+            "epoch_floor": floor,
+            "nodes": {"total": len(nodes), "by_status": by_status},
+            "claims_pending": pending,
+            "engines": {
+                "total": sum(n["engines"]["total"] for n in nodes),
+                "ready": sum(n["engines"]["ready"] for n in nodes),
+                "failed": sum(n["engines"]["failed"] for n in nodes),
+            },
+            "allocatable_vram_bytes": sum(
+                n["capacity"]["allocatable_vram_bytes"] for n in nodes
+                if n["capacity"] is not None and n["status"] == "online"
+            ),
+            "routable_endpoints": sum(1 for p in projection if p["routable"]),
+            "settings": {
+                "lease_ttl_seconds": self._config.lease_ttl_seconds,
+                "heartbeat_interval_seconds": self._config.heartbeat_interval_seconds,
+                "cert_lifetime_hours": self._config.cert_lifetime_hours,
+                "require_mtls": self._config.require_mtls,
+            },
+        }
+
+
+def _audit_view(e: AuditEvent) -> dict:
+    return {
+        "id": e.id,
+        "node_id": e.node_id,
+        "actor": e.actor or "",
+        "kind": e.kind,
+        "detail": e.detail,
+        "created_at": _iso(e.created_at) if e.created_at else None,
+    }
+
+
+def _cert_pem_from_header(value: str) -> str:
+    """Normalize the edge-forwarded client certificate to PEM."""
+    text = urllib.parse.unquote(value).strip()
+    if "BEGIN CERTIFICATE" in text:
+        return text
+    try:
+        der = base64.b64decode(text, validate=True)
+    except (ValueError, binascii.Error) as e:
+        raise ValueError("unreadable client certificate header") from e
+    body = base64.encodebytes(der).decode().replace("\n", "")
+    lines = "\n".join(body[i:i + 64] for i in range(0, len(body), 64))
+    return f"-----BEGIN CERTIFICATE-----\n{lines}\n-----END CERTIFICATE-----\n"
 
 
 def _aware(d: datetime) -> datetime:

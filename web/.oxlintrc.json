@@ -1,0 +1,50 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "plugins": [
+    "react",
+    "typescript",
+    "oxc",
+    "vitest"
+  ],
+  "rules": {
+    "react/rules-of-hooks": "error",
+    "react/only-export-components": [
+      "warn",
+      {
+        "allowConstantExport": true
+      }
+    ],
+    "react/incompatible-library": "off"
+  },
+  "overrides": [
+    {
+      "files": [
+        "src/components/ui/**",
+        "src/providers/**",
+        "src/routes.tsx",
+        "src/components/**",
+        "src/pages/fleet/shared.tsx",
+        "src/hooks/**",
+        "src/main.tsx",
+        "src/cloud/app.tsx",
+        "src/cloud/session.tsx"
+      ],
+      "rules": {
+        "react/only-export-components": "off"
+      }
+    },
+    {
+      "files": [
+        "src/hooks/use-mobile.ts"
+      ],
+      "rules": {
+        "react/set-state-in-effect": "off"
+      }
+    }
+  ],
+  "ignorePatterns": [
+    "dist",
+    "node_modules",
+    "public/**"
+  ]
+}

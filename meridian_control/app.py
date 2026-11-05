@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from .ca import NodeCA
 from .config import ControlConfig
 from .db import make_session_factory
-from .routes import register_error_handler, router
+from .routes import admin_router, register_error_handler, router
 from .service import ControlService
 
 
@@ -29,7 +29,21 @@ def create_app(config: Optional[ControlConfig] = None, now: Optional[Callable] =
 
     app = FastAPI(title="meridian-control", version="0.1.0")
     app.state.control_service = service
+    if config.cors_origins:
+        from fastapi.middleware.cors import CORSMiddleware
+
+        app.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(config.cors_origins),
+            allow_methods=["GET", "POST"],
+            allow_headers=["content-type", "authorization"],
+        )
     app.include_router(router)
+    if config.legacy_admin_enabled:
+        app.include_router(admin_router)
+    app.state.control_config = config
+    if config.cloud:
+        _install_cloud(app, config, session_factory, now)
     register_error_handler(app)
 
     @app.get("/healthz")
@@ -37,3 +51,30 @@ def create_app(config: Optional[ControlConfig] = None, now: Optional[Callable] =
         return {"status": "ok"}
 
     return app
+
+
+def _install_cloud(app: FastAPI, config: ControlConfig, session_factory, now: Optional[Callable]) -> None:
+    """Meridian Cloud: accounts, workspaces, gateway API and the console."""
+    import logging
+
+    from .accounts import AccountsService
+    from .mailer import make_mailer
+    from .security import load_or_create_secret
+    from .web import install_cloud
+
+    if config.signup not in ("open", "invite"):
+        raise ValueError("MERIDIAN_CONTROL_SIGNUP must be 'open' or 'invite'")
+    mailer = make_mailer(config)
+    if mailer.kind == "console":
+        logging.getLogger("meridian_control").warning(
+            "No SMTP configured: sign-in codes are only logged (development mode). "
+            "Set MERIDIAN_CONTROL_SMTP_HOST before inviting real users."
+        )
+    secret = load_or_create_secret(config.secret_key, config.ca_dir)
+    app.state.mailer = mailer
+    app.state.accounts = (
+        AccountsService(session_factory, config, mailer, secret, now=now)
+        if now is not None
+        else AccountsService(session_factory, config, mailer, secret)
+    )
+    install_cloud(app, config)

@@ -1,0 +1,61 @@
+# Meridian Cloud edge — TLS for the console/API and mTLS for GPU nodes.
+#
+# Tailscale Funnel forwards raw TCP (TLS untouched) from the internet:
+#   https://$MERIDIAN_HOST       (443)  → 127.0.0.1:8441  console, /api, /auth, gateways
+#   https://$MERIDIAN_HOST:8443  (8443) → 127.0.0.1:8442  node agents (client certificates)
+# Caddy terminates TLS with the *.ts.net certificate it fetches from the local
+# tailscaled, and proxies to meridian-control on 127.0.0.1:8090.
+{
+	# Only Funnel (via localhost) can reach this edge.
+	default_bind 127.0.0.1
+	# Certificates come from tailscaled; there is no port 80 to redirect.
+	auto_https disable_redirects
+	servers {
+		# Funnel prepends a PROXY v2 header so per-IP sign-in limits see the
+		# real client address. Connections without one still work.
+		listener_wrappers {
+			proxy_protocol {
+				allow 127.0.0.1/32
+			}
+			tls
+		}
+	}
+}
+
+# Console, accounts and gateway API.
+{$MERIDIAN_HOST}:8441 {
+	encode zstd gzip
+
+	# Node-protocol calls belong on :8443 where client certificates are verified.
+	@nodes path /control/v1/*
+	respond @nodes "use the node endpoint on port 8443" 421
+
+	reverse_proxy 127.0.0.1:8090 {
+		# A certificate in this header would be trusted as a node identity:
+		# never let a browser or gateway supply one.
+		header_up -X-Client-Cert
+	}
+}
+
+# GPU node agents. TLS client certificates issued by the Meridian node CA.
+{$MERIDIAN_HOST}:8442 {
+	tls {
+		client_auth {
+			# Enrollment happens before a node has a certificate; every other
+			# call is re-verified by meridian-control (REQUIRE_MTLS=1).
+			mode verify_if_given
+			trust_pool file /etc/caddy/node-ca.pem
+		}
+	}
+
+	@node path /control/v1/* /healthz
+	handle @node {
+		reverse_proxy 127.0.0.1:8090 {
+			# Overwrites anything the client sent; empty when no certificate.
+			header_up X-Client-Cert {http.request.tls.client.certificate_der_base64}
+		}
+	}
+	handle {
+		respond "not found" 404
+	}
+}
