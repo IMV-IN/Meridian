@@ -18,9 +18,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Every Python that is still supported upstream (3.10 reached end of
-        # life in October 2026). Keep in step with requires-python.
-        python-version: ["3.11", "3.12", "3.13", "3.14", "3.15"]
+        # From the oldest supported Python (requires-python; 3.10 reached end
+        # of life in October 2026) up to 3.14, the version everything runs on.
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       # Retry checkout once — GitHub occasionally returns Service Unavailable resolving actions.

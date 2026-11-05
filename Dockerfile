@@ -14,9 +14,9 @@ COPY web/ ./
 RUN npm run build
 
 
-# Python 3.14: the newest release with prebuilt wheels for every runtime
-# dependency on amd64 and arm64 (PyYAML has none for 3.15 yet, and this slim
-# image has no compiler). CI also tests 3.15; move up once those wheels ship.
+# Python 3.14 is the project's runtime everywhere (images, CI, docs). 3.15 is
+# not used yet: PyYAML has no prebuilt 3.15 wheels and this slim image has no
+# compiler.
 FROM python:3.14-slim-trixie AS builder
 
 WORKDIR /build
