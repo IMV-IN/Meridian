@@ -1,0 +1,75 @@
+# Meridian Cloud on one small machine (Arduino UNO Q, Raspberry Pi, a Linux
+# laptop, or an Oracle Cloud Always Free VM) published with Tailscale Funnel.
+# Full guide: docs/CLOUD.md
+#
+#   cp .env.example .env && $EDITOR .env
+#   sudo install -d -o 10002 -g 10002 data
+#   docker compose run --rm migrate      # DB + node CA (before Caddy mounts it)
+#   docker compose up -d
+#   ./funnel.sh on
+#
+# Host networking keeps everything on 127.0.0.1; only Funnel exposes it.
+name: meridian-cloud
+
+x-control: &control
+  image: ghcr.io/imv-in/meridian-control:${MERIDIAN_VERSION:-latest}
+  # Used when the tag isn't published (or with `docker compose build`).
+  build:
+    context: ../..
+    dockerfile: deploy/control/Dockerfile
+  network_mode: host
+  env_file: .env
+  environment:
+    MERIDIAN_CONTROL_CLOUD: "1"
+    MERIDIAN_CONTROL_PUBLIC_URL: https://${MERIDIAN_HOST:?set MERIDIAN_HOST in .env}
+    MERIDIAN_CONTROL_NODE_URL: https://${MERIDIAN_HOST}:8443
+    MERIDIAN_CONTROL_DB_URL: sqlite:////var/lib/meridian-control/control.db
+    MERIDIAN_CONTROL_CA_DIR: /var/lib/meridian-control/ca
+    # Node calls must present a certificate, verified by Caddy and re-checked here.
+    MERIDIAN_CONTROL_REQUIRE_MTLS: "1"
+    # Caddy (the only client) sets X-Forwarded-For to the real client address.
+    MERIDIAN_CONTROL_TRUST_PROXY_HEADERS: "1"
+  volumes:
+    # Database, node CA and session key. Back this directory up.
+    - ./data:/var/lib/meridian-control
+
+services:
+  migrate:
+    <<: *control
+    command: ["migrate"]
+    restart: "no"
+
+  control:
+    <<: *control
+    command: ["run", "--host", "127.0.0.1", "--port", "8090"]
+    restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/healthz', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  caddy:
+    image: caddy:2.10
+    network_mode: host
+    restart: unless-stopped
+    environment:
+      MERIDIAN_HOST: ${MERIDIAN_HOST}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Only the CA *certificate* — the CA key stays with meridian-control.
+      - ./data/ca/ca_cert.pem:/etc/caddy/node-ca.pem:ro
+      # Caddy fetches the *.ts.net certificate from the host's tailscaled.
+      - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
+      - caddy-data:/data
+      - caddy-config:/config
+
+volumes:
+  caddy-data:
+  caddy-config:

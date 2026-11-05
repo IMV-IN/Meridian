@@ -4,6 +4,33 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Meridian Cloud** (`meridian-control` with `MERIDIAN_CONTROL_CLOUD=1`):
+  accounts with **Sign in with Google** (authorization code + PKCE, state,
+  nonce) and **6-digit email codes** (HMAC-stored, attempt- and rate-limited,
+  no account enumeration); server-side sessions in `__Host-` HttpOnly cookies
+  with CSRF header enforcement; **workspaces** with viewer / operator / admin /
+  owner roles, invitations and last-owner protection; workspace-scoped fleet
+  API (`/api/w/{id}/…`) with an actor on every audit event. API-key sign-in is
+  unchanged for self-hosted gateways. See [`docs/CLOUD.md`](docs/CLOUD.md).
+- **Hybrid gateways**: a workspace **gateway token** (`mgw_…`) lets a gateway
+  pull its workspace's serving projection and send a metadata-only health
+  report every 15 s (`control_plane.token` / `MERIDIAN_CLOUD_TOKEN`,
+  `report_interval_s`, `gateway_name`, `gateway_id`). Prompts never leave the
+  customer network. Default gateway identity is `hostname:port`.
+- Console **cloud mode**: detected at boot; sign-in, onboarding, workspace
+  switcher, gateways list/detail with a connect wizard, members and
+  invitations, gateway tokens, account sessions, and the fleet pages scoped to
+  the workspace. The theme bootstrap is now an external script so the console
+  runs under `script-src 'self'`.
+- **Free hosting kit** (`deploy/cloud/`): Docker Compose (control plane +
+  Caddy) for arm64/amd64, Tailscale Funnel raw-TCP publishing with PROXY v2,
+  node mTLS at the edge (Caddy `client_auth`, base64 DER header accepted by
+  meridian-control), daily backup script. `meridian-control backup` (online
+  SQLite backup) and `migrate` now also initialises the node CA. The release
+  workflow publishes multi-arch `ghcr.io/<owner>/meridian-control` images with
+  the console built in.
+- `scripts/console_demo.py --cloud`: local Meridian Cloud with a dev mail
+  outbox, a seeded workspace, simulated GPU nodes and two reporting gateways.
 - **Operator console** (`web/`, served at `/ui`): a React + TypeScript +
   shadcn/ui application replacing the single-file dashboard (which remains the
   fallback when the console is not built). It covers live overview, request

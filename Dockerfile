@@ -4,7 +4,7 @@
 # - Runtime: Debian trixie slim + security upgrades; strip base-image packaging
 #   tools so Trivy does not report HIGH CVEs from pip/wheel left on the PATH.
 
-FROM node:22-slim AS console
+FROM --platform=$BUILDPLATFORM node:22-slim AS console
 
 WORKDIR /src/web
 COPY web/package.json web/package-lock.json ./

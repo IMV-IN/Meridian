@@ -14,6 +14,11 @@ managed by `meridian-control`.
 > (`/meridian/*`, `/v1/*`, `/metrics`, and `meridian-control`'s `/admin/*`).
 > It adds no privileges of its own. Every permission is enforced server-side.
 
+> **Meridian Cloud.** The same console also runs in *cloud mode*, served by
+> `meridian-control` with accounts (Google / email codes), workspaces and
+> connected gateways instead of API-key sign-in. It switches automatically
+> when `/api/cloud/info` answers. See [`CLOUD.md`](CLOUD.md).
+
 ## Open it
 
 | How you run Meridian | Console |

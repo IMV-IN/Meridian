@@ -71,7 +71,10 @@ def _install_cloud(app: FastAPI, config: ControlConfig, session_factory, now: Op
             "Set MERIDIAN_CONTROL_SMTP_HOST before inviting real users."
         )
     secret = load_or_create_secret(config.secret_key, config.ca_dir)
-    kwargs = {"now": now} if now is not None else {}
     app.state.mailer = mailer
-    app.state.accounts = AccountsService(session_factory, config, mailer, secret, **kwargs)
+    app.state.accounts = (
+        AccountsService(session_factory, config, mailer, secret, now=now)
+        if now is not None
+        else AccountsService(session_factory, config, mailer, secret)
+    )
     install_cloud(app, config)

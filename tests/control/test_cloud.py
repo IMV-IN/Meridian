@@ -374,3 +374,17 @@ def test_der_base64_client_cert_header_is_accepted(tmp_path, clock):
     assert c.post(path, json={"agent_session_id": "s1"}).status_code == 401
     ok = c.post(path, json={"agent_session_id": "s1"}, headers={"x-client-cert": base64.b64encode(der).decode()})
     assert ok.status_code == 200, ok.text
+
+
+def test_migrate_initialises_the_node_ca(tmp_path, monkeypatch, capsys):
+    """The TLS edge loads ca_cert.pem for client_auth before the first `run`."""
+    from meridian_control.cli import main
+
+    monkeypatch.setenv("MERIDIAN_CONTROL_DB_URL", f"sqlite:///{tmp_path}/control.db")
+    monkeypatch.setenv("MERIDIAN_CONTROL_CA_DIR", str(tmp_path / "ca"))
+    assert main(["migrate"]) == 0
+    assert (tmp_path / "ca" / "ca_cert.pem").read_text().startswith("-----BEGIN CERTIFICATE-----")
+    first = (tmp_path / "ca" / "ca_cert.pem").read_bytes()
+    assert main(["migrate"]) == 0  # idempotent: the CA is never regenerated
+    assert (tmp_path / "ca" / "ca_cert.pem").read_bytes() == first
+    assert "node CA ready" in capsys.readouterr().out

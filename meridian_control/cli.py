@@ -29,12 +29,18 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     if args.command == "migrate":
+        from .ca import NodeCA
         from .config import ControlConfig
         from .db import run_migrations
 
-        db_url = ControlConfig.from_env().db_url
-        run_migrations(db_url)
-        print(f"migrated {db_url} to head")
+        cfg = ControlConfig.from_env()
+        run_migrations(cfg.db_url)
+        print(f"migrated {cfg.db_url} to head")
+        # Create the node CA up front so a TLS edge that verifies node client
+        # certificates (Caddy `client_auth`) can load ca_cert.pem before the
+        # server's first start.
+        NodeCA.load_or_create(cfg.ca_dir)
+        print(f"node CA ready: {cfg.ca_dir / 'ca_cert.pem'}")
         return 0
 
     if args.command == "run":

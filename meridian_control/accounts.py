@@ -308,7 +308,7 @@ class AccountsService:
         ]
         if not all(checks):
             raise err("GOOGLE_BAD_TOKEN", "Google identity could not be verified", 400)
-        return claims
+        return dict(claims)
 
     # ---------------------------------------------------------------- sessions
     def _upsert_user(self, s, *, email: str, name: str, avatar: str, google_sub: Optional[str]) -> User:
@@ -499,7 +499,7 @@ class AccountsService:
                 raise err("NOT_FOUND", "workspace not found", 404)
             if ROLE_RANK[m.role] < ROLE_RANK[minimum]:
                 raise err("FORBIDDEN", f"requires the {minimum} role or higher", 403)
-            return m.role
+            return str(m.role)
 
     def workspace(self, workspace_id: str, role: str) -> dict:
         with self._sf() as s:

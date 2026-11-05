@@ -1,6 +1,7 @@
-# meridian-control image (the node control plane). Separate deployable from the
-# gateway image at the repo root. Runs the control-plane HTTP server; apply
-# Alembic migrations first (`meridian-control migrate`) as an init step.
+# meridian-control image (the node control plane, and Meridian Cloud when
+# MERIDIAN_CONTROL_CLOUD=1). Separate deployable from the gateway image at the
+# repo root. Runs the control-plane HTTP server; apply Alembic migrations first
+# (`meridian-control migrate`) as an init step. Multi-arch (amd64 + arm64).
 #
 #   docker build -f deploy/control/Dockerfile -t meridian-control .
 #   docker run -e MERIDIAN_CONTROL_DB_URL=postgresql+psycopg://... \
@@ -8,6 +9,17 @@
 #              -v meridian-ca:/var/lib/meridian-control/ca \
 #              meridian-control migrate
 #   docker run ... meridian-control run --host 0.0.0.0 --port 8443
+# The console (web/) is served by the control plane in cloud mode.
+FROM --platform=$BUILDPLATFORM node:22-slim AS console
+
+WORKDIR /src/web
+COPY web/package.json web/package-lock.json ./
+RUN npm ci --no-audit --no-fund
+COPY web/ ./
+# vite.config.ts writes to ../meridian/ui/dist → /src/meridian/ui/dist
+RUN npm run build
+
+
 FROM python:3.12-slim-trixie AS builder
 
 WORKDIR /build
@@ -16,6 +28,7 @@ RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/
 COPY pyproject.toml README.md ./
 COPY meridian/ meridian/
 COPY meridian_control/ meridian_control/
+COPY --from=console /src/meridian/ui/dist meridian/ui/dist
 
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade "pip>=26.1.2" \

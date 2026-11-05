@@ -33,15 +33,18 @@ mimetypes.add_type("image/svg+xml", ".svg")
 
 
 def _cfg(request: Request) -> ControlConfig:
-    return request.app.state.control_config
+    value: ControlConfig = request.app.state.control_config
+    return value
 
 
 def _acc(request: Request) -> AccountsService:
-    return request.app.state.accounts
+    value: AccountsService = request.app.state.accounts
+    return value
 
 
 def _svc(request: Request) -> ControlService:
-    return request.app.state.control_service
+    value: ControlService = request.app.state.control_service
+    return value
 
 
 def session_cookie_name(cfg: ControlConfig) -> str:
