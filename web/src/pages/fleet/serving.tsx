@@ -20,6 +20,7 @@ import { useControl, useControlOverview, useCrl, useNodes, useProjection, useSta
 import type { PlacementResult, ProjectionEndpoint } from "@/lib/api/types"
 import { formatBytes, shortId } from "@/lib/format"
 import { useAuth } from "@/providers/auth-provider"
+import { useMode } from "@/providers/mode-provider"
 
 import { ControlGate } from "./shared"
 
@@ -181,6 +182,9 @@ export default function ServingPage() {
   const status = useStatus()
   const nodes = useNodes()
   const { can } = useAuth()
+  // Meridian Cloud has no local gateway: hide gateway-sync columns and the
+  // restore runbook (a CLI step against the database in Cloud).
+  const cloud = useMode().mode === "cloud"
   const registered = useMemo(() => new Set((status.data?.backends ?? []).map((b) => b.name)), [status.data])
   const nodeName = useMemo(() => new Map((nodes.data ?? []).map((n) => [n.node_id, n.display_name])), [nodes.data])
   const eps = projection.data ?? []
@@ -208,7 +212,7 @@ export default function ServingPage() {
           </StatusBadge>
         ),
       },
-      {
+      ...(cloud ? [] : [{
         id: "gateway",
         header: "This gateway",
         accessorFn: (e) => registered.has(`managed:${e.node_id}:${e.engine_id}`),
@@ -231,9 +235,9 @@ export default function ServingPage() {
             )
           )
         },
-      },
+      } satisfies ColumnDef<ProjectionEndpoint, unknown>]),
     ],
-    [registered, nodeName, can],
+    [registered, nodeName, can, cloud],
   )
 
   const routable = eps.filter((e) => e.routable).length
@@ -244,12 +248,14 @@ export default function ServingPage() {
       title="Serving & placement"
       description="The serving projection is the control plane's verdict on which managed engines may receive traffic. Gateways poll it and register routable engines as backends."
     >
-      <div className="grid gap-4 sm:grid-cols-3">
+      <div className={cloud ? "grid gap-4 sm:grid-cols-2" : "grid gap-4 sm:grid-cols-3"}>
         <StatCard label="Ready endpoints" icon={Waypoints} value={eps.length} hint="engines reporting Ready with an endpoint" loading={projection.isLoading} />
         <StatCard label="Routable" value={routable} tone={routable === eps.length ? "good" : "warning"} hint="valid lease and not revoked" loading={projection.isLoading} />
-        <StatCard label="Registered in this gateway" value={synced} tone={synced < routable ? "warning" : "neutral"} hint="managed backends after projection sync" loading={projection.isLoading} />
+        {!cloud && (
+          <StatCard label="Registered in this gateway" value={synced} tone={synced < routable ? "warning" : "neutral"} hint="managed backends after projection sync" loading={projection.isLoading} />
+        )}
       </div>
-      <Panel title="Serving projection" description="GET /admin/projection">
+      <Panel title="Serving projection" description={cloud ? "What connected gateways pull every few seconds" : "GET /admin/projection"}>
         <DataTable
           columns={columns}
           data={eps}
@@ -284,7 +290,7 @@ export default function ServingPage() {
               </Table>
             )}
           </Panel>
-          <RestorePanel />
+          {!cloud && <RestorePanel />}
         </div>
       </div>
     </ControlGate>

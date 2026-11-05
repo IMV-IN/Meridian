@@ -34,7 +34,7 @@ const HIGHLIGHTS = [
   { icon: ShieldCheck, title: "Governance built in", body: "Keys, budgets, rate limits, PII and cost attribution." },
 ]
 
-function BrandPanel() {
+export function BrandPanel() {
   return (
     <div className="relative hidden overflow-hidden bg-brand-ink text-[#f4f8ee] lg:flex lg:flex-col lg:justify-between lg:p-12">
       <div

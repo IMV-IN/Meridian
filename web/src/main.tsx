@@ -1,44 +1,60 @@
 import "./index.css"
 
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { StrictMode } from "react"
+import { QueryClientProvider, type QueryClient } from "@tanstack/react-query"
+import { StrictMode, type ReactNode } from "react"
 import { createRoot } from "react-dom/client"
 import { RouterProvider } from "react-router"
 
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
+import { makeQueryClient } from "@/lib/query-client"
 import { AuthProvider } from "@/providers/auth-provider"
 import { SettingsProvider } from "@/providers/settings-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
 
+import { detectCloud, type CloudInfo } from "./cloud/api"
 import { createRouter } from "./routes"
 
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      staleTime: 1_000,
-      refetchOnWindowFocus: false,
-      // Live views pause in background tabs; no point polling hidden pages.
-      refetchIntervalInBackground: false,
-    },
-  },
-})
-
-const router = createRouter()
-
-createRoot(document.getElementById("root")!).render(
-  <StrictMode>
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <SettingsProvider>
-          <AuthProvider>
+function Frame({ client, children }: { client: QueryClient; children: ReactNode }) {
+  return (
+    <StrictMode>
+      <ThemeProvider>
+        <QueryClientProvider client={client}>
+          <SettingsProvider>
             <TooltipProvider delayDuration={250}>
-              <RouterProvider router={router} />
+              {children}
               <Toaster position="bottom-right" closeButton />
             </TooltipProvider>
-          </AuthProvider>
-        </SettingsProvider>
-      </QueryClientProvider>
-    </ThemeProvider>
-  </StrictMode>,
-)
+          </SettingsProvider>
+        </QueryClientProvider>
+      </ThemeProvider>
+    </StrictMode>
+  )
+}
+
+async function boot() {
+  const root = createRoot(document.getElementById("root")!)
+  const info: CloudInfo | null = await detectCloud()
+  if (info) {
+    // Meridian Cloud: accounts + workspaces; loaded on demand so the
+    // self-hosted console bundle stays unchanged.
+    const [{ CloudSessionProvider }, { createCloudRouter }] = await Promise.all([import("./cloud/session"), import("./cloud/app")])
+    root.render(
+      <Frame client={makeQueryClient({ cloud: true })}>
+        <CloudSessionProvider info={info}>
+          <RouterProvider router={createCloudRouter()} />
+        </CloudSessionProvider>
+      </Frame>,
+    )
+    return
+  }
+  root.render(
+    <Frame client={makeQueryClient()}>
+      <AuthProvider>
+        <RouterProvider router={createRouter()} />
+      </AuthProvider>
+    </Frame>,
+  )
+}
+
+void boot()

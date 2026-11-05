@@ -39,7 +39,7 @@ const STEPS = [
 ]
 
 function MintPanel({ autoOpen }: { autoOpen: boolean }) {
-  const { api, baseUrl } = useControl()
+  const { api, baseUrl, nodeUrl } = useControl()
   const qc = useQueryClient()
   const [auto, setAuto] = useState(false)
   const [ttl, setTtl] = useState("3600")
@@ -78,7 +78,7 @@ function MintPanel({ autoOpen }: { autoOpen: boolean }) {
             <CodeBlock
               language="shell"
               code={`export MERIDIAN_NODE_TOKEN='<paste token>'
-# config: control_plane_url: ${baseUrl}
+# /etc/meridian-node/config.yaml → control_plane_url: ${nodeUrl}
 meridian-node --config /etc/meridian-node/config.yaml check-config
 meridian-node --config /etc/meridian-node/config.yaml run`}
             />

@@ -18,7 +18,7 @@ import type { Capabilities, Features, Identity, WhoAmI } from "@/lib/api/types"
 
 export type AuthPhase = "loading" | "unreachable" | "signed-out" | "ready"
 
-interface AuthContextValue {
+export interface AuthContextValue {
   phase: AuthPhase
   whoami: WhoAmI | null
   identity: Identity | null
@@ -44,7 +44,7 @@ const NO_FEATURES: Features = {
   pii: false,
 }
 
-const AuthContext = createContext<AuthContextValue | null>(null)
+export const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const qc = useQueryClient()

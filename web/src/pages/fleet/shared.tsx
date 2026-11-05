@@ -9,12 +9,14 @@ import { Button } from "@/components/ui/button"
 import { useConfig, useControl, useControlOverview } from "@/hooks/queries"
 import type { NodeStatus } from "@/lib/api/types"
 import { formatRelative } from "@/lib/format"
+import { useMode } from "@/providers/mode-provider"
 
 /** Renders children only when a control-plane URL is configured and reachable. */
 export function ControlGate({ title, description, actions, children }: { title: string; description: ReactNode; actions?: ReactNode; children: ReactNode }) {
   const { api, baseUrl } = useControl()
   const overview = useControlOverview()
   const config = useConfig()
+  const cloud = useMode().mode === "cloud"
   if (!api) {
     const suggested = config.data?.control_plane.enabled ? config.data.control_plane.url : null
     return (
@@ -49,7 +51,8 @@ export function ControlGate({ title, description, actions, children }: { title: 
     return (
       <Page>
         <PageHeader title={title} description={description} />
-        <ErrorState error={overview.error} title={`Can't reach ${baseUrl}`} onRetry={() => overview.refetch()} />
+        <ErrorState error={overview.error} title={cloud ? "Couldn't load the fleet" : `Can't reach ${baseUrl}`} onRetry={() => overview.refetch()} />
+        {!cloud && (
         <p className="text-center text-sm text-muted-foreground">
           Check the URL and CORS in{" "}
           <Link className="underline underline-offset-2" to="/settings?tab=control">
@@ -57,6 +60,7 @@ export function ControlGate({ title, description, actions, children }: { title: 
           </Link>
           .
         </p>
+        )}
       </Page>
     )
   }

@@ -24,7 +24,10 @@
         "src/routes.tsx",
         "src/components/**",
         "src/pages/fleet/shared.tsx",
-        "src/hooks/**"
+        "src/hooks/**",
+        "src/main.tsx",
+        "src/cloud/app.tsx",
+        "src/cloud/session.tsx"
       ],
       "rules": {
         "react/only-export-components": "off"
@@ -41,6 +44,7 @@
   ],
   "ignorePatterns": [
     "dist",
-    "node_modules"
+    "node_modules",
+    "public/**"
   ]
 }

@@ -8,15 +8,7 @@
     <meta name="referrer" content="no-referrer" />
     <meta name="description" content="Meridian operator console — routing, health, governance and fleet control for self-hosted inference." />
     <title>Meridian Console</title>
-    <script>
-      // Apply the saved theme before first paint (no light/dark flash).
-      try {
-        var t = localStorage.getItem("meridian.console.theme") || "system";
-        var d = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
-        document.documentElement.classList.toggle("dark", d);
-        document.documentElement.style.colorScheme = d ? "dark" : "light";
-      } catch (e) {}
-    </script>
+    <script src="/theme-init.js"></script>
   </head>
   <body>
     <div id="root"></div>

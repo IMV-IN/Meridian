@@ -7,6 +7,9 @@ import { defineConfig } from 'vite'
 // `npm run build` writes straight into the Python package so the gateway
 // (and the Docker image) pick it up without a copy step.
 const GATEWAY = process.env.MERIDIAN_GATEWAY_URL ?? 'http://127.0.0.1:8080'
+// Set to develop the Meridian Cloud console against `meridian-control` in
+// cloud mode (it serves /api and /auth; the console detects it at boot).
+const CLOUD = process.env.MERIDIAN_CLOUD_URL
 
 export default defineConfig({
   base: '/ui/',
@@ -37,6 +40,7 @@ export default defineConfig({
       '/meridian': GATEWAY,
       '/v1': GATEWAY,
       '/metrics': GATEWAY,
+      ...(CLOUD ? { '/api': CLOUD, '/auth': CLOUD } : {}),
     },
   },
   test: {

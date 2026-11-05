@@ -1,12 +1,13 @@
 import { keepPreviousData, useQuery } from "@tanstack/react-query"
 import { useMemo } from "react"
 
-import { ApiError } from "@/lib/api/client"
 import { controlApi, type ControlApi } from "@/lib/api/control"
 import { gateway } from "@/lib/api/gateway"
 import type { UsageQuery } from "@/lib/api/types"
 import { parsePrometheus } from "@/lib/prometheus"
+import { retryTransient } from "@/lib/query-client"
 import { useAuth } from "@/providers/auth-provider"
+import { useMode } from "@/providers/mode-provider"
 import { useSettings } from "@/providers/settings-provider"
 
 export const qk = {
@@ -22,9 +23,7 @@ export const qk = {
   control: (base: string) => ["control", base] as const,
 }
 
-// 401/403 are answers, not transient failures — don't hammer them.
-const retry = (count: number, err: unknown) =>
-  !(err instanceof ApiError && (err.isUnauthorized || err.isForbidden || err.isNotFound)) && count < 2
+const retry = retryTransient
 
 export function useStatus() {
   const { interval } = useSettings()
@@ -132,12 +131,23 @@ export function useUsage(q: UsageQuery, enabled = true) {
 
 // ── Control plane ─────────────────────────────────────────────────────────
 
-/** The control-plane client, or null when no URL is configured. */
-export function useControl(): { api: ControlApi | null; baseUrl: string } {
+export const CLOUD_HEADERS = { "X-Meridian-CSRF": "1" }
+
+/**
+ * The control-plane client, or null when no URL is configured. In Meridian
+ * Cloud it is the current workspace's session-authenticated API.
+ */
+export function useControl(): { api: ControlApi | null; baseUrl: string; nodeUrl: string } {
   const { settings } = useSettings()
-  const baseUrl = settings.controlPlaneUrl.trim()
-  const api = useMemo(() => (baseUrl ? controlApi(baseUrl) : null), [baseUrl])
-  return { api, baseUrl }
+  const mode = useMode()
+  const cloudWs = mode.mode === "cloud" ? mode.workspaceId : undefined
+  const configured = settings.controlPlaneUrl.trim()
+  const baseUrl = cloudWs ? `${window.location.origin}/api/w/${cloudWs}` : configured
+  const api = useMemo(() => {
+    if (cloudWs) return controlApi("", { prefix: `/api/w/${encodeURIComponent(cloudWs)}`, headers: CLOUD_HEADERS })
+    return configured ? controlApi(configured) : null
+  }, [cloudWs, configured])
+  return { api, baseUrl, nodeUrl: (cloudWs ? mode.nodeUrl : undefined) || baseUrl }
 }
 
 function useControlQuery<T>(
