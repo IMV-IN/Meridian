@@ -19,6 +19,15 @@ http://127.0.0.1:5173/ui (proxied to this gateway).
 
     python scripts/console_demo.py [--no-traffic] [--port 8080]
 
+With ``--cloud`` it runs Meridian Cloud instead: meridian-control in cloud
+mode (accounts, workspaces) serving the console at http://127.0.0.1:8443/ui,
+a demo account signed in through the email-code flow, a workspace with
+enrolled GPU nodes, and two gateways connected with a workspace token and
+reporting metadata-only health. Sign-in codes are printed here (dev outbox;
+no SMTP or Google account needed).
+
+    python scripts/console_demo.py --cloud
+
 Requires: pip install -e ".[dev,control]". Ctrl-C stops everything.
 """
 
@@ -29,6 +38,7 @@ import base64
 import json
 import os
 import random
+import re
 import signal
 import subprocess
 import sys
@@ -39,7 +49,7 @@ import urllib.error
 import urllib.request
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Callable, Optional
 
 ROOT = Path(__file__).resolve().parent.parent
 
@@ -149,7 +159,8 @@ def write_config(tmp: Path, port: int, control_port: int) -> Path:
 class Node:
     """Simulated meridian-node agent speaking the v1 control protocol."""
 
-    def __init__(self, base: str, hostname: str, devices: dict, engines: list, auto_approve: bool = True):
+    def __init__(self, base: str, hostname: str, devices: dict, engines: list, mint: Callable[[bool], str],
+                 auto_approve: bool = True):
         from cryptography.hazmat.primitives import serialization
         from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
@@ -161,7 +172,7 @@ class Node:
         self.seq = 0
         self.epoch = 0
         self.node_id: Optional[str] = None
-        token = _http("POST", f"{base}/admin/tokens", {"auto_approve": auto_approve})["token"]
+        token = mint(auto_approve)
         resp = _http("POST", f"{base}/control/v1/enroll",
                      {"node_public_key": self.pub, "host_claims": {"hostname": hostname}},
                      {"Authorization": f"Bearer {token}"})
@@ -194,26 +205,26 @@ class Node:
         })
 
 
-def seed_control(base: str) -> list:
+def seed_control(base: str, mint: Callable[[bool], str], desired: Callable[[str, dict], Any]) -> list:
     gib = 2**30
     a = Node(base, "gpu-host-a", {"GPU-a0": 18 * gib, "GPU-a1": 22 * gib}, [
         {"engine_id": "eng-qwen-a", "phase": "Ready", "endpoint": "http://127.0.0.1:9105", "model": "demo-model",
          "loaded_artifact_digest": "sha256:" + "ab" * 32},
         {"engine_id": "eng-llama-a", "phase": "Warming", "model": "llama-3.1-8b"},
-    ])
+    ], mint)
     b = Node(base, "gpu-host-b", {"GPU-b0": 6 * gib, "GPU-b1": 30 * gib, "GPU-b2": 30 * gib, "GPU-b3": 2 * gib}, [
         {"engine_id": "eng-mistral-b", "phase": "Ready", "endpoint": "http://10.20.0.12:8000",
          "model": "mistral-7b", "loaded_artifact_digest": "sha256:" + "cd" * 32},
         {"engine_id": "eng-embed-b", "phase": "Failed", "model": "bge-m3", "restart_count": 5,
          "reason": "CrashLoopBackOff"},
-    ])
+    ], mint)
     stale = Node(base, "gpu-host-c", {"GPU-c0": 40 * gib}, [
         {"engine_id": "eng-qwen-c", "phase": "Ready", "endpoint": "http://10.20.0.13:8000", "model": "demo-model"},
-    ])
+    ], mint)
     stale.beat()  # one heartbeat, then silence → lease lapses after the TTL
-    Node(base, "gpu-host-d", {}, [], auto_approve=False)  # stays a pending claim
+    Node(base, "gpu-host-d", {}, [], mint, auto_approve=False)  # stays a pending claim
     if a.node_id:
-        _http("POST", f"{base}/admin/nodes/{a.node_id}/desired", {
+        desired(a.node_id, {
             "node_id": a.node_id, "generation": 1, "snapshot_hash": "sha256:" + "11" * 32,
             "assignments": [{"engine_id": "eng-qwen-a", "desired_phase": "Running",
                              "engine": {"kind": "vllm", "version": "0.10.2"},
@@ -277,11 +288,99 @@ def traffic_loop(gateway: str, stop: threading.Event) -> None:
         stop.wait(random.uniform(0.15, 0.6))
 
 
+# ── Meridian Cloud mode ────────────────────────────────────────────────────
+
+DEMO_EMAIL = "demo@meridian.local"
+_CODE = re.compile(r"\b(\d{6})\b")
+
+
+def _outbox_code(outbox: Path, email: str, after: float, timeout: float = 15.0) -> str:
+    """The newest sign-in code mailed to ``email`` (dev outbox, no SMTP)."""
+    deadline = time.time() + timeout
+    tag = email.replace("@", "_at_")
+    while time.time() < deadline:
+        for f in sorted(outbox.glob(f"*-{tag}.json"), reverse=True):
+            if f.stat().st_mtime >= after:
+                m = _CODE.search(json.loads(f.read_text())["subject"])
+                if m:
+                    return m.group(1)
+        time.sleep(0.2)
+    raise RuntimeError(f"no sign-in code for {email} in {outbox}")
+
+
+class CloudSeeder:
+    """Signs in through the real email-code flow and seeds one workspace."""
+
+    def __init__(self, base: str, outbox: Path) -> None:
+        import httpx
+
+        # The session cookie is HttpOnly; httpx keeps it like a browser would.
+        self.c = httpx.Client(base_url=base, headers={"X-Meridian-CSRF": "1"}, timeout=10)
+        started = time.time() - 1
+        self.c.post("/auth/email/start", json={"email": DEMO_EMAIL}).raise_for_status()
+        code = _outbox_code(outbox, DEMO_EMAIL, started)
+        self.c.post("/auth/email/verify", json={"email": DEMO_EMAIL, "code": code}).raise_for_status()
+        self.c.patch("/api/me", json={"name": "Demo Operator"}).raise_for_status()
+        self.ws = self.c.post("/api/workspaces", json={"name": "Acme AI"}).json()["id"]
+        self.c.post(f"/api/w/{self.ws}/invitations", json={"email": "sam@acme.dev", "role": "operator"})
+
+    def mint(self, auto_approve: bool) -> str:
+        r = self.c.post(f"/api/w/{self.ws}/tokens", json={"auto_approve": auto_approve})
+        r.raise_for_status()
+        return r.json()["token"]
+
+    def desired(self, node_id: str, body: dict) -> None:
+        self.c.post(f"/api/w/{self.ws}/nodes/{node_id}/desired", json=body).raise_for_status()
+
+    def gateway_token(self, name: str) -> str:
+        r = self.c.post(f"/api/w/{self.ws}/gateway-tokens", json={"name": name})
+        r.raise_for_status()
+        return r.json()["token"]
+
+
+def outbox_watch(outbox: Path, stop: threading.Event) -> None:
+    """Print sign-in codes as the browser requests them."""
+    seen = {f.name for f in outbox.glob("*.json")}
+    while not stop.is_set():
+        for f in sorted(outbox.glob("*.json")):
+            if f.name in seen:
+                continue
+            seen.add(f.name)
+            try:
+                msg = json.loads(f.read_text())
+            except Exception:
+                continue
+            m = _CODE.search(msg.get("subject", ""))
+            what = f"sign-in code {m.group(1)}" if m else msg.get("subject", "")
+            print(f"[mail] to {msg.get('to')}: {what}", flush=True)
+        stop.wait(0.5)
+
+
+def write_edge_config(tmp: Path, port: int, control_port: int) -> Path:
+    """A second, minimal gateway so the Gateways page has more than one."""
+    cfg = {
+        "gateway": {"strategy": "least_inflight", "port": port},
+        "health": {"interval_s": 3, "timeout_s": 2, "fail_threshold": 3, "success_threshold": 1},
+        "logging": {"level": "WARNING", "jsonl_path": str(tmp / "edge-requests.jsonl")},
+        "backends": [
+            {"name": "edge-a", "url": "http://127.0.0.1:9101", "engine": "vllm", "model": "demo-model"},
+            {"name": "edge-b", "url": "http://127.0.0.1:9104", "engine": "ollama", "model": "demo-model"},
+            {"name": "edge-offline", "url": "http://127.0.0.1:9199", "engine": "vllm", "model": "demo-model"},
+        ],
+        "control_plane": {"enabled": True, "url": f"http://127.0.0.1:{control_port}", "poll_interval_s": 5,
+                          "gateway_name": "acme-edge-blr", "report_interval_s": 5},
+    }
+    path = tmp / "edge.yaml"
+    path.write_text(json.dumps(cfg, indent=2))
+    return path
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8080)
     ap.add_argument("--control-port", type=int, default=8443)
     ap.add_argument("--no-traffic", action="store_true")
+    ap.add_argument("--cloud", action="store_true", help="run Meridian Cloud (accounts + workspaces)")
     args = ap.parse_args()
 
     tmp = Path(tempfile.mkdtemp(prefix="meridian-console-demo-"))
@@ -314,26 +413,82 @@ def main() -> int:
             _wait(f"http://127.0.0.1:{port}/v1/models")
 
         control = f"http://127.0.0.1:{args.control_port}"
+        outbox = tmp / "outbox"
+        control_env = {**env_base, "MERIDIAN_CONTROL_DB_URL": f"sqlite:///{tmp}/control.db",
+                       "MERIDIAN_CONTROL_CA_DIR": str(tmp / "ca")}
+        if args.cloud:
+            control_env.update({
+                "MERIDIAN_CONTROL_CLOUD": "1",
+                "MERIDIAN_CONTROL_PUBLIC_URL": control,
+                "MERIDIAN_CONTROL_DEV_MAIL_OUTBOX": str(outbox),
+            })
+        else:
+            control_env["MERIDIAN_CONTROL_CORS_ORIGINS"] = (f"http://127.0.0.1:{args.port},http://localhost:{args.port},"
+                                                            "http://127.0.0.1:5173,http://localhost:5173")
         spawn([py, "-m", "uvicorn", "meridian_control.app:create_app", "--factory", "--host", "127.0.0.1",
-               "--port", str(args.control_port), "--log-level", "warning"],
-              {**env_base, "MERIDIAN_CONTROL_DB_URL": f"sqlite:///{tmp}/control.db",
-               "MERIDIAN_CONTROL_CA_DIR": str(tmp / "ca"),
-               "MERIDIAN_CONTROL_CORS_ORIGINS": f"http://127.0.0.1:{args.port},http://localhost:{args.port},"
-                                                "http://127.0.0.1:5173,http://localhost:5173"})
+               "--port", str(args.control_port), "--log-level", "warning"], control_env)
         _wait(f"{control}/healthz")
-        nodes = seed_control(control)
+
+        gateway_env = {**env_base}
+        if args.cloud:
+            seeder = CloudSeeder(control, outbox)
+            nodes = seed_control(control, seeder.mint, seeder.desired)
+            gateway_env["MERIDIAN_CLOUD_TOKEN"] = seeder.gateway_token("acme-gateways")
+        else:
+            def legacy_mint(auto_approve: bool) -> str:
+                return _http("POST", f"{control}/admin/tokens", {"auto_approve": auto_approve})["token"]
+
+            def legacy_desired(node_id: str, body: dict) -> None:
+                _http("POST", f"{control}/admin/nodes/{node_id}/desired", body)
+
+            nodes = seed_control(control, legacy_mint, legacy_desired)
         for n in nodes:
             n.beat()
         threading.Thread(target=heartbeat_loop, args=(nodes, stop), daemon=True).start()
 
         cfg = write_config(tmp, args.port, args.control_port)
+        if args.cloud:
+            raw = json.loads(cfg.read_text())
+            raw["control_plane"].update({"gateway_name": "acme-prod-mumbai", "report_interval_s": 5})
+            cfg.write_text(json.dumps(raw, indent=2))
         gateway = f"http://127.0.0.1:{args.port}"
         spawn([py, "-m", "uvicorn", "meridian.api.main:app", "--host", "127.0.0.1", "--port", str(args.port),
-               "--log-level", "warning"], {**env_base, "MERIDIAN_CONFIG": str(cfg)})
+               "--log-level", "warning"], {**gateway_env, "MERIDIAN_CONFIG": str(cfg)})
         _wait(f"{gateway}/meridian/version")
+        gateways = [gateway]
+        if args.cloud:
+            edge = f"http://127.0.0.1:{args.port + 1}"
+            spawn([py, "-m", "uvicorn", "meridian.api.main:app", "--host", "127.0.0.1", "--port",
+                   str(args.port + 1), "--log-level", "warning"],
+                  {**gateway_env, "MERIDIAN_CONFIG": str(write_edge_config(tmp, args.port + 1, args.control_port))})
+            _wait(f"{edge}/meridian/version")
+            gateways.append(edge)
+            threading.Thread(target=outbox_watch, args=(outbox, stop), daemon=True).start()
         if not args.no_traffic:
-            for _ in range(5):
-                threading.Thread(target=traffic_loop, args=(gateway, stop), daemon=True).start()
+            for i in range(5 + len(gateways) - 1):
+                threading.Thread(target=traffic_loop, args=(gateways[i % len(gateways)], stop), daemon=True).start()
+
+        if args.cloud:
+            print(f"""
+Meridian Cloud demo is running  (state: {tmp})
+
+  Console        {control}/ui
+  Dev server     cd web && MERIDIAN_CLOUD_URL={control} npm run dev   →  http://127.0.0.1:5173/ui
+
+  Sign in with {DEMO_EMAIL} (or any email — signup is open). Codes are
+  printed below as [mail] lines; nothing is sent anywhere.
+
+  Workspace "Acme AI": 2 gateways reporting ({", ".join(gateways)}),
+  4 GPU nodes (2 online, 1 lease lapsed, 1 awaiting approval).
+
+Ctrl-C to stop.""", flush=True)
+            while True:
+                time.sleep(1)
+                for p in procs:
+                    if p.poll() is not None:
+                        print(f"[demo] process exited: {p.args}", file=sys.stderr)
+                        shutdown()
+                        return 1
 
         print(f"""
 Meridian console demo is running  (state: {tmp})

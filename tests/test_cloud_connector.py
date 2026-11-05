@@ -141,3 +141,24 @@ def test_token_from_environment(monkeypatch):
     monkeypatch.setenv("MERIDIAN_CLOUD_TOKEN", "mgw_from_env")
     cfg = MeridianConfig.from_dict({"control_plane": {"enabled": True, "url": "https://x"}})
     assert cfg.control_plane.resolved_token() == "mgw_from_env"
+
+
+@pytest.mark.asyncio
+async def test_default_gateway_identity_includes_the_port(monkeypatch):
+    """Two gateways on one host must not overwrite each other's reports."""
+    from meridian.api import cloud_report
+
+    monkeypatch.setattr(cloud_report.socket, "gethostname", lambda: "gpu box #1")
+    assert cloud_report.default_gateway_id(8080) == "gpu-box-1:8080"
+    assert cloud_report.default_gateway_id(8081) != cloud_report.default_gateway_id(8080)
+    assert cloud_report.default_gateway_id() == "gpu-box-1"
+
+    cfg = MeridianConfig.model_validate({
+        "gateway": {"port": 9090},
+        "backends": [{"name": "b", "url": "http://127.0.0.1:1"}],
+        "control_plane": {"enabled": True, "url": "http://cloud", "token": "mgw_x"},
+    })
+    state = await init_app(cfg, start_health=False)
+    report = CloudReporter(state, client=None).build_report()
+    assert report["gateway_id"] == "gpu-box-1:9090"
+    assert report["name"] == "gpu-box-1:9090"

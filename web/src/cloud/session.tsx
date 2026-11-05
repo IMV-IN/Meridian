@@ -66,8 +66,11 @@ export function CloudSessionProvider({ info, children }: { info: CloudInfo; chil
     try {
       await cloud.logout()
     } finally {
-      qc.clear()
-      await qc.invalidateQueries({ queryKey: ["cloud", "me"] })
+      // Drop workspace data, then re-check the session: /api/me answers 401
+      // and the shell flips to sign-in. (Clearing the whole cache would
+      // detach the live /api/me observer and leave the shell signed in.)
+      qc.removeQueries({ predicate: (q) => !(q.queryKey[0] === "cloud" && q.queryKey[1] === "me") })
+      await qc.refetchQueries({ queryKey: ["cloud", "me"] })
     }
   }, [qc])
 

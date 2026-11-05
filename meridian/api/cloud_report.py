@@ -34,8 +34,15 @@ logger = logging.getLogger("meridian.cloud")
 _ID_SAFE = re.compile(r"[^A-Za-z0-9._:@-]+")
 
 
-def default_gateway_id() -> str:
-    return _ID_SAFE.sub("-", socket.gethostname())[:120] or "gateway"
+def default_gateway_id(port: Optional[int] = None) -> str:
+    """Stable per-process identity: ``hostname:port``.
+
+    The port keeps two gateways on one host (or one VM) from overwriting
+    each other's reports. Set ``control_plane.gateway_id`` for an identity
+    that survives hostname changes (e.g. Kubernetes pod restarts).
+    """
+    host = _ID_SAFE.sub("-", socket.gethostname())[:100] or "gateway"
+    return f"{host}:{port}" if port else host
 
 
 def _counter_totals() -> Dict[str, float]:
@@ -105,9 +112,10 @@ class CloudReporter:
         }
         if state.canary is not None:
             status["canary"] = state.canary.status()
+        gateway_id = cp.gateway_id or default_gateway_id(state.config.gateway.port)
         return {
-            "gateway_id": cp.gateway_id or default_gateway_id(),
-            "name": cp.gateway_name or cp.gateway_id or default_gateway_id(),
+            "gateway_id": gateway_id,
+            "name": cp.gateway_name or gateway_id,
             "version": __version__,
             "interval_s": cp.report_interval_s,
             "sent_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),

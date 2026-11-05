@@ -23,34 +23,38 @@ import { GatewayStatusBadge } from "../components"
 import { useGateways } from "../hooks"
 import { useCloud, useWorkspace } from "../session"
 
-function ConnectGatewayDialog({ open, onOpenChange, known }: { open: boolean; onOpenChange: (o: boolean) => void; known: Set<string> }) {
+function ConnectGatewayDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-2xl">
-        {open && <ConnectBody known={known} onClose={() => onOpenChange(false)} />}
+        {open && <ConnectBody onClose={() => onOpenChange(false)} />}
       </DialogContent>
     </Dialog>
   )
 }
 
-function ConnectBody({ known, onClose }: { known: Set<string>; onClose: () => void }) {
+function ConnectBody({ onClose }: { onClose: () => void }) {
   const ws = useWorkspace()
   const { info } = useCloud()
   const qc = useQueryClient()
   const gateways = useGateways()
   const [name, setName] = useState("")
   const [token, setToken] = useState<string | null>(null)
-  // Gateways that existed when the dialog opened; a new id means "connected".
-  const [baseline] = useState<Set<string>>(() => new Set(known))
+  // Gateways that existed when the token was minted; a new id after that
+  // means "connected". (Snapshotting at open is wrong when the dialog is
+  // opened from a link before the list has loaded.)
+  const [baseline, setBaseline] = useState<Set<string> | null>(null)
   const { copied, copy } = useCopy(2500)
   const create = useMutation({
     mutationFn: () => cloud.createGatewayToken(ws.id, name.trim() || "gateway"),
-    onSuccess: (r) => {
+    onSuccess: async (r) => {
+      const current = await qc.fetchQuery({ queryKey: ["cloud", "gateways", ws.id], queryFn: ({ signal }) => cloud.gateways(ws.id, signal) })
+      setBaseline(new Set(current.map((g) => g.gateway_id)))
       setToken(r.token)
       void qc.invalidateQueries({ queryKey: ["cloud", "gateway-tokens", ws.id] })
     },
   })
-  const connected = useMemo(() => (gateways.data ?? []).find((g) => !baseline.has(g.gateway_id)), [gateways.data, baseline])
+  const connected = useMemo(() => (baseline ? (gateways.data ?? []).find((g) => !baseline.has(g.gateway_id)) : undefined), [gateways.data, baseline])
   const gwName = (name.trim() || "gateway").replace(/[^A-Za-z0-9._-]+/g, "-")
   const yaml = `# Add to your gateway's config.yaml
 control_plane:
@@ -62,7 +66,7 @@ control_plane:
   -e MERIDIAN_CONFIG=/app/config.yaml \\
   -e MERIDIAN_CLOUD_TOKEN='<paste token>' \\
   -v "$PWD/config.yaml:/app/config.yaml:ro" \\
-  meridian:latest`
+  ghcr.io/imv-in/meridian:${info.version}`
 
   return (
     <>
@@ -189,8 +193,7 @@ export default function GatewaysPage() {
   const [params, setParams] = useSearchParams()
   const connectOpen = params.get("connect") === "1"
   const setConnect = (o: boolean) => setParams(o ? { connect: "1" } : {}, { replace: true })
-  const data = useMemo(() => gateways.data ?? [], [gateways.data])
-  const known = useMemo(() => new Set(data.map((g) => g.gateway_id)), [data])
+  const data = gateways.data ?? []
   const canAdmin = atLeast(ws.role, "admin")
 
   return (
@@ -226,7 +229,7 @@ export default function GatewaysPage() {
           }
         />
       )}
-      {canAdmin && <ConnectGatewayDialog open={connectOpen} onOpenChange={setConnect} known={known} />}
+      {canAdmin && <ConnectGatewayDialog open={connectOpen} onOpenChange={setConnect} />}
     </Page>
   )
 }

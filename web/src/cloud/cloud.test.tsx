@@ -129,7 +129,7 @@ describe("Meridian Cloud console", () => {
         me = { user: USER, workspaces: [ws] }
         return json(201, ws)
       },
-      "/api/w/w1/gateways": () => json(200, []),
+      "/api/w/w1/gateways": () => json(200, { gateways: [] }),
       "/api/w/w1/members": () => json(200, { members: [{ ...USER, role: "owner", joined_at: null, last_login_at: null }], invitations: [] }),
       "/api/w/w1/overview": () => json(503, { detail: { code: "unavailable", message: "warming up" } }),
     })
@@ -166,7 +166,7 @@ describe("Meridian Cloud console", () => {
       "fetch",
       fakeCloud({
         "/api/me": () => (signedIn ? json(200, { user: USER, workspaces: [ws] }) : json(401, { detail: { code: "unauthenticated", message: "Sign in" } })),
-        "/api/w/w1/gateways": () => (signedIn ? json(200, []) : json(401, { detail: { code: "unauthenticated", message: "Sign in" } })),
+        "/api/w/w1/gateways": () => (signedIn ? json(200, { gateways: [] }) : json(401, { detail: { code: "unauthenticated", message: "Sign in" } })),
         "/api/w/w1/members": () => json(200, { members: [], invitations: [] }),
       }).impl,
     )
@@ -180,13 +180,59 @@ describe("Meridian Cloud console", () => {
     await waitFor(() => expect(client.getQueryCache().findAll({ queryKey: ["cloud", "gateways"] })).toHaveLength(0))
   })
 
+  it("signs out from the account page", async () => {
+    let signedIn = true
+    const ws = { id: "w1", slug: "acme", name: "Acme", role: "owner" as const }
+    const server = fakeCloud({
+      "/api/me": () => (signedIn ? json(200, { user: USER, workspaces: [ws] }) : json(401, { detail: { code: "unauthenticated", message: "Sign in" } })),
+      "/api/me/sessions": () => json(200, { sessions: [] }),
+      "POST /auth/logout": () => {
+        signedIn = false
+        return json(200, { ok: true })
+      },
+    })
+    vi.stubGlobal("fetch", server.impl)
+    const user = userEvent.setup()
+    renderCloud("/settings?tab=account")
+    await user.click(await screen.findByRole("button", { name: "Sign out" }))
+    expect(await screen.findByRole("heading", { name: "Sign in to Meridian" })).toBeInTheDocument()
+    expect(server.calls.find((c) => c.path === "/auth/logout")?.headers["X-Meridian-CSRF"]).toBe("1")
+  })
+
+  it("connect dialog waits for a gateway that wasn't there when the token was minted", async () => {
+    const ws = { id: "w1", slug: "acme", name: "Acme", role: "admin" as const }
+    const gw = (id: string) => ({
+      gateway_id: id, name: id, version: "0.12.0", online: true, first_seen_at: null, last_seen_at: null,
+      strategy: "least_inflight", backends_total: 1, backends_healthy: 1, window: {}, canary: null,
+    })
+    let gateways = [gw("old-gw:8080")]
+    vi.stubGlobal(
+      "fetch",
+      fakeCloud({
+        "/api/me": () => json(200, { user: USER, workspaces: [ws] }),
+        "/api/w/w1/gateways": () => json(200, { gateways }),
+        "POST /api/w/w1/gateway-tokens": () => json(201, { token: "mgw_secret", id: "t1", name: "edge", prefix: "mgw_secr" }),
+      }).impl,
+    )
+    const user = userEvent.setup()
+    // Opened from a link: the list hasn't loaded when the dialog mounts.
+    const { client } = renderCloud("/gateways?connect=1")
+    await user.click(await screen.findByRole("button", { name: "Create token" }))
+    expect(await screen.findByText("mgw_secret")).toBeInTheDocument()
+    expect(screen.getByText(/Waiting for the first report/)).toBeInTheDocument()
+
+    gateways = [...gateways, gw("new-gw:8080")]
+    await client.refetchQueries({ queryKey: ["cloud", "gateways"] })
+    expect(await screen.findByText("new-gw:8080 is connected")).toBeInTheDocument()
+  })
+
   it("hides admin actions from viewers", async () => {
     const ws = { id: "w1", slug: "acme", name: "Acme", role: "viewer" as const }
     vi.stubGlobal(
       "fetch",
       fakeCloud({
         "/api/me": () => json(200, { user: USER, workspaces: [ws] }),
-        "/api/w/w1/gateways": () => json(200, []),
+        "/api/w/w1/gateways": () => json(200, { gateways: [] }),
       }).impl,
     )
     renderCloud("/gateways")
