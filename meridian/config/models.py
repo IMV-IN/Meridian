@@ -489,6 +489,23 @@ class ControlPlaneConfig(BaseModel):
     # Tag applied to every managed backend so operators can target/observe them.
     tag: str = "managed"
 
+    # Meridian Cloud (hosted control plane). A workspace gateway token switches
+    # the projection pull to the authenticated, workspace-scoped endpoint and
+    # enables metadata-only status reports. Prefer the env var over writing
+    # the secret into the config file.
+    token: Optional[str] = None
+    token_env: str = "MERIDIAN_CLOUD_TOKEN"
+    report: bool = True
+    report_interval_s: float = Field(default=15.0, ge=5.0)
+    # Stable identity shown in the cloud console (defaults to the hostname).
+    gateway_id: str = ""
+    gateway_name: str = ""
+
+    def resolved_token(self) -> Optional[str]:
+        import os
+
+        return self.token or os.environ.get(self.token_env) or None
+
 
 class MeridianConfig(BaseModel):
     gateway: GatewayConfig = Field(default_factory=GatewayConfig)

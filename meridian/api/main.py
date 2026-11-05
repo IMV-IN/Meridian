@@ -155,6 +155,14 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         )
         await managed_sync.start()
 
+    cloud_reporter = None
+    cp = state.config.control_plane
+    if cp.enabled and cp.url and cp.report and cp.resolved_token():
+        from meridian.api.cloud_report import CloudReporter
+
+        cloud_reporter = CloudReporter(state)
+        await cloud_reporter.start()
+
     yield
 
     try:
@@ -163,6 +171,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         pass
     if managed_sync is not None:
         await managed_sync.stop()
+    if cloud_reporter is not None:
+        await cloud_reporter.stop()
     for task in sweep_tasks:
         task.cancel()
         try:

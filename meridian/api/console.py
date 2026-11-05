@@ -222,6 +222,9 @@ def config_summary(state: "AppState") -> Dict[str, Any]:
             "url": cfg.control_plane.url,
             "poll_interval_s": cfg.control_plane.poll_interval_s,
             "tag": cfg.control_plane.tag,
+            # Whether a Meridian Cloud token is present — never the token itself.
+            "cloud_connected": bool(cfg.control_plane.resolved_token()),
+            "report": cfg.control_plane.report,
         },
         "backends": [
             {
