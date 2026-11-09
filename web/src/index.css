@@ -152,7 +152,7 @@
   --muted-foreground: #9ba39f;
   --accent: #1f2826;
   --accent-foreground: #eef3e8;
-  --destructive: #e66767;
+  --destructive: #f08a85;
   --border: rgb(255 255 255 / 0.085);
   --input: rgb(255 255 255 / 0.13);
   --ring: #7fb3a2;
@@ -288,4 +288,10 @@
   outline: 2px solid color-mix(in oklab, var(--ring) 60%, transparent);
   outline-offset: 2px;
   border-radius: 6px;
+}
+
+/* Inputs with suggestions (datalist): Chrome's black triangle clashes with the
+   rest of the form; suggestions still open on focus and typing. */
+input[list]::-webkit-calendar-picker-indicator {
+  display: none !important;
 }

@@ -1,5 +1,5 @@
 import * as React from "react"
-import { Command as CommandPrimitive } from "cmdk"
+import { Command as CommandPrimitive, useCommandState } from "cmdk"
 import { cn } from "@/lib/utils"
 
 import {
@@ -131,17 +131,17 @@ function CommandGroup({
   )
 }
 
+// cmdk's separator is role="separator", which a listbox may not contain
+// (axe aria-required-children). Same look and behaviour (hidden while
+// searching), but presentational.
 function CommandSeparator({
   className,
+  alwaysRender,
   ...props
-}: React.ComponentProps<typeof CommandPrimitive.Separator>) {
-  return (
-    <CommandPrimitive.Separator
-      data-slot="command-separator"
-      className={cn("-mx-1 h-px bg-border", className)}
-      {...props}
-    />
-  )
+}: React.ComponentProps<"div"> & { alwaysRender?: boolean }) {
+  const searching = useCommandState((state) => state.search !== "")
+  if (searching && !alwaysRender) return null
+  return <div data-slot="command-separator" role="none" className={cn("-mx-1 h-px bg-border", className)} {...props} />
 }
 
 function CommandItem({

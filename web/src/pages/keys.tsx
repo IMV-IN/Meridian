@@ -212,7 +212,7 @@ function CreateKeyDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[92svh] gap-0 overflow-hidden p-0 sm:max-w-2xl">
+      <DialogContent className="flex max-h-[92svh] flex-col gap-0 overflow-hidden p-0 sm:max-w-3xl">
         <DialogHeader className="border-b px-6 pt-6 pb-4">
           <DialogTitle>Create API key</DialogTitle>
           <DialogDescription>
@@ -221,7 +221,7 @@ function CreateKeyDialog({
         </DialogHeader>
         <form
           onSubmit={form.handleSubmit((values) => create.mutate(values))}
-          className="scrollbar-thin flex max-h-[calc(92svh-150px)] flex-col overflow-y-auto"
+          className="scrollbar-thin flex min-h-0 flex-1 flex-col overflow-y-auto"
           noValidate
         >
           <div className="grid gap-6 px-6 py-5 md:grid-cols-[1fr_220px]">
@@ -229,8 +229,8 @@ function CreateKeyDialog({
               <FieldSet>
                 <FieldLegend className="text-sm">Identity</FieldLegend>
                 <FieldDescription className="-mt-1 text-xs">Requests made with this key are attributed, budgeted and isolated by org → team → user.</FieldDescription>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <Field data-invalid={!!errors.org_id} className="sm:col-span-3">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <Field data-invalid={!!errors.org_id} className="sm:col-span-2">
                     <FieldLabel htmlFor="k-org">Org *</FieldLabel>
                     <Input id="k-org" list="k-org-list" placeholder="e.g. acme" autoComplete="off" spellCheck={false} aria-invalid={!!errors.org_id} {...form.register("org_id")} />
                     <datalist id="k-org-list">
@@ -249,7 +249,7 @@ function CreateKeyDialog({
                     <FieldLabel htmlFor="k-user">User</FieldLabel>
                     <Input id="k-user" placeholder="e.g. dana" autoComplete="off" spellCheck={false} {...form.register("user_id")} />
                   </Field>
-                  <Field data-invalid={!!errors.key_id}>
+                  <Field data-invalid={!!errors.key_id} className="sm:col-span-2">
                     <FieldLabel htmlFor="k-id">Key ID</FieldLabel>
                     <Input id="k-id" placeholder="Generated if blank" autoComplete="off" spellCheck={false} className="font-mono text-xs" {...form.register("key_id")} />
                     {errors.key_id && <FieldError>{errors.key_id.message}</FieldError>}
@@ -337,7 +337,7 @@ function CreateKeyDialog({
                       value={customModel}
                       onChange={(e) => setCustomModel(e.target.value)}
                       placeholder="Other model ID…"
-                      className="h-7 w-36 font-mono text-xs"
+                      className="h-7 w-44 font-mono text-xs"
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault()
