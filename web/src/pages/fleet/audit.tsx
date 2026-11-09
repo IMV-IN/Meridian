@@ -1,5 +1,5 @@
 import { FileClock } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Link } from "react-router"
 
 import { DataTable, type ColumnDef } from "@/components/data-table"
@@ -10,13 +10,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAudit, useNodes } from "@/hooks/queries"
 import type { AuditEvent } from "@/lib/api/types"
 import { shortId } from "@/lib/format"
+import { useUrlState } from "@/hooks/use-url-state"
 
 import { AUDIT_KIND, ControlGate } from "./shared"
 
 export default function FleetAuditPage() {
-  const [limit, setLimit] = useState("250")
-  const [kind, setKind] = useState("all")
-  const [q, setQ] = useState("")
+  const [limit, setLimit] = useUrlState("limit", "250")
+  const [kind, setKind] = useUrlState("kind", "all")
+  const [q, setQ] = useUrlState("q")
   const audit = useAudit({ limit: Number(limit) })
   const nodes = useNodes()
   const names = useMemo(() => new Map((nodes.data ?? []).map((n) => [n.node_id, n.display_name])), [nodes.data])
@@ -73,7 +74,7 @@ export default function FleetAuditPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <SearchInput value={q} onChange={setQ} placeholder="Search node, event, detail…" />
         <Select value={kind} onValueChange={setKind}>
-          <SelectTrigger size="sm" className="w-full sm:w-56">
+          <SelectTrigger aria-label="Filter by event" size="sm" className="w-full sm:w-56">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -86,7 +87,7 @@ export default function FleetAuditPage() {
           </SelectContent>
         </Select>
         <Select value={limit} onValueChange={setLimit}>
-          <SelectTrigger size="sm" className="w-full sm:w-36">
+          <SelectTrigger aria-label="Events to load" size="sm" className="w-full sm:w-36">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

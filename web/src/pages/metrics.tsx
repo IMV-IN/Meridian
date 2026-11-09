@@ -1,5 +1,5 @@
 import { Ban, Coins, Gauge, RotateCcw, ShieldAlert, Timer, Zap } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 
 import { BarList, ColumnChart } from "@/components/charts"
 import { CodeBlock } from "@/components/code"
@@ -15,6 +15,7 @@ import { gatewayOrigin } from "@/lib/api/gateway"
 import { backendLabel, formatMs, formatNumber, formatPercent, titleCase } from "@/lib/format"
 import { bucketCounts, histogram, quantile, select, sum, sumBy, type Exposition } from "@/lib/prometheus"
 import { cn } from "@/lib/utils"
+import { useUrlState } from "@/hooks/use-url-state"
 
 function useDerived(exp: Exposition | null) {
   return useMemo(() => {
@@ -75,8 +76,10 @@ function useDerived(exp: Exposition | null) {
 }
 
 function RawExplorer({ exp, text }: { exp: Exposition; text: string }) {
-  const [q, setQ] = useState("")
-  const [selected, setSelected] = useState<string | null>(null)
+  const [q, setQ] = useUrlState("q")
+  const [metric, setMetric] = useUrlState("metric")
+  const selected = metric || null
+  const setSelected = (v: string | null) => setMetric(v ?? "")
   const families = useMemo(() => {
     const names = new Map<string, { type: string; help: string; count: number }>()
     for (const [name, f] of exp.families) {
@@ -169,6 +172,7 @@ function RawExplorer({ exp, text }: { exp: Exposition; text: string }) {
 }
 
 export default function MetricsPage() {
+  const [tab, setTab] = useUrlState("tab", "dashboards")
   const m = useMetrics()
   const d = useDerived(m.parsed)
 
@@ -180,7 +184,7 @@ export default function MetricsPage() {
         title="Observability"
         description="Cumulative Prometheus counters since the gateway process started. Labels are cardinality-safe: backend, model, status — never tenant, user or request IDs."
       />
-      <Tabs defaultValue="dashboards" className="gap-4">
+      <Tabs value={tab} onValueChange={setTab} className="gap-4">
         <TabsList>
           <TabsTrigger value="dashboards">Dashboards</TabsTrigger>
           <TabsTrigger value="explorer">Metric explorer</TabsTrigger>
@@ -232,7 +236,7 @@ export default function MetricsPage() {
                           <TableCell className="text-right">{formatNumber(r.c4)}</TableCell>
                           <TableCell className="text-right">{formatNumber(r.c5)}</TableCell>
                           <TableCell className="text-right">
-                            <span className={cn(err > 0.05 && "font-semibold text-(--status-critical)", err > 0.01 && err <= 0.05 && "font-medium")}>{formatPercent(err)}</span>
+                            <span className={cn(err > 0.05 && "font-semibold text-critical-ink", err > 0.01 && err <= 0.05 && "font-medium")}>{formatPercent(err)}</span>
                           </TableCell>
                           <TableCell className="text-right">{formatMs(r.mean)}</TableCell>
                           <TableCell className="text-right">{formatMs(r.p50)}</TableCell>

@@ -4,6 +4,44 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Console UI audit and fixes.** Every page was checked against WCAG 2.2 AA (axe-core),
+  the Vercel Web Interface Guidelines and Anthropic's frontend-design guidance, in light,
+  dark and mobile views. Both consoles (gateway and Cloud) now report zero violations.
+  - Accessibility:
+    - one `main` landmark, a named sidebar and `nav`, an `h1` on every page;
+    - accessible names on 18 filter dropdowns and on the empty `Actions` table headers;
+    - text contrast fixed for inactive tabs, sidebar captions, destructive buttons,
+      toast descriptions and dark-mode critical text (new `--status-critical-ink`);
+    - visible focus on tab panels, charts and clickable rows;
+    - scrollable tables and code blocks reachable by keyboard;
+    - Playground code tabs wired to their panels;
+    - the ⌘K palette's title moved inside its dialog.
+  - Mobile: tab bars scroll instead of widening the page, and panels shrink inside
+    grids. Node detail and routing no longer scroll sideways at 390 px.
+  - Forms: `name`, `autocomplete`, `inputmode` and no spellcheck on identifiers,
+    `one-time-code` on the sign-in code, and `autoFocus` only on desktop.
+  - Behaviour:
+    - filters and tabs (keys, nodes, fleet audit, policies, metrics, node detail)
+      live in the URL;
+    - numbers and dates use the viewer's locale;
+    - `theme-color` follows the theme;
+    - global `prefers-reduced-motion` support;
+    - no `transition: all`;
+    - `touch-action` and overscroll handling.
+  - Copy: specific link labels, sentence-case labels instead of all caps, fewer
+    dot-joined titles, and the stray decorative dots removed from the sign-in panel.
+    The connect-gateway dialog no longer flashes empty while it closes.
+  - Performance:
+    - console assets are precompressed at build time (`.br`/`.gz`) and served with
+      `Content-Encoding` by the gateway and meridian-control, so the JavaScript
+      shrinks from 1.58 MB to 420 KB on the wire;
+    - meridian-control embeds the boot info in the page (no `/api/cloud/info`
+      round trip, and no 404 probe on self-hosted gateways);
+    - on a throttled mobile profile, first paint fell from 7.6 s to 2.4 s and LCP
+      from 8.0 s to 2.7 s.
+  - `npm run audit:ui` (axe-core plus reflow, console and focus checks) makes the audit
+    repeatable. See [`docs/CONSOLE.md`](docs/CONSOLE.md#ui-quality-bar).
+
 - **Python 3.14 everywhere.** The gateway, control-plane and mock-backend
   images move to `python:3.14-slim-trixie`, and every single-version CI job
   runs on 3.14. Supported range is now **3.11 – 3.14**

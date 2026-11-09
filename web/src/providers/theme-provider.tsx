@@ -46,6 +46,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     document.head.appendChild(style)
     root.classList.toggle("dark", resolvedTheme === "dark")
     root.style.colorScheme = resolvedTheme
+    // Mobile browser chrome follows the page background (--background).
+    document.querySelector('meta[name="theme-color"]')?.setAttribute("content", resolvedTheme === "dark" ? "#0b0e0d" : "#f6f6f3")
     const id = window.setTimeout(() => style.remove(), 0)
     return () => window.clearTimeout(id)
   }, [resolvedTheme])

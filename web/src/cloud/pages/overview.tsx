@@ -126,7 +126,7 @@ export default function CloudOverview() {
           actions={
             <Button variant="ghost" size="xs" asChild>
               <Link to="/gateways">
-                All gateways <ArrowRight data-icon="inline-end" />
+                All gateways
               </Link>
             </Button>
           }
@@ -177,7 +177,7 @@ export default function CloudOverview() {
           actions={
             <Button variant="ghost" size="xs" asChild>
               <Link to="/fleet">
-                Nodes <ArrowRight data-icon="inline-end" />
+                All nodes
               </Link>
             </Button>
           }

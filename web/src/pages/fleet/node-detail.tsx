@@ -23,6 +23,7 @@ import { qk, useControl, useNode } from "@/hooks/queries"
 import type { NodeDetail, ObservedEngine } from "@/lib/api/types"
 import { formatBytes, formatNumber, formatRelative, shortId } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { useUrlState } from "@/hooks/use-url-state"
 
 import { AUDIT_KIND, ControlGate, LeaseText, NodeStatusBadge } from "./shared"
 
@@ -99,6 +100,8 @@ function PublishDesiredBody({ node, onDone }: { node: NodeDetail; onDone: () => 
           </DialogDescription>
         </DialogHeader>
         <Textarea
+          name="desired-state"
+          autoComplete="off"
           value={text}
           onChange={(e) => setText(e.target.value)}
           spellCheck={false}
@@ -203,6 +206,7 @@ export default function NodeDetailPage() {
   const { api, baseUrl } = useControl()
   const qc = useQueryClient()
   const [publishOpen, setPublishOpen] = useState(false)
+  const [tab, setTab] = useUrlState("tab", "engines")
   const [stopOpen, setStopOpen] = useState(false)
   const [revokeOpen, setRevokeOpen] = useState(false)
   const revoke = useMutation({
@@ -357,7 +361,7 @@ export default function NodeDetailPage() {
             />
           </div>
 
-          <Tabs defaultValue="engines" className="gap-4">
+          <Tabs value={tab} onValueChange={setTab} className="gap-4">
             <TabsList>
               <TabsTrigger value="engines">
                 <Cpu /> Engines ({n.engines.total})

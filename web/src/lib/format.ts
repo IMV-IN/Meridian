@@ -1,7 +1,14 @@
 import { formatDistanceToNowStrict } from "date-fns"
 
-const compactFmt = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
-const intFmt = new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 })
+/**
+ * Numbers and dates follow the viewer's own locale (navigator.languages), not
+ * a hard-coded one: an operator in India sees 1,00,000; one in Germany 100.000.
+ */
+export const LOCALE: string | undefined =
+  typeof navigator !== "undefined" ? (navigator.languages?.[0] ?? navigator.language) : undefined
+
+const compactFmt = new Intl.NumberFormat(LOCALE, { notation: "compact", maximumFractionDigits: 1 })
+const intFmt = new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 0 })
 
 /** 1,284 / 12.9K / 4.2M — auto-compacts at 10,000. */
 export function formatNumber(v: number | null | undefined, opts: { compact?: boolean; digits?: number } = {}): string {
@@ -10,12 +17,12 @@ export function formatNumber(v: number | null | undefined, opts: { compact?: boo
   const compact = opts.compact ?? Math.abs(v) >= 10_000
   if (compact) return compactFmt.format(v)
   if (opts.digits !== undefined) {
-    return new Intl.NumberFormat("en-US", {
+    return new Intl.NumberFormat(LOCALE, {
       minimumFractionDigits: opts.digits,
       maximumFractionDigits: opts.digits,
     }).format(v)
   }
-  return Number.isInteger(v) ? intFmt.format(v) : new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(v)
+  return Number.isInteger(v) ? intFmt.format(v) : new Intl.NumberFormat(LOCALE, { maximumFractionDigits: 2 }).format(v)
 }
 
 /** Latency: 0.8 ms / 42 ms / 1.24 s / 2.1 min */
@@ -72,7 +79,7 @@ export function formatCurrency(v: number | null | undefined, currency = "USD"): 
   if (v === null || v === undefined || Number.isNaN(v)) return "—"
   const digits = Math.abs(v) > 0 && Math.abs(v) < 1 ? 4 : 2
   try {
-    return new Intl.NumberFormat("en-US", {
+    return new Intl.NumberFormat(LOCALE, {
       style: "currency",
       currency,
       minimumFractionDigits: digits,
@@ -102,7 +109,7 @@ export function formatTimestamp(
     hour12: false,
     timeZone: tz === "utc" ? "UTC" : undefined,
   }
-  const s = new Intl.DateTimeFormat("en-US", parts).format(d)
+  const s = new Intl.DateTimeFormat(LOCALE, parts).format(d)
   return tz === "utc" ? `${s} UTC` : s
 }
 

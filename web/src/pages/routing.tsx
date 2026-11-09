@@ -243,7 +243,7 @@ function CanaryPanel({ cfg, backends }: { cfg: ConfigSummary; backends: BackendS
                     />
                     <div className={cn("mt-2 text-sm font-medium tabular", state === "next" && "text-muted-foreground")}>{s.weight}%</div>
                     <div className="text-xs text-muted-foreground">{s.duration_s ? `for ${formatSeconds(s.duration_s)}` : "hold"}</div>
-                    {state === "current" && !c.schedule_done && <div className="text-[11px] font-medium text-(--series-1)">current</div>}
+                    {state === "current" && !c.schedule_done && <div className="flex items-center gap-1 text-[11px] font-medium text-foreground"><span aria-hidden className="size-1.5 rounded-full bg-(--series-1)" />current</div>}
                   </li>
                 )
               })}
@@ -409,7 +409,7 @@ export default function RoutingPage() {
       <Pipeline cfg={cfg} canaryWeight={status.data?.canary?.weight} />
 
       <div id="strategy" className="grid scroll-mt-16 gap-4 xl:grid-cols-3">
-        <Panel className="xl:col-span-2" title={`Strategy · ${info?.title ?? g.strategy}`} description={info?.body}>
+        <Panel className="xl:col-span-2" title={`${info?.title ?? g.strategy} strategy`} description={info?.body}>
           {tokenAware ? (
             <div className="space-y-4">
               <div className="rounded-lg border bg-muted/40 p-3 font-mono text-[12.5px] leading-relaxed">
@@ -493,7 +493,7 @@ export default function RoutingPage() {
         <TieringPanel cfg={cfg} backends={backends} />
       </div>
       <div id="isolation" className="grid scroll-mt-16 gap-4 xl:grid-cols-3">
-        <div className="xl:col-span-2">
+        <div className="min-w-0 xl:col-span-2">
           <IsolationPanel cfg={cfg} backends={backends} />
         </div>
         <Panel title="Resilience" description="Upstream timeouts, retries and circuit breaking">

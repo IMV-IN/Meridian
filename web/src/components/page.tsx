@@ -20,7 +20,7 @@ export function PageHeader({
     <div className="flex flex-col gap-4 pb-2">
       <div className="flex flex-col gap-3 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0 space-y-1">
-          {eyebrow && <div className="text-xs font-medium tracking-wide text-muted-foreground uppercase">{eyebrow}</div>}
+          {eyebrow && <div className="text-sm text-muted-foreground">{eyebrow}</div>}
           <h1 className="text-2xl font-semibold tracking-tight text-balance">{title}</h1>
           {description && <p className="max-w-3xl text-sm text-pretty text-muted-foreground">{description}</p>}
         </div>
@@ -54,7 +54,9 @@ export function Panel({
   footer?: ReactNode
 }) {
   return (
-    <Card className={cn("gap-3", className)}>
+    // min-w-0: as a grid/flex child a panel must shrink to its track; wide
+    // content (tables) scrolls inside instead of pushing the page sideways.
+    <Card className={cn("min-w-0 gap-3", className)}>
       {(title || actions) && (
         <CardHeader>
           {title && <CardTitle className="text-sm font-semibold">{title}</CardTitle>}

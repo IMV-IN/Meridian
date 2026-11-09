@@ -86,7 +86,7 @@ export function AppSidebar() {
                 <MeridianMark className="size-8" />
                 <div className="grid flex-1 text-left leading-tight">
                   <span className="truncate text-sm font-semibold tracking-tight">Meridian</span>
-                  <span className="truncate text-[11px] text-sidebar-foreground/60">
+                  <span className="truncate text-[11px] text-sidebar-foreground/75">
                     Inference console{version.data ? ` · v${version.data.version}` : ""}
                   </span>
                 </div>
@@ -95,7 +95,8 @@ export function AppSidebar() {
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent className="scrollbar-thin">
+      <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col">
+        <SidebarContent className="scrollbar-thin">
         {NAV.map((group) => (
           <SidebarGroup key={group.label}>
             <SidebarGroupLabel>{group.label}</SidebarGroupLabel>
@@ -126,6 +127,7 @@ export function AppSidebar() {
           </SidebarGroup>
         ))}
       </SidebarContent>
+      </nav>
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -168,7 +170,7 @@ function UserMenu({ authEnabled }: { authEnabled: boolean }) {
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
               <span className="truncate font-mono text-[12px] font-medium">{name}</span>
-              <span className="truncate text-[11px] text-sidebar-foreground/60">{sub}</span>
+              <span className="truncate text-[11px] text-sidebar-foreground/75">{sub}</span>
             </div>
             <ChevronsUpDown className="ml-auto size-4 opacity-60" />
           </SidebarMenuButton>

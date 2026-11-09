@@ -57,6 +57,7 @@
   --color-serious: var(--status-serious);
   --color-critical: var(--status-critical);
   --color-good-ink: var(--status-good-ink);
+  --color-critical-ink: var(--status-critical-ink);
 
   /* Categorical series slots (validated order; assign in order, never cycle). */
   --color-series-1: var(--series-1);
@@ -96,7 +97,7 @@
   --muted-foreground: #5d625f;
   --accent: #eaeee5;
   --accent-foreground: #10211f;
-  --destructive: #c53333;
+  --destructive: #b52b2b;
   --border: #e3e3dd;
   --input: #dcdcd5;
   --ring: #3f7d6c;
@@ -112,6 +113,8 @@
 
   --status-good: #0ca30c;
   --status-good-ink: #006300;
+  /* -ink variants are for text: ≥4.5:1 on background and card. */
+  --status-critical-ink: #b42b2b;
   --status-warning: #fab219;
   --status-serious: #ec835a;
   --status-critical: #d03b3b;
@@ -164,6 +167,7 @@
   --sidebar-ring: #7fb3a2;
 
   --status-good-ink: #39c339;
+  --status-critical-ink: #ec6a64;
 
   --series-1: #3987e5;
   --series-2: #d95926;
@@ -182,6 +186,8 @@
   }
   html {
     @apply font-sans;
+    /* Our own :active/:hover states replace the grey iOS/Android flash. */
+    -webkit-tap-highlight-color: transparent;
     -webkit-font-smoothing: antialiased;
     -moz-osx-font-smoothing: grayscale;
     text-rendering: optimizeLegibility;
@@ -193,6 +199,20 @@
   button:not(:disabled),
   [role="button"]:not(:disabled) {
     cursor: pointer;
+  }
+  /* No double-tap-zoom delay on controls. */
+  a, button, input, label, select, summary, textarea, [role="button"], [role="tab"], [role="option"] {
+    touch-action: manipulation;
+  }
+  /* Rubber-band scrolling off for mouse/trackpad; touch keeps pull-to-refresh. */
+  @media (pointer: fine) {
+    html {
+      overscroll-behavior: none;
+    }
+  }
+  /* Overlays never scroll the page behind them. */
+  [role="dialog"], [role="menu"], [role="listbox"], [data-slot="command-list"], [data-slot="scroll-area-viewport"] {
+    overscroll-behavior: contain;
   }
   code,
   kbd,
@@ -209,6 +229,12 @@
   /* Tabular figures only where numbers align in columns (tables, axes). */
   .tabular {
     font-variant-numeric: tabular-nums;
+  }
+  .scrollbar-none {
+    scrollbar-width: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
   }
   .scrollbar-thin {
     scrollbar-width: thin;
@@ -245,4 +271,21 @@
 }
 @media (prefers-reduced-motion: reduce) {
   .animate-pulse-ring { animation: none; }
+  /* Respect the OS setting everywhere: enter/exit animations, spinners'
+     rotation and transitions resolve instantly. */
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Recharts makes charts keyboard-focusable (arrow keys move the tooltip);
+   give them a visible focus ring like every other control. */
+.recharts-wrapper:focus-visible,
+.recharts-surface:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--ring) 60%, transparent);
+  outline-offset: 2px;
+  border-radius: 6px;
 }

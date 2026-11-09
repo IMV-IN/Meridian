@@ -201,7 +201,7 @@ function ControlTab() {
           <Field data-invalid={result?.ok === false}>
             <FieldLabel htmlFor="cp-url">Base URL</FieldLabel>
             <div className="flex gap-2">
-              <Input id="cp-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://control.internal:8443 or /control" className="font-mono text-sm" />
+              <Input id="cp-url" name="control-plane-url" inputMode="url" autoComplete="off" spellCheck={false} value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://control.internal:8443 or /control" className="font-mono text-sm" />
               <Button variant="outline" onClick={() => void test(url.trim())} disabled={!url.trim() || testing}>
                 {testing ? <Spinner data-icon="inline-start" /> : <PlugZap data-icon="inline-start" />}
                 Test

@@ -17,6 +17,7 @@ import { useVersion } from "@/hooks/queries"
 import { ApiError } from "@/lib/api/client"
 import { gatewayOrigin } from "@/lib/api/gateway"
 import { useAuth } from "@/providers/auth-provider"
+import { autoFocusDesktop } from "@/lib/utils"
 
 const schema = z.object({
   key: z
@@ -36,13 +37,13 @@ const HIGHLIGHTS = [
 
 export function BrandPanel() {
   return (
-    <div className="relative hidden overflow-hidden bg-brand-ink text-[#f4f8ee] lg:flex lg:flex-col lg:justify-between lg:p-12">
+    <aside aria-label="About Meridian" className="relative hidden overflow-hidden bg-brand-ink text-[#f4f8ee] lg:flex lg:flex-col lg:justify-between lg:p-12">
       <div
         aria-hidden
         className="absolute inset-0 opacity-90"
         style={{
           background:
-            "radial-gradient(circle at 86% 12%, rgba(243,167,18,.9) 0 .32rem, transparent .4rem), radial-gradient(circle at 92% 19%, rgba(228,246,201,.9) 0 .2rem, transparent .26rem), linear-gradient(140deg, #10211f 0%, #1c3a35 55%, #315a51 100%)",
+            "linear-gradient(140deg, #10211f 0%, #1c3a35 55%, #315a51 100%)",
         }}
       />
       <div aria-hidden className="absolute -right-24 -bottom-24 size-[460px] rounded-full border border-white/10" />
@@ -55,9 +56,9 @@ export function BrandPanel() {
         </div>
       </div>
       <div className="relative max-w-md space-y-8">
-        <h2 className="text-4xl leading-[1.05] font-semibold tracking-tight text-brand-lime">
+        <p className="text-4xl leading-[1.05] font-semibold tracking-tight text-balance text-brand-lime">
           The control room for your inference fleet.
-        </h2>
+        </p>
         <ul className="space-y-5">
           {HIGHLIGHTS.map((h) => (
             <li key={h.title} className="flex gap-3">
@@ -72,8 +73,8 @@ export function BrandPanel() {
           ))}
         </ul>
       </div>
-      <p className="relative text-xs text-white/45">Prompts are never stored by the console or logged by the gateway.</p>
-    </div>
+      <p className="relative text-xs text-white/60">Prompts are never stored by the console or logged by the gateway.</p>
+    </aside>
   )
 }
 
@@ -104,7 +105,7 @@ export function SignInPage() {
   return (
     <div className="grid min-h-svh lg:grid-cols-[1.05fr_1fr]">
       <BrandPanel />
-      <div className="flex flex-col items-center justify-center bg-background p-6 sm:p-10">
+      <main className="flex flex-col items-center justify-center bg-background p-6 sm:p-10">
         <div className="w-full max-w-sm space-y-8">
           <div className="flex items-center gap-3 lg:hidden">
             <MeridianMark className="size-9" />
@@ -138,7 +139,7 @@ export function SignInPage() {
                     placeholder="mrdn_…"
                     autoComplete="off"
                     spellCheck={false}
-                    autoFocus
+                    autoFocus={autoFocusDesktop()}
                     className="font-mono text-[13px]"
                     aria-invalid={!!errors.key || !!serverError}
                     {...form.register("key")}
@@ -185,14 +186,14 @@ export function SignInPage() {
             {version.data ? ` · Meridian v${version.data.version}` : ""}
           </p>
         </div>
-      </div>
+      </main>
     </div>
   )
 }
 
 export function UnreachablePage({ error, onRetry }: { error: ApiError | null; onRetry: () => void }) {
   return (
-    <div className="flex min-h-svh items-center justify-center bg-background p-6">
+    <main className="flex min-h-svh items-center justify-center bg-background p-6">
       <Card className="w-full max-w-md">
         <CardContent className="space-y-5 pt-2">
           <div className="flex items-center gap-3">
@@ -215,15 +216,15 @@ export function UnreachablePage({ error, onRetry }: { error: ApiError | null; on
           </Button>
         </CardContent>
       </Card>
-    </div>
+    </main>
   )
 }
 
 export function BootScreen() {
   return (
-    <div className="flex min-h-svh flex-col items-center justify-center gap-4 bg-background">
+    <main className="flex min-h-svh flex-col items-center justify-center gap-4 bg-background">
       <MeridianMark className="size-10 animate-pulse" />
-      <span className="text-sm text-muted-foreground">Connecting to gateway…</span>
-    </div>
+      <span role="status" className="text-sm text-muted-foreground">Connecting to gateway…</span>
+    </main>
   )
 }
