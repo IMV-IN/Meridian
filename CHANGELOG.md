@@ -14,7 +14,8 @@ All notable changes to this project will be documented in this file.
     clipped mid-word; on phones that dialog's header scrolled away;
   - sparkline end dots were stretched into ovals that poked out of their cards;
   - the command palette's list had invalid ARIA children and the Activity popover had no
-    accessible name; stat-card labels and hints were truncated on phones.
+    accessible name; stat-card labels and hints were truncated on phones;
+  - dark-mode destructive buttons were 4.1:1 contrast (now about 5:1).
 - **Console UI audit and fixes.** Every page was checked against WCAG 2.2 AA (axe-core),
   the Vercel Web Interface Guidelines and Anthropic's frontend-design guidance, in light,
   dark and mobile views. Both consoles (gateway and Cloud) now report zero violations.
