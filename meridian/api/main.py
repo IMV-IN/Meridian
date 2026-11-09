@@ -28,6 +28,7 @@ from meridian.api.pipeline import ChatRequest, prepare_chat_request, reconcile_b
 from meridian.api.reload import reload_config
 from meridian.api.routing import route
 from meridian.api.state import AppState, build_app_state, build_backend, shutdown_app_state
+from meridian.api.static_files import static_file
 from meridian.auth import AuthError, authenticate
 from meridian.config.models import MeridianConfig
 from meridian.cost.authz import clamp_window_days, require_usage_identity, resolve_usage_scope
@@ -766,7 +767,7 @@ async def ui() -> FileResponse:
 
 
 @app.get("/ui/{path:path}")
-async def ui_path(path: str) -> Response:
+async def ui_path(path: str, request: Request) -> Response:
     """Console static assets + SPA fallback (client-side routes → index.html).
 
     Files resolve strictly inside ``ui/dist`` (no traversal). Hashed bundles
@@ -782,7 +783,9 @@ async def ui_path(path: str) -> Response:
                 if path.startswith("assets/")
                 else "no-cache"
             )
-            return FileResponse(candidate, headers={**_UI_HEADERS, "Cache-Control": cache})
+            return static_file(
+                candidate, request.headers.get("accept-encoding", ""), {**_UI_HEADERS, "Cache-Control": cache}
+            )
         if path.startswith("assets/"):
             return Response(status_code=404, headers=_UI_HEADERS)
     return _ui_index_response()
