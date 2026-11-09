@@ -289,3 +289,9 @@
   outline-offset: 2px;
   border-radius: 6px;
 }
+
+/* Inputs with suggestions (datalist): Chrome's black triangle clashes with the
+   rest of the form; suggestions still open on focus and typing. */
+input[list]::-webkit-calendar-picker-indicator {
+  display: none !important;
+}

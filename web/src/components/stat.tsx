@@ -39,24 +39,28 @@ export function Sparkline({
   const line = pts.map((p, k) => `${k ? "L" : "M"}${x(p.i).toFixed(1)},${y(p.v).toFixed(1)}`).join(" ")
   const area = `${line} L${x(pts[pts.length - 1].i).toFixed(1)},${h} L${x(pts[0].i).toFixed(1)},${h} Z`
   const last = pts[pts.length - 1]
+  // The line stretches to any width (preserveAspectRatio="none"), so the end
+  // dot is drawn in HTML: a circle inside the stretched SVG becomes an oval.
+  // px-1 keeps the dot inside the card.
   return (
-    <svg
-      viewBox={`0 0 ${w} ${h}`}
-      preserveAspectRatio="none"
-      className={cn("w-full overflow-visible", className)}
-      style={{ height }}
-      aria-hidden
-    >
-      <defs>
-        <linearGradient id={`spark-${gid}`} x1="0" x2="0" y1="0" y2="1">
-          <stop offset="0%" stopColor={color} stopOpacity={0.16} />
-          <stop offset="100%" stopColor={color} stopOpacity={0} />
-        </linearGradient>
-      </defs>
-      <path d={area} fill={`url(#spark-${gid})`} />
-      <path d={line} fill="none" stroke={color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
-      <circle cx={x(last.i)} cy={y(last.v)} r={2.5} fill={color} stroke="var(--card)" strokeWidth={1.5} vectorEffect="non-scaling-stroke" />
-    </svg>
+    <div className={cn("w-full px-1", className)} style={{ height }} aria-hidden>
+      <div className="relative size-full">
+        <svg viewBox={`0 0 ${w} ${h}`} preserveAspectRatio="none" className="absolute inset-0 size-full overflow-visible">
+          <defs>
+            <linearGradient id={`spark-${gid}`} x1="0" x2="0" y1="0" y2="1">
+              <stop offset="0%" stopColor={color} stopOpacity={0.16} />
+              <stop offset="100%" stopColor={color} stopOpacity={0} />
+            </linearGradient>
+          </defs>
+          <path d={area} fill={`url(#spark-${gid})`} />
+          <path d={line} fill="none" stroke={color} strokeWidth={1.5} vectorEffect="non-scaling-stroke" strokeLinejoin="round" strokeLinecap="round" />
+        </svg>
+        <span
+          className="absolute size-2 -translate-x-1/2 -translate-y-1/2 rounded-full border-[1.5px] border-card"
+          style={{ left: `${(x(last.i) / w) * 100}%`, top: `${(y(last.v) / h) * 100}%`, background: color }}
+        />
+      </div>
+    </div>
   )
 }
 
@@ -97,13 +101,13 @@ export function StatCard({
             {Icon && <Icon className="size-3.5 shrink-0" aria-hidden />}
             {info ? (
               <Tooltip>
-                <TooltipTrigger className="truncate underline decoration-dotted decoration-muted-foreground/50 underline-offset-4">
+                <TooltipTrigger className="text-left leading-tight underline decoration-dotted decoration-muted-foreground/50 underline-offset-4">
                   {label}
                 </TooltipTrigger>
                 <TooltipContent className="max-w-64">{info}</TooltipContent>
               </Tooltip>
             ) : (
-              <span className="truncate">{label}</span>
+              <span className="leading-tight">{label}</span>
             )}
           </span>
           {tone && tone !== "neutral" && (
@@ -118,7 +122,7 @@ export function StatCard({
             {unit && <span className="text-sm font-medium text-muted-foreground">{unit}</span>}
           </div>
         )}
-        {hint && <div className="min-h-4 truncate text-xs text-muted-foreground">{hint}</div>}
+        {hint && <div className="min-h-4 text-xs leading-snug text-muted-foreground">{hint}</div>}
       </div>
       {trend && (
         <div className="-mt-1 px-0">

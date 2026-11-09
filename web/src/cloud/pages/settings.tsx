@@ -141,15 +141,15 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
               <SelectTrigger id="inv-role" className="w-full">
                 <SelectValue />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent position="popper">
                 {roles.map((r) => (
-                  <SelectItem key={r} value={r}>
+                  <SelectItem key={r} value={r} description={ROLE_HELP[r]}>
                     <span className="capitalize">{r}</span>
-                    <span className="ml-2 text-xs text-muted-foreground">{ROLE_HELP[r]}</span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            <FieldDescription>{ROLE_HELP[role]}</FieldDescription>
           </Field>
         </form>
         <DialogFooter>

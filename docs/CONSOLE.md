@@ -164,15 +164,21 @@ Every page is held to:
   - URLs: filters and tabs live in the query string, so views can be linked.
 - **Reflow**: no horizontal page scroll at 390 px. Wide tables and tab bars
   scroll inside their own container.
+- **Containment**: nothing spills out of its card, dialog, menu or control, for
+  every value a select can take (a long option must not widen its dialog), and
+  no text or placeholder is cut off without an ellipsis.
 - **Performance**:
   - assets are served precompressed (Brotli or gzip, about 70% smaller);
   - meridian-control embeds the console's boot info in the page, so the first
     render needs no extra request;
   - layout shift stays under 0.1.
 
-`npm run audit:ui` checks the first three automatically, running axe-core plus
-reflow, console-error and focus checks across light, dark and mobile views. It
-exits non-zero on any finding:
+`npm run audit:ui` checks the first four automatically, running axe-core plus
+reflow, containment, console-error and focus checks across light, dark and
+mobile views. It also opens every dialog, select, menu, popover and the command
+palette a page offers (choosing each select option in turn) and checks each one
+the same way, saving a screenshot of every state for a visual pass. It exits
+non-zero on any finding. `--only <regex>` limits it to matching routes:
 
 ```bash
 python scripts/console_demo.py            # gateway console on :8080
