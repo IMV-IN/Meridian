@@ -50,6 +50,8 @@ class AppState:
     # Source file the running config was loaded from (None for tests that pass
     # a MeridianConfig directly). Full POST /meridian/reload re-reads this.
     config_path: Optional[str] = None
+    # Console sign-in with Meridian Cloud accounts (meridian.api.cloud_sso).
+    cloud_sso: Optional[Any] = None
     recent_requests: Deque[Dict[str, Any]] = field(
         default_factory=lambda: deque(maxlen=100)
     )

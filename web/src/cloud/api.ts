@@ -99,6 +99,8 @@ export interface GatewaySummary {
   backends_healthy: number
   window: GatewayWindow
   canary: CanaryStatus | null
+  /** Where workspace members sign in to this gateway's own console. */
+  console_url?: string | null
 }
 
 export interface GatewayReport {

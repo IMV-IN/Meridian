@@ -4,6 +4,18 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Sign in to a gateway's console with Meridian Cloud.** A gateway connected to a workspace
+  offers *Sign in with Meridian Cloud* on its console; the person's workspace role sets their
+  rights there (viewer reads, operator also reloads, admin/owner also manage API keys).
+  - Authorization-code flow with PKCE, Meridian Cloud as identity provider: redirects only to
+    the console address the gateway reported (`control_plane.console_url`), one-time 60-second
+    codes redeemable only with the gateway's workspace token, sign-ins in the audit log.
+  - Gateway sessions are HttpOnly cookies (12 h) with a CSRF header for writes; roles are
+    re-checked every 5 minutes, so removing or demoting a member reaches every gateway.
+  - API keys stay available as break-glass (`control_plane.console_key_sign_in`).
+  - The gateway console shows the signed-in account, workspace and role, links fleet pages
+    and "Open Meridian Cloud" to the cloud console; Meridian Cloud's gateway page links back
+    with *Open gateway console*.
 - **Console layout fixes found by a deeper audit.** `npm run audit:ui` now opens every
   dialog, select, menu, popover and the command palette, tries every select option, and
   checks that nothing spills out of its container. It found and the console now fixes:

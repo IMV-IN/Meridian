@@ -40,6 +40,15 @@ def _features(state: "AppState") -> Dict[str, bool]:
     }
 
 
+def _cloud(state: "AppState") -> Optional[Dict[str, Any]]:
+    """Meridian Cloud connection, when this gateway reports to a workspace.
+    The fleet (nodes, enrollment, serving) is then managed in Meridian Cloud."""
+    cp = state.config.control_plane
+    if not (cp.enabled and cp.url and cp.resolved_token()):
+        return None
+    return {"url": cp.url.rstrip("/"), "sign_in": state.cloud_sso is not None}
+
+
 def whoami_view(state: "AppState", identity: Optional[IdentityContext]) -> Dict[str, Any]:
     """Identity + capabilities for the presenting key (or open mode)."""
     auth_enabled = state.config.auth.enabled
@@ -56,6 +65,7 @@ def whoami_view(state: "AppState", identity: Optional[IdentityContext]) -> Dict[
                 "read_all_cost": False,
             },
             "features": _features(state),
+            "cloud": _cloud(state),
         }
     return {
         "auth_enabled": auth_enabled,
@@ -77,6 +87,7 @@ def whoami_view(state: "AppState", identity: Optional[IdentityContext]) -> Dict[
             "read_all_cost": identity.can_read_all_cost,
         },
         "features": _features(state),
+        "cloud": _cloud(state),
     }
 
 

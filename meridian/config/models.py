@@ -500,6 +500,17 @@ class ControlPlaneConfig(BaseModel):
     # Stable identity shown in the cloud console (defaults to the hostname).
     gateway_id: str = ""
     gateway_name: str = ""
+    # Console sign-in with Meridian Cloud accounts (needs a token and reports).
+    # Workspace members sign in to this gateway's console; their workspace
+    # role (viewer / operator / admin / owner) sets what they may do here.
+    console_sso: bool = True
+    # Address people open this gateway's console at (scheme + host + port),
+    # e.g. https://gw.internal:8080. Sign-in only returns here. Default:
+    # http://localhost:<gateway.port>.
+    console_url: str = ""
+    # Also offer API-key sign-in on the console (break-glass access when
+    # Meridian Cloud is unreachable). Set false to require cloud accounts.
+    console_key_sign_in: bool = True
 
     def resolved_token(self) -> Optional[str]:
         import os

@@ -11,6 +11,7 @@ import type {
   ModelList,
   ReloadReport,
   RequestRecord,
+  SignInOptions,
   UsageQuery,
   UsageReport,
   VersionInfo,
@@ -19,6 +20,9 @@ import type {
 
 export const gateway = {
   whoami: (signal?: AbortSignal) => request<WhoAmI>("/meridian/whoami", { signal }),
+  signInOptions: (signal?: AbortSignal) =>
+    request<SignInOptions>("/meridian/console/sign-in-options", { signal, auth: false }),
+  cloudSignOut: () => request<{ signed_out: boolean }>("/auth/cloud/logout", { method: "POST", auth: false }),
   version: (signal?: AbortSignal) => request<VersionInfo>("/meridian/version", { signal, auth: false }),
   status: (signal?: AbortSignal) => request<GatewayStatus>("/meridian/status", { signal }),
   requests: (signal?: AbortSignal) =>

@@ -19,7 +19,11 @@ from meridian.auth import AuthError, IdentityContext, authenticate
 def _authenticate(
     key_index: Dict[str, IdentityContext],
     authorization: Optional[str],
+    sso: Optional[IdentityContext] = None,
 ) -> IdentityContext:
+    # A Meridian Cloud console session counts when no API key is presented.
+    if sso is not None and not (authorization and authorization.strip()):
+        return sso
     try:
         return authenticate(authorization, key_index)
     except AuthError as exc:
@@ -31,11 +35,12 @@ def require_ops_view(
     auth_enabled: bool,
     key_index: Dict[str, IdentityContext],
     authorization: Optional[str],
+    sso: Optional[IdentityContext] = None,
 ) -> Optional[IdentityContext]:
     """Require read access to operator views. Returns None when auth is off."""
     if not auth_enabled:
         return None
-    identity = _authenticate(key_index, authorization)
+    identity = _authenticate(key_index, authorization, sso)
     if not identity.can_view_ops:
         raise GatewayError(
             "Key is not permitted to view operator data",
@@ -50,15 +55,16 @@ def require_reload(
     auth_enabled: bool,
     key_index: Dict[str, IdentityContext],
     authorization: Optional[str],
+    sso: Optional[IdentityContext] = None,
 ) -> Optional[IdentityContext]:
-    """Require key-reload rights. Reload always requires auth to be enabled."""
-    if not auth_enabled:
+    """Require key-reload rights: auth enabled, or a Meridian Cloud session."""
+    if not auth_enabled and sso is None:
         raise GatewayError(
             "Key reload requires auth.enabled",
             "authentication_error",
             401,
         )
-    identity = _authenticate(key_index, authorization)
+    identity = _authenticate(key_index, authorization, sso)
     if not identity.can_reload:
         raise GatewayError(
             "operator or ops_admin key required for reload",
@@ -73,6 +79,7 @@ def require_key_admin(
     auth_enabled: bool,
     key_index: Dict[str, IdentityContext],
     authorization: Optional[str],
+    sso: Optional[IdentityContext] = None,
 ) -> Optional[IdentityContext]:
     """Require key-management rights (ops_admin / role admin)."""
     if not auth_enabled:
@@ -81,7 +88,7 @@ def require_key_admin(
             "authentication_error",
             401,
         )
-    identity = _authenticate(key_index, authorization)
+    identity = _authenticate(key_index, authorization, sso)
     if not identity.can_manage_keys:
         raise GatewayError(
             "admin or ops_admin key required for key management",

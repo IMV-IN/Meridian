@@ -481,6 +481,9 @@ Meridian Cloud demo is running  (state: {tmp})
   Workspace "Acme AI": 2 gateways reporting ({", ".join(gateways)}),
   4 GPU nodes (2 online, 1 lease lapsed, 1 awaiting approval).
 
+  Gateway console  http://localhost:{args.port}/ui  → "Sign in with Meridian Cloud"
+                   (use localhost: it is the console address the gateway reports)
+
 Ctrl-C to stop.""", flush=True)
             while True:
                 time.sleep(1)

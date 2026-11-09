@@ -44,7 +44,7 @@ export class ApiError extends Error {
 type UnauthorizedListener = (err: ApiError) => void
 const unauthorizedListeners = new Set<UnauthorizedListener>()
 
-/** Notified when a gateway call made *with* a key is rejected as 401. */
+/** Notified when an authenticated gateway call (key or session) is rejected as 401. */
 export function onUnauthorized(listener: UnauthorizedListener): () => void {
   unauthorizedListeners.add(listener)
   return () => unauthorizedListeners.delete(listener)
@@ -114,6 +114,9 @@ export async function rawRequest(path: string, opts: RequestOptions = {}): Promi
   const finalHeaders: Record<string, string> = { Accept: "application/json", ...headers }
   const key = auth && !baseUrl ? credentials.get() : null
   if (key) finalHeaders.Authorization = `Bearer ${key}`
+  // Writes on the gateway's own origin carry the CSRF header that cookie
+  // (Meridian Cloud) sessions require; harmless with an API key.
+  if (!baseUrl && method !== "GET") finalHeaders["X-Meridian-CSRF"] = "1"
   let payload: BodyInit | undefined
   if (body !== undefined) {
     finalHeaders["Content-Type"] = "application/json"
@@ -137,7 +140,7 @@ export async function rawRequest(path: string, opts: RequestOptions = {}): Promi
   }
   if (!resp.ok) {
     const err = await parseError(resp)
-    if (err.isUnauthorized && key) for (const l of unauthorizedListeners) l(err)
+    if (err.isUnauthorized && !baseUrl && auth) for (const l of unauthorizedListeners) l(err)
     throw err
   }
   return resp

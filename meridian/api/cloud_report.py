@@ -124,6 +124,8 @@ class CloudReporter:
             "totals": {k: int(v) for k, v in totals.items()},
             "features": _features(state),
             "recent_requests": list(state.recent_requests)[:50],
+            # Where workspace members sign in to this gateway's console.
+            **({"console_url": state.cloud_sso.console_url} if state.cloud_sso is not None else {}),
         }
 
     async def send_once(self) -> bool:
@@ -135,7 +137,11 @@ class CloudReporter:
         try:
             resp = await self._client.post(url, json=self.build_report(), headers={"Authorization": f"Bearer {token}"})
             resp.raise_for_status()
-        except httpx.HTTPError as exc:
+            if self._state.cloud_sso is not None:
+                ws = resp.json().get("workspace_id")
+                if isinstance(ws, str) and ws:
+                    self._state.cloud_sso.workspace_id = ws
+        except (httpx.HTTPError, ValueError) as exc:
             if not self._failing:
                 logger.warning("Cloud report failed (%s); will keep retrying quietly", exc)
             self._failing = True

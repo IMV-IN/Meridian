@@ -1,4 +1,4 @@
-import { ChevronsUpDown, KeyRound, Lock, LogOut, Monitor, Moon, Settings, Sun, UserRound } from "lucide-react"
+import { ChevronsUpDown, Cloud, ExternalLink, KeyRound, Lock, LogOut, Monitor, Moon, Settings, Sun, UserRound } from "lucide-react"
 import { useTheme } from "@/providers/theme-provider"
 import { Link, NavLink, useLocation } from "react-router"
 
@@ -39,6 +39,8 @@ import { useAuth } from "@/providers/auth-provider"
 import { MeridianMark } from "./logo"
 import { NAV, SETTINGS_NAV, type NavItem } from "./nav"
 
+const FLEET_PATHS = new Set(["/fleet", "/fleet/enrollment", "/fleet/serving", "/fleet/audit"])
+
 function isActive(pathname: string, to: string) {
   if (to === "/") return pathname === "/"
   if (to === "/fleet") return pathname === "/fleet" || pathname.startsWith("/fleet/nodes")
@@ -72,7 +74,7 @@ function NavBadge({ item }: { item: NavItem }) {
 
 export function AppSidebar() {
   const { pathname } = useLocation()
-  const { can, authEnabled } = useAuth()
+  const { can, authEnabled, cloud } = useAuth()
   const version = useVersion()
   const { setOpenMobile } = useSidebar()
 
@@ -104,6 +106,20 @@ export function AppSidebar() {
               <SidebarMenu>
                 {group.items.map((item) => {
                   const locked = item.need ? !can(item.need) : false
+                  // With Meridian Cloud, the fleet is managed there: link out.
+                  const external = cloud && FLEET_PATHS.has(item.to) ? `${cloud.url}/ui${item.to}` : null
+                  if (external)
+                    return (
+                      <SidebarMenuItem key={item.to}>
+                        <SidebarMenuButton asChild tooltip={`${item.title} (Meridian Cloud)`}>
+                          <a href={external} target="_blank" rel="noopener noreferrer">
+                            <item.icon />
+                            <span>{item.title}</span>
+                            <ExternalLink className="ml-auto size-3 opacity-60" aria-label="opens Meridian Cloud in a new tab" />
+                          </a>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    )
                   return (
                     <SidebarMenuItem key={item.to}>
                       <SidebarMenuButton
@@ -147,16 +163,29 @@ export function AppSidebar() {
 }
 
 function UserMenu({ authEnabled }: { authEnabled: boolean }) {
-  const { identity, signOut } = useAuth()
+  const { identity, account, cloud, signOut } = useAuth()
   const { theme, setTheme } = useTheme()
   const { isMobile } = useSidebar()
-  const name = identity ? identity.key_id ?? "API key" : "Open mode"
-  const sub = identity
-    ? [identity.org_id, identity.team_id].filter(Boolean).join(" / ") + (identity.role ? ` · ${identity.role}` : "")
-    : authEnabled
-      ? "Not signed in"
-      : "Gateway auth disabled"
-  const initials = identity ? identity.org_id.slice(0, 2).toUpperCase() : "—"
+  const name = account ? account.name || account.email : identity ? (identity.key_id ?? "API key") : "Open mode"
+  const sub = account
+    ? `${account.workspace.name} · ${account.cloud_role}`
+    : identity
+      ? [identity.org_id, identity.team_id].filter(Boolean).join(" / ") + (identity.role ? ` · ${identity.role}` : "")
+      : authEnabled
+        ? "Not signed in"
+        : "Gateway auth disabled"
+  const initials = account
+    ? (account.name || account.email)
+        .split(/[\s@.]+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((w) => w[0]!.toUpperCase())
+        .join("")
+    : identity
+      ? identity.org_id.slice(0, 2).toUpperCase()
+      : "—"
+  const signedIn = !!(account || identity)
+  const nameClass = account ? "truncate font-medium" : "truncate font-mono text-[12px] font-medium"
 
   return (
     <SidebarMenuItem>
@@ -165,11 +194,11 @@ function UserMenu({ authEnabled }: { authEnabled: boolean }) {
           <SidebarMenuButton size="lg" className="data-[state=open]:bg-sidebar-accent">
             <Avatar className="size-8 rounded-lg">
               <AvatarFallback className="rounded-lg bg-primary text-[11px] font-semibold text-primary-foreground">
-                {identity ? initials : <UserRound className="size-4" />}
+                {signedIn ? initials : <UserRound className="size-4" />}
               </AvatarFallback>
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
-              <span className="truncate font-mono text-[12px] font-medium">{name}</span>
+              <span className={nameClass}>{name}</span>
               <span className="truncate text-[11px] text-sidebar-foreground/75">{sub}</span>
             </div>
             <ChevronsUpDown className="ml-auto size-4 opacity-60" />
@@ -183,8 +212,14 @@ function UserMenu({ authEnabled }: { authEnabled: boolean }) {
         >
           <DropdownMenuLabel className="font-normal">
             <div className="space-y-0.5">
-              <div className="font-mono text-xs font-medium">{name}</div>
+              <div className={account ? "text-sm font-medium" : "font-mono text-xs font-medium"}>{name}</div>
+              {account && account.name && <div className="text-xs text-muted-foreground">{account.email}</div>}
               <div className="text-xs text-muted-foreground">{sub}</div>
+              {account && (
+                <div className="text-xs text-muted-foreground">
+                  On this gateway: <span className="font-medium text-foreground">{account.role}</span>
+                </div>
+              )}
             </div>
           </DropdownMenuLabel>
           <DropdownMenuSeparator />
@@ -214,11 +249,20 @@ function UserMenu({ authEnabled }: { authEnabled: boolean }) {
                 Settings
               </Link>
             </DropdownMenuItem>
+            {cloud && (
+              <DropdownMenuItem asChild>
+                <a href={`${cloud.url}/ui/`} target="_blank" rel="noopener noreferrer">
+                  <Cloud />
+                  Open Meridian Cloud
+                  <ExternalLink className="ml-auto size-3 opacity-60" />
+                </a>
+              </DropdownMenuItem>
+            )}
           </DropdownMenuGroup>
-          {authEnabled && (
+          {(authEnabled || account) && (
             <>
               <DropdownMenuSeparator />
-              {identity ? (
+              {signedIn ? (
                 <DropdownMenuItem variant="destructive" onClick={signOut}>
                   <LogOut />
                   Sign out
