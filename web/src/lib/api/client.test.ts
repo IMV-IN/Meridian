@@ -57,16 +57,28 @@ describe("request()", () => {
     expect((err as ApiError).isNetwork).toBe(true)
   })
 
-  it("notifies unauthorized listeners only when a stored key was rejected", async () => {
+  it("notifies unauthorized listeners for the gateway's own calls only", async () => {
+    // Key or Meridian Cloud session: the auth provider decides what ended.
     const seen: number[] = []
     const off = onUnauthorized((e) => seen.push(e.status))
     fetchMock.mockImplementation(async () => jsonResponse(401, { error: { message: "Invalid API key", type: "authentication_error" } }))
     await request("/meridian/status").catch(() => undefined)
-    expect(seen).toEqual([]) // no key stored → nothing to sign out of
-    credentials.set("mrdn_testkeytestkeytestkey1", "session")
-    await request("/meridian/status").catch(() => undefined)
     expect(seen).toEqual([401])
+    await request("/admin/nodes", { baseUrl: "http://control:8443" }).catch(() => undefined)
+    await request("/meridian/console/sign-in-options", { auth: false }).catch(() => undefined)
+    expect(seen).toEqual([401]) // other origins and unauthenticated calls don't sign anyone out
     off()
+  })
+
+  it("sends the CSRF header on same-origin writes only", async () => {
+    fetchMock.mockImplementation(async () => jsonResponse(200, {}))
+    await request("/meridian/reload", { method: "POST" })
+    await request("/meridian/status")
+    await request("/admin/x", { method: "POST", baseUrl: "http://control:8443" })
+    const headers = fetchMock.mock.calls.map((c) => (c[1] as RequestInit).headers as Record<string, string>)
+    expect(headers[0]["X-Meridian-CSRF"]).toBe("1")
+    expect(headers[1]["X-Meridian-CSRF"]).toBeUndefined()
+    expect(headers[2]["X-Meridian-CSRF"]).toBeUndefined()
   })
 
   it("builds URLs and drops empty query values", () => {

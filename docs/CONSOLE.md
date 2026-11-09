@@ -32,7 +32,15 @@ token. By default it is kept for the browser tab only (sessionStorage). Choose
 **Remember on this device** to keep it in localStorage. If the key is deleted or
 rotated, the console signs you out with an explanation.
 
-With auth disabled the console runs in **open mode** and shows a banner. Key
+When the gateway is connected to a Meridian Cloud workspace, the sign-in page
+offers **Sign in with Meridian Cloud**: workspace members sign in with their
+cloud account and their workspace role sets their rights here (viewer,
+operator, or admin for admins and owners). API keys remain available as
+break-glass unless `control_plane.console_key_sign_in` is false. See
+[Gateway console sign-in](CLOUD.md#gateway-console-sign-in).
+
+With auth disabled (and no Meridian Cloud connection) the console runs in
+**open mode** and shows a banner. Key
 management, config reload and cost export all need auth, so they are
 unavailable in open mode.
 

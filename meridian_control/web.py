@@ -12,8 +12,10 @@ Auth model:
 
 from __future__ import annotations
 
+import html
 import json
 import mimetypes
+import urllib.parse
 from pathlib import Path
 from typing import Any, Optional
 
@@ -425,6 +427,74 @@ async def gw_report(request: Request, gp: GatewayPrincipal = Depends(gateway_pri
     return {"accepted": True, "workspace_id": gp.workspace_id}
 
 
+@gateway_router.post("/auth/token")
+def gw_auth_token(request: Request, body: dict = Body(...), gp: GatewayPrincipal = Depends(gateway_principal)):
+    """Exchange a sign-in code for the user's identity and workspace role."""
+    return _acc(request).gateway_exchange(
+        gp,
+        _body_str(body, "code"),
+        _body_str(body, "code_verifier"),
+        _body_str(body, "redirect_uri"),
+        _body_str(body, "gateway_id"),
+    )
+
+
+@gateway_router.post("/auth/role")
+def gw_auth_role(request: Request, body: dict = Body(...), gp: GatewayPrincipal = Depends(gateway_principal)):
+    return _acc(request).gateway_member_role(gp, _body_str(body, "user_id"))
+
+
+# ── gateway console sign-in (browser) ─────────────────────────────────────
+oauth_router = APIRouter(prefix="/oauth")
+
+
+def _error_page(title: str, message: str, status: int) -> HTMLResponse:
+    esc = html.escape
+    page = (
+        "<!doctype html><html lang=en><head><meta charset=utf-8>"
+        "<meta name=viewport content='width=device-width,initial-scale=1'>"
+        f"<title>{esc(title)} · Meridian Cloud</title>"
+        "<style>body{font:16px/1.5 system-ui,sans-serif;margin:0;display:grid;place-items:center;min-height:100vh;"
+        "background:#f6f6f3;color:#121816}main{max-width:28rem;padding:2rem}a{color:#1f6f4a}"
+        "@media(prefers-color-scheme:dark){body{background:#0b0e0d;color:#eceeea}a{color:#7fd1a6}}</style>"
+        f"</head><body><main><h1>{esc(title)}</h1><p>{esc(message)}</p>"
+        "<p><a href='/ui/'>Open Meridian Cloud</a></p></main></body></html>"
+    )
+    return HTMLResponse(page, status_code=status, headers=_UI_HEADERS)
+
+
+@oauth_router.get("/gateway/authorize")
+def gateway_authorize(
+    request: Request,
+    workspace_id: str = Query(""),
+    gateway_id: str = Query(""),
+    redirect_uri: str = Query(""),
+    state: str = Query(""),
+    code_challenge: str = Query(""),
+    code_challenge_method: str = Query("S256"),
+):
+    """Sign a person in to a gateway's console with their Meridian Cloud account."""
+    if code_challenge_method != "S256":
+        return _error_page("Can't sign in", "This gateway sent an unsupported sign-in request.", 400)
+    p = _acc(request).resolve_session(request.cookies.get(session_cookie_name(_cfg(request))))
+    if p is None:
+        # Sign in to Meridian Cloud first, then come straight back here.
+        back = request.url.path + ("?" + request.url.query if request.url.query else "")
+        return RedirectResponse(f"/ui/?{urllib.parse.urlencode({'next': back})}", status_code=302)
+    try:
+        url = _acc(request).gateway_authorize(p, workspace_id, gateway_id, redirect_uri, state, code_challenge)
+    except ControlServiceError as e:
+        msg = (
+            "This gateway hasn't connected to Meridian Cloud with its console address yet. "
+            "Check that it is running with a workspace token, wait 15 seconds, then try again."
+            if e.code == "UNKNOWN_GATEWAY"
+            else "The sign-in request from this gateway was malformed. Start again from the gateway's console."
+        )
+        return _error_page("Can't sign in to this gateway", msg, e.http_status)
+    no_store = {"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"}
+    return RedirectResponse(url, status_code=302, headers=no_store)
+
+
 # ── console bundle ────────────────────────────────────────────────────────
 _UI_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -505,6 +575,7 @@ def install_cloud(app: FastAPI, cfg: ControlConfig) -> None:
     app.include_router(api_router)
     app.include_router(w)
     app.include_router(gateway_router)
+    app.include_router(oauth_router)
     mount_console(app, cfg)
 
     @app.middleware("http")

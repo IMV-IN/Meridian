@@ -21,6 +21,7 @@ import json
 import logging
 import re
 import secrets
+import threading
 import time
 import urllib.parse
 from dataclasses import dataclass
@@ -65,6 +66,8 @@ CODE_MAX_ATTEMPTS = 5
 CODES_PER_EMAIL_PER_HOUR = 5
 CODE_MIN_INTERVAL_S = 30
 INVITE_TTL = timedelta(days=14)
+GATEWAY_CODE_TTL_S = 60
+_CONSOLE_URL = re.compile(r"https?://[A-Za-z0-9.\-\[\]:]+(/[A-Za-z0-9._~/-]*)?")
 
 GOOGLE_AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token"
@@ -124,6 +127,8 @@ class AccountsService:
         self._now = now
         self._http = http
         self.limiter = SlidingWindowLimiter()
+        self._used_codes: dict[str, float] = {}
+        self._codes_lock = threading.Lock()
 
     # ------------------------------------------------------------------ policy
     def _may_sign_in(self, s, email: str) -> bool:
@@ -760,6 +765,112 @@ class AccountsService:
                 s.commit()
             return GatewayPrincipal(workspace_id=row.workspace_id, token_id=row.id)
 
+    # ------------------------------------------------------ gateway sign-in
+    # Meridian Cloud is the identity provider for gateway consoles: an
+    # authorization-code flow with PKCE. The gateway is a confidential client
+    # authenticated by its workspace token, so a code is useless to anyone but
+    # the gateway that asked for it. Codes are short-lived signed values (no
+    # table): {user, workspace, gateway, PKCE challenge, redirect URI}.
+
+    @staticmethod
+    def gateway_callback_url(console_url: str) -> str:
+        return console_url.rstrip("/") + "/auth/cloud/callback"
+
+    def gateway_authorize(
+        self,
+        p: Principal,
+        workspace_id: str,
+        gateway_id: str,
+        redirect_uri: str,
+        state: str,
+        code_challenge: str,
+    ) -> str:
+        """URL to send the browser back to: the gateway's callback with a code,
+        or with error=access_denied when the user isn't in the workspace."""
+        if not (16 <= len(state) <= 200) or not re.fullmatch(r"[A-Za-z0-9_-]{43}", code_challenge or ""):
+            raise err("INVALID_REQUEST", "malformed sign-in request", 400)
+        with self._sf() as s:
+            gw = s.get(GatewayInstance, (workspace_id, gateway_id))
+            console_url = str((gw.report or {}).get("console_url") or "") if gw is not None else ""
+            # The redirect must be the exact callback of the console this gateway
+            # reported over its authenticated channel: no open redirect.
+            if not console_url or redirect_uri != self.gateway_callback_url(console_url):
+                raise err("UNKNOWN_GATEWAY", "this gateway hasn't registered its console with Meridian Cloud", 400)
+            m = s.get(Membership, (workspace_id, p.user_id))
+        sep = "&" if "?" in redirect_uri else "?"
+        if m is None:
+            return f"{redirect_uri}{sep}{urllib.parse.urlencode({'error': 'access_denied', 'state': state})}"
+        code = sign(
+            self._secret,
+            {
+                "t": "gwcode",
+                "u": p.user_id,
+                "w": workspace_id,
+                "g": gateway_id,
+                "c": code_challenge,
+                "r": redirect_uri,
+                "n": secrets.token_urlsafe(8),
+                "iat": time.time(),
+            },
+        )
+        return f"{redirect_uri}{sep}{urllib.parse.urlencode({'code': code, 'state': state})}"
+
+    def gateway_exchange(
+        self, gp: GatewayPrincipal, code: str, code_verifier: str, redirect_uri: str, gateway_id: str
+    ) -> dict:
+        data = unsign(self._secret, code or "", max_age_s=GATEWAY_CODE_TTL_S)
+        bad = err("INVALID_GRANT", "sign-in code is invalid or expired", 400)
+        if data is None or data.get("t") != "gwcode":
+            raise bad
+        digest_v = hashlib.sha256((code_verifier or "").encode()).digest()
+        challenge = base64.urlsafe_b64encode(digest_v).decode().rstrip("=")
+        if not (
+            secrets.compare_digest(str(data.get("w", "")), gp.workspace_id)
+            and secrets.compare_digest(str(data.get("g", "")), gateway_id or "")
+            and secrets.compare_digest(str(data.get("r", "")), redirect_uri or "")
+            and secrets.compare_digest(str(data.get("c", "")), challenge)
+        ):
+            raise bad
+        # One use per code (single replica, like the rate limiter).
+        digest = sha256_hex(code)
+        now = time.time()
+        with self._codes_lock:
+            for k in [k for k, exp in self._used_codes.items() if exp < now]:
+                del self._used_codes[k]
+            if digest in self._used_codes:
+                raise bad
+            self._used_codes[digest] = now + GATEWAY_CODE_TTL_S
+        with self._sf() as s:
+            user = s.get(User, str(data["u"]))
+            m = s.get(Membership, (gp.workspace_id, str(data["u"])))
+            ws = s.get(Workspace, gp.workspace_id)
+            if user is None or user.disabled or m is None or ws is None:
+                raise err("FORBIDDEN", "not a member of this workspace", 403)
+            s.add(
+                AuditEvent(
+                    workspace_id=gp.workspace_id,
+                    actor=user.email,
+                    kind="gateway_sign_in",
+                    detail=f"{gateway_id} as {m.role}"[:1024],
+                )
+            )
+            s.commit()
+            return {
+                "user": self._user_view(user),
+                "role": str(m.role),
+                "workspace": {"id": ws.id, "slug": ws.slug, "name": ws.name},
+            }
+
+    def gateway_member_role(self, gp: GatewayPrincipal, user_id: str) -> dict:
+        """Current role of a user the gateway signed in, so a removed or
+        demoted member loses gateway access within the gateway's re-check."""
+        with self._sf() as s:
+            user = s.get(User, user_id)
+            m = s.get(Membership, (gp.workspace_id, user_id))
+            if user is None or user.disabled or m is None:
+                raise err("NOT_MEMBER", "not a member of this workspace", 404)
+            return {"role": str(m.role)}
+
     # ---------------------------------------------------------- gateway reports
     def record_gateway_report(self, gp: GatewayPrincipal, report: dict[str, Any], raw_size: int) -> None:
         if raw_size > self._c.max_report_bytes:
@@ -792,7 +903,13 @@ class AccountsService:
             row.version = str(report.get("version", ""))[:40]
             row.token_id = gp.token_id
             row.last_seen_at = now
-            row.report = {**report, "received_at": _iso(now)}
+            stored = {**report, "received_at": _iso(now)}
+            # The console URL becomes a sign-in redirect target, so keep only a
+            # plain http(s) origin (+ optional path) and nothing else.
+            console_url = str(stored.pop("console_url", "") or "").strip()
+            if len(console_url) <= 300 and _CONSOLE_URL.fullmatch(console_url):
+                stored["console_url"] = console_url.rstrip("/")
+            row.report = stored
             s.commit()
 
     def _gateway_view(self, g: GatewayInstance, full: bool) -> dict:
@@ -814,6 +931,7 @@ class AccountsService:
             "backends_healthy": sum(1 for b in backends if b.get("healthy") and not b.get("idle")),
             "window": report.get("window") or {},
             "canary": status.get("canary"),
+            "console_url": report.get("console_url"),
         }
         if full:
             view["report"] = report

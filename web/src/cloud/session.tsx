@@ -92,6 +92,8 @@ export function CloudSessionProvider({ info, children }: { info: CloudInfo; chil
       phase: "ready",
       whoami: null,
       identity: null,
+      account: null,
+      cloud: null,
       authEnabled: true,
       capabilities: NO_CAPS,
       features: NO_FEATURES,

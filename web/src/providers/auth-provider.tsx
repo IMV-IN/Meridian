@@ -14,7 +14,7 @@ import { toast } from "sonner"
 import { ApiError, onUnauthorized, rawRequest } from "@/lib/api/client"
 import { credentials, type Persistence } from "@/lib/api/credentials"
 import { gateway } from "@/lib/api/gateway"
-import type { Capabilities, Features, Identity, WhoAmI } from "@/lib/api/types"
+import type { Capabilities, CloudAccount, CloudLink, Features, Identity, WhoAmI } from "@/lib/api/types"
 
 export type AuthPhase = "loading" | "unreachable" | "signed-out" | "ready"
 
@@ -22,6 +22,10 @@ export interface AuthContextValue {
   phase: AuthPhase
   whoami: WhoAmI | null
   identity: Identity | null
+  /** Signed in with a Meridian Cloud account (rather than an API key). */
+  account: CloudAccount | null
+  /** This gateway reports to Meridian Cloud: the fleet is managed there. */
+  cloud: CloudLink | null
   authEnabled: boolean
   capabilities: Capabilities
   features: Features
@@ -64,11 +68,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(
     () =>
       onUnauthorized((err) => {
-        if (!credentials.get()) return
-        credentials.clear()
-        setRejectedReason(err.message || "The gateway rejected your API key.")
-        qc.clear()
-        toast.error("Signed out", { description: "Your API key was rejected by the gateway." })
+        if (credentials.get()) {
+          credentials.clear()
+          setRejectedReason(err.message || "The gateway rejected your API key.")
+          qc.clear()
+          toast.error("Signed out", { description: "Your API key was rejected by the gateway." })
+          return
+        }
+        // A Meridian Cloud session that ended (expired, or removed from the
+        // workspace): show the sign-in page with the reason.
+        const who = qc.getQueryData<WhoAmI>(["whoami", "anon"])
+        if (who?.account) {
+          setRejectedReason("Your session ended. Sign in again with Meridian Cloud.")
+          qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "whoami" })
+          void qc.resetQueries({ queryKey: ["whoami"] })
+        }
       }),
     [qc],
   )
@@ -92,8 +106,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
 
   const signOut = useCallback(() => {
+    const who = qc.getQueryData<WhoAmI>(["whoami", credentials.get() ?? "anon"])
     credentials.clear()
     setRejectedReason(null)
+    if (who?.account) {
+      // End the gateway's Meridian Cloud session, then show the sign-in page.
+      void gateway
+        .cloudSignOut()
+        .catch(() => undefined)
+        .finally(() => {
+          // Drop cached data, then re-ask who we are: the 401 shows sign-in.
+          qc.removeQueries({ predicate: (q) => q.queryKey[0] !== "whoami" })
+          void qc.resetQueries({ queryKey: ["whoami"] })
+        })
+      return
+    }
     qc.clear()
   }, [qc])
 
@@ -109,6 +136,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       phase,
       whoami,
       identity: whoami?.identity ?? null,
+      account: whoami?.account ?? null,
+      cloud: whoami?.cloud ?? null,
       authEnabled: whoami?.auth_enabled ?? err?.isUnauthorized ?? false,
       capabilities,
       features: whoami?.features ?? NO_FEATURES,

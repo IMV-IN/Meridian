@@ -85,11 +85,40 @@ export interface Identity {
   pii_policy: string | null
 }
 
+/** A person signed in with their Meridian Cloud account. */
+export interface CloudAccount {
+  user_id: string
+  email: string
+  name: string
+  avatar_url: string
+  /** Workspace role in Meridian Cloud: viewer | operator | admin | owner. */
+  cloud_role: string
+  /** What that role means on this gateway: viewer | operator | admin. */
+  role: string
+  workspace: { id: string; slug: string; name: string }
+  expires_at: number
+}
+
+export interface CloudLink {
+  url: string
+  /** Workspace members can sign in to this console with Meridian Cloud. */
+  sign_in: boolean
+}
+
 export interface WhoAmI {
   auth_enabled: boolean
   identity: Identity | null
   capabilities: Capabilities
   features: Features
+  /** Set when this gateway reports to a Meridian Cloud workspace. */
+  cloud?: CloudLink | null
+  /** Set when signed in with a Meridian Cloud account (not an API key). */
+  account?: CloudAccount
+}
+
+export interface SignInOptions {
+  api_key: boolean
+  cloud: { enabled: boolean; ready: boolean; cloud_url: string; key_sign_in: boolean } | null
 }
 
 export interface BucketCaps {

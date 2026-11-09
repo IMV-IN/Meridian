@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { Network, Timer, Trash2, TriangleAlert, Zap } from "lucide-react"
+import { ExternalLink, Network, Timer, Trash2, TriangleAlert, Zap } from "lucide-react"
 import { useState } from "react"
 import { useNavigate, useParams } from "react-router"
 import { toast } from "sonner"
@@ -124,11 +124,20 @@ export default function GatewayDetailPage() {
           </span>
         }
         actions={
-          atLeast(ws.role, "admin") && (
-            <Button variant="outline" size="sm" onClick={() => setForget(true)}>
-              <Trash2 data-icon="inline-start" /> Remove
-            </Button>
-          )
+          <>
+            {d.console_url && (
+              <Button size="sm" asChild>
+                <a href={`${d.console_url}/ui/`} target="_blank" rel="noopener noreferrer">
+                  <ExternalLink data-icon="inline-start" /> Open gateway console
+                </a>
+              </Button>
+            )}
+            {atLeast(ws.role, "admin") && (
+              <Button variant="outline" size="sm" onClick={() => setForget(true)}>
+                <Trash2 data-icon="inline-start" /> Remove
+              </Button>
+            )}
+          </>
         }
       />
       {!d.online && (

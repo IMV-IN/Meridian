@@ -20,8 +20,11 @@ def require_usage_identity(
     auth_enabled: bool,
     key_index: Dict[str, IdentityContext],
     authorization: Optional[str],
+    sso: Optional[IdentityContext] = None,
 ) -> IdentityContext:
     """Authenticate for /meridian/usage*. Raises GatewayError on deny."""
+    if sso is not None and not (authorization and authorization.strip()):
+        return sso
     if not auth_enabled:
         raise GatewayError(
             "Usage API requires auth.enabled when cost attribution is on",

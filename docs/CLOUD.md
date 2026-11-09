@@ -204,6 +204,9 @@ your first workspace.
   The gateway appears within one report interval. Its identity defaults to
   `hostname:port`; set `control_plane.gateway_id` if hostnames change, for
   example with Kubernetes pods.
+- **Sign in to the gateway's console.** Once connected, the gateway's own
+  console (`http://<gateway>:8080/ui`) offers **Sign in with Meridian Cloud**.
+  See [Gateway console sign-in](#gateway-console-sign-in).
 - **Enroll a GPU node.** On **Enrollment → Mint token**, then on the GPU host:
 
   ```bash
@@ -217,12 +220,67 @@ your first workspace.
   server with its normal trust store, because `*.ts.net` certificates are
   publicly trusted.
 
+## Gateway console sign-in
+
+Each gateway serves its own console for the traffic it handles (requests,
+latency, backends, routing, keys, usage). When the gateway is connected to a
+workspace, people sign in to that console with their **Meridian Cloud
+account**, and their workspace role sets what they can do there:
+
+| Workspace role | On the gateway console |
+| --- | --- |
+| viewer | Read every view |
+| operator | Also reload config and keys |
+| admin, owner | Also create, rotate and delete API keys |
+
+The fleet pages (nodes, enrollment, serving, audit) open Meridian Cloud,
+where the fleet is managed. Meridian Cloud's gateway page links back with
+**Open gateway console**.
+
+Tell the gateway the address people open its console at, so sign-in can
+return there (the default is `http://localhost:<port>`, which only works on
+the gateway's own machine):
+
+```yaml
+control_plane:
+  console_url: http://gw-laptop.local:8080   # scheme + host + port
+  console_key_sign_in: true                    # keep API keys as break-glass
+```
+
+How it works: an authorization-code flow with PKCE, with Meridian Cloud as
+the identity provider.
+
+1. The console sends the browser to `/oauth/gateway/authorize` on Meridian
+   Cloud. People who aren't signed in there sign in first and come straight
+   back.
+2. Meridian Cloud checks membership of the gateway's workspace and redirects
+   to the gateway's callback. It only redirects to the console address that
+   gateway reported over its authenticated channel, so there is no open
+   redirect.
+3. The gateway exchanges the one-time, 60-second code using its workspace
+   token and the PKCE verifier, so a code is useless to anyone else.
+4. The gateway keeps its own session (HttpOnly cookie, 12 hours; writes need
+   the `X-Meridian-CSRF` header) and re-checks the role every 5 minutes.
+   Removing or demoting a member in Meridian Cloud takes effect on every
+   gateway within minutes.
+
+Only identity crosses: no prompts, completions or keys. Each sign-in is
+recorded in the workspace audit log (`gateway_sign_in`). While a gateway is
+connected, its operator endpoints require sign-in even if `auth.enabled` is
+off. If Meridian Cloud is unreachable, existing sessions keep working until
+they expire, and API keys still work when `console_key_sign_in` is on.
+
+GPU nodes have no console of their own by design: the agent opens no inbound
+port besides the engine's, and it is managed from Meridian Cloud (Nodes,
+Enrollment, Serving, Audit log) under the same workspace roles.
+
 ## How the edge is secured
 
 | Path | Exposed on | Authentication |
 | --- | --- | --- |
 | `/ui`, `/api/*`, `/auth/*` | 443 | Session cookie (`__Host-`, HttpOnly, Secure, SameSite=Lax). Writes also need the `X-Meridian-CSRF` header |
 | `/api/gateway/v1/*` | 443 | `Authorization: Bearer mgw_…` (stored hashed, revocable per token) |
+| `/oauth/gateway/authorize` | 443 | Session cookie; redirects only to the console address the gateway reported |
 | `/control/v1/enroll` | 8443 | One-time join token |
 | `/control/v1/nodes/*` | 8443 | Client certificate. Caddy verifies it against the node CA and forwards it; meridian-control re-verifies the chain and the node ID (`REQUIRE_MTLS=1`) |
 | `/control/v1/*` | 443 | Refused (421). Nodes must use 8443 |

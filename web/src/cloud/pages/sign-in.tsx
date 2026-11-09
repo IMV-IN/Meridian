@@ -43,6 +43,11 @@ function message(e: unknown): string {
   return "Something went wrong."
 }
 
+function safeReturnPath(value: string | null): string | null {
+  if (!value || !value.startsWith("/") || value.startsWith("//") || /[\\\r\n]/.test(value)) return null
+  return value
+}
+
 export function CloudSignIn() {
   const { info, refresh } = useCloud()
   const [step, setStep] = useState<"email" | "code">("email")
@@ -59,7 +64,11 @@ export function CloudSignIn() {
     return () => window.clearTimeout(id)
   }, [cooldown])
 
-  const next = window.location.pathname.startsWith("/ui") ? window.location.pathname : "/ui/"
+  // ?next= brings the person back after sign-in, e.g. to a gateway console's
+  // sign-in request (/oauth/gateway/authorize). Same-origin paths only.
+  const returnTo = safeReturnPath(new URLSearchParams(window.location.search).get("next"))
+  const forGateway = returnTo?.startsWith("/oauth/gateway/") ?? false
+  const next = returnTo ?? (window.location.pathname.startsWith("/ui") ? window.location.pathname : "/ui/")
 
   const sendCode = async (e?: React.FormEvent) => {
     e?.preventDefault()
@@ -86,6 +95,10 @@ export function CloudSignIn() {
     setBusy(true)
     try {
       await cloud.emailVerify(email.trim(), value)
+      if (returnTo) {
+        window.location.assign(returnTo)
+        return
+      }
       window.history.replaceState(null, "", window.location.pathname)
       await refresh()
     } catch (err) {
@@ -119,9 +132,11 @@ export function CloudSignIn() {
               <div className="space-y-1.5">
                 <h1 className="text-2xl font-semibold tracking-tight">Sign in to Meridian</h1>
                 <p className="text-sm text-muted-foreground">
-                  {info.signup === "invite"
-                    ? "Use the email address you were invited with."
-                    : "New here? Signing in creates your account."}
+                  {forGateway
+                    ? "A gateway console asked you to sign in. You'll go straight back to it afterwards."
+                    : info.signup === "invite"
+                      ? "Use the email address you were invited with."
+                      : "New here? Signing in creates your account."}
                 </p>
               </div>
               {info.providers.google && (

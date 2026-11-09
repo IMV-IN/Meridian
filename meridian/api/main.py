@@ -16,7 +16,7 @@ from typing import AsyncGenerator, AsyncIterator, Awaitable, Callable, Optional
 
 import httpx
 from fastapi import FastAPI, Request
-from fastapi.responses import FileResponse, JSONResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
 from prometheus_client import generate_latest
 
 from meridian.api.authz import require_key_admin, require_ops_view, require_reload
@@ -29,7 +29,7 @@ from meridian.api.reload import reload_config
 from meridian.api.routing import route
 from meridian.api.state import AppState, build_app_state, build_backend, shutdown_app_state
 from meridian.api.static_files import static_file
-from meridian.auth import AuthError, authenticate
+from meridian.auth import AuthError, IdentityContext, authenticate
 from meridian.config.models import MeridianConfig
 from meridian.cost.authz import clamp_window_days, require_usage_identity, resolve_usage_scope
 from meridian.cost.extract import usage_from_dict, usage_from_sse_bytes
@@ -88,6 +88,18 @@ def get_state() -> AppState:
     if _state is None:
         raise RuntimeError("App state not initialized; call init_app() first")
     return _state
+
+
+def sso_identity(request: Request) -> Optional[IdentityContext]:
+    """Identity from a Meridian Cloud console session, if any."""
+    sso = _state.cloud_sso if _state is not None else None
+    return sso.identity(request) if sso is not None else None
+
+
+def ops_sign_in_required(state: AppState) -> bool:
+    """Operator views need sign-in when keys are on, or when the console
+    signs people in with Meridian Cloud (then the gateway isn't left open)."""
+    return state.config.auth.enabled or state.cloud_sso is not None
 
 
 async def init_app(
@@ -161,6 +173,13 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     if cp.enabled and cp.url and cp.report and cp.resolved_token():
         from meridian.api.cloud_report import CloudReporter
 
+        if cp.console_sso:
+            from meridian.api.cloud_sso import CloudSSO
+
+            state.cloud_sso = CloudSSO(cp, state.config.gateway.port)
+            await state.cloud_sso.start_rechecks()
+            logger.info("Console sign-in with Meridian Cloud enabled (console at %s)", state.cloud_sso.console_url)
+
         cloud_reporter = CloudReporter(state)
         await cloud_reporter.start()
 
@@ -174,6 +193,8 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await managed_sync.stop()
     if cloud_reporter is not None:
         await cloud_reporter.stop()
+    if state.cloud_sso is not None:
+        await state.cloud_sso.stop()
     for task in sweep_tasks:
         task.cancel()
         try:
@@ -416,9 +437,10 @@ async def status(request: Request) -> Response:
     state = get_state()
     try:
         require_ops_view(
-            auth_enabled=state.config.auth.enabled,
+            auth_enabled=ops_sign_in_required(state),
             key_index=state.key_index,
             authorization=request.headers.get("authorization"),
+            sso=sso_identity(request),
         )
     except GatewayError as exc:
         return exc.to_response()
@@ -445,6 +467,13 @@ async def whoami(request: Request) -> Response:
     auth is disabled this reports open mode. Never echoes the raw key.
     """
     state = get_state()
+    sso = state.cloud_sso
+    has_key = bool((request.headers.get("authorization") or "").strip())
+    if sso is not None and not has_key:
+        session = sso.session(request)
+        if session is None:
+            return GatewayError("Sign in required", "authentication_error", 401).to_response()
+        return JSONResponse({**whoami_view(state, session.identity), "account": session.account()})
     if not state.config.auth.enabled:
         return JSONResponse(whoami_view(state, None))
     try:
@@ -454,15 +483,87 @@ async def whoami(request: Request) -> Response:
     return JSONResponse(whoami_view(state, identity))
 
 
+@app.get("/meridian/console/sign-in-options")
+async def sign_in_options() -> JSONResponse:
+    """What the console's sign-in page offers (public; no secrets)."""
+    state = get_state()
+    sso = state.cloud_sso
+    return JSONResponse({
+        "api_key": state.config.auth.enabled and (sso is None or state.config.control_plane.console_key_sign_in),
+        "cloud": sso.options() if sso is not None else None,
+    })
+
+
+@app.get("/auth/cloud/start", include_in_schema=False)
+async def cloud_sign_in_start(request: Request) -> Response:
+    from meridian.api.cloud_sso import STATE_COOKIE, STATE_TTL_S, SSOError
+
+    sso = get_state().cloud_sso
+    if sso is None:
+        return RedirectResponse("/ui/?auth_error=cloud_disabled", status_code=302)
+    try:
+        url, cookie = sso.start()
+    except SSOError as exc:
+        return RedirectResponse(f"/ui/?auth_error={exc.code}", status_code=302)
+    resp = RedirectResponse(url, status_code=302)
+    resp.set_cookie(
+        STATE_COOKIE, cookie, max_age=STATE_TTL_S, httponly=True,
+        secure=request.url.scheme == "https", samesite="lax", path="/auth/cloud",
+    )
+    return resp
+
+
+@app.get("/auth/cloud/callback", include_in_schema=False)
+async def cloud_sign_in_callback(
+    request: Request, code: str = "", state: str = "", error: str = ""
+) -> Response:
+    from meridian.api.cloud_sso import SESSION_COOKIE, SESSION_TTL_S, STATE_COOKIE, SSOError
+
+    sso = get_state().cloud_sso
+    if sso is None:
+        return RedirectResponse("/ui/?auth_error=cloud_disabled", status_code=302)
+    if error or not code:
+        resp = RedirectResponse(f"/ui/?auth_error={'not_member' if error == 'access_denied' else 'invalid'}", 302)
+    else:
+        try:
+            token = await sso.finish(code, state, request.cookies.get(STATE_COOKIE))
+        except SSOError as exc:
+            resp = RedirectResponse(f"/ui/?auth_error={exc.code}", status_code=302)
+        else:
+            resp = RedirectResponse("/ui/", status_code=302)
+            resp.set_cookie(
+                SESSION_COOKIE, token, max_age=SESSION_TTL_S, httponly=True,
+                secure=request.url.scheme == "https", samesite="lax", path="/",
+            )
+    resp.delete_cookie(STATE_COOKIE, path="/auth/cloud")
+    resp.headers["Cache-Control"] = "no-store"
+    return resp
+
+
+@app.post("/auth/cloud/logout", include_in_schema=False)
+async def cloud_sign_out(request: Request) -> Response:
+    from meridian.api.cloud_sso import CSRF_HEADER, SESSION_COOKIE
+
+    sso = get_state().cloud_sso
+    if request.headers.get(CSRF_HEADER) != "1":
+        return GatewayError("missing X-Meridian-CSRF header", "permission_error", 403).to_response()
+    if sso is not None:
+        sso.sign_out(request)
+    resp = JSONResponse({"signed_out": True})
+    resp.delete_cookie(SESSION_COOKIE, path="/")
+    return resp
+
+
 @app.get("/meridian/config")
 async def config_view(request: Request) -> Response:
     """Effective routing/policy config, allowlisted (no keys, no secrets)."""
     state = get_state()
     try:
         require_ops_view(
-            auth_enabled=state.config.auth.enabled,
+            auth_enabled=ops_sign_in_required(state),
             key_index=state.key_index,
             authorization=request.headers.get("authorization"),
+            sso=sso_identity(request),
         )
     except GatewayError as exc:
         return exc.to_response()
@@ -475,9 +576,10 @@ async def budgets_view(request: Request) -> Response:
     state = get_state()
     try:
         require_ops_view(
-            auth_enabled=state.config.auth.enabled,
+            auth_enabled=ops_sign_in_required(state),
             key_index=state.key_index,
             authorization=request.headers.get("authorization"),
+            sso=sso_identity(request),
         )
     except GatewayError as exc:
         return exc.to_response()
@@ -489,9 +591,10 @@ async def recent_requests(request: Request) -> Response:
     state = get_state()
     try:
         require_ops_view(
-            auth_enabled=state.config.auth.enabled,
+            auth_enabled=ops_sign_in_required(state),
             key_index=state.key_index,
             authorization=request.headers.get("authorization"),
+            sso=sso_identity(request),
         )
     except GatewayError as exc:
         return exc.to_response()
@@ -512,6 +615,7 @@ async def reload_auth_keys(request: Request) -> Response:
             auth_enabled=state.config.auth.enabled,
             key_index=state.key_index,
             authorization=request.headers.get("authorization"),
+            sso=sso_identity(request),
         )
     except GatewayError as exc:
         return exc.to_response()
@@ -539,6 +643,7 @@ async def keys_list(request: Request) -> Response:
             auth_enabled=state.config.auth.enabled,
             key_index=state.key_index,
             authorization=request.headers.get("authorization"),
+            sso=sso_identity(request),
         )
         return JSONResponse({"keys": list_keys(state)})
     except GatewayError as exc:
@@ -563,6 +668,7 @@ async def keys_create(request: Request) -> Response:
             auth_enabled=state.config.auth.enabled,
             key_index=state.key_index,
             authorization=request.headers.get("authorization"),
+            sso=sso_identity(request),
         )
     except GatewayError as exc:
         return exc.to_response()
@@ -610,6 +716,7 @@ async def keys_delete(key_id: str, request: Request) -> Response:
             auth_enabled=state.config.auth.enabled,
             key_index=state.key_index,
             authorization=request.headers.get("authorization"),
+            sso=sso_identity(request),
         )
         view = delete_key(
             state, key_id, caller_key_id=identity.key_id if identity else None
@@ -647,6 +754,7 @@ async def usage_report(
             auth_enabled=state.config.auth.enabled,
             key_index=state.key_index,
             authorization=request.headers.get("authorization"),
+            sso=sso_identity(request),
         )
         org_f, team_f = resolve_usage_scope(identity, org, team)
     except GatewayError as exc:
@@ -699,6 +807,7 @@ async def usage_csv(
                 auth_enabled=state.config.auth.enabled,
                 key_index=state.key_index,
                 authorization=request.headers.get("authorization"),
+                sso=sso_identity(request),
             )
             org_f, team_f = resolve_usage_scope(identity, org, team)
         except GatewayError as exc:
