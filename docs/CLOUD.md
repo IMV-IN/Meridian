@@ -276,9 +276,17 @@ backup can never act again. See the restore runbook in
 
 ## Update
 
+Images are published only for tagged releases, so a checkout that tracks
+`main` rebuilds the image from the new code. From `deploy/cloud`:
+
 ```bash
-git pull && docker compose pull && docker compose run --rm migrate && docker compose up -d
+git pull && docker compose build control && docker compose run --rm migrate && docker compose up -d
 ```
+
+`up -d` recreates the services whose image or settings changed; the
+database, node CA and sessions in `data/` carry over, so nobody is signed out.
+On a published release (`MERIDIAN_VERSION` in `.env` set to that tag), use
+`docker compose pull` in place of `docker compose build control`.
 
 ## Limits and when to move
 
