@@ -81,10 +81,15 @@ export function SearchInput({
         <Search />
       </InputGroupAddon>
       <InputGroupInput
+        type="search"
+        name="q"
+        enterKeyHint="search"
+        autoComplete="off"
+        spellCheck={false}
         value={value}
         onChange={(e) => onChange(e.target.value)}
         placeholder={placeholder}
-        aria-label={placeholder}
+        aria-label={placeholder.replace(/…$/, "")}
       />
       {value && (
         <InputGroupAddon align="inline-end">
@@ -169,6 +174,8 @@ function ConfirmBody({
             </Label>
             <Input
               id="confirm-input"
+              name="confirm"
+              autoCapitalize="off"
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
               autoComplete="off"

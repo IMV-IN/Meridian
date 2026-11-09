@@ -27,7 +27,10 @@ function ConnectGatewayDialog({ open, onOpenChange }: { open: boolean; onOpenCha
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-2xl">
-        {open && <ConnectBody onClose={() => onOpenChange(false)} />}
+        {/* Radix mounts content only while open and keeps it through the exit
+            animation, so the form resets on every open without flashing an
+            empty dialog on close. */}
+        <ConnectBody onClose={() => onOpenChange(false)} />
       </DialogContent>
     </Dialog>
   )
@@ -86,7 +89,7 @@ control_plane:
           >
             <Field data-invalid={create.isError}>
               <FieldLabel htmlFor="gw-name">Gateway name</FieldLabel>
-              <Input id="gw-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="prod-mumbai-1" autoFocus maxLength={100} />
+              <Input id="gw-name" name="gateway-name" autoComplete="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. prod-mumbai-1" maxLength={100} />
               {create.error ? (
                 <FieldError>{create.error instanceof ApiError ? create.error.message : "Failed"}</FieldError>
               ) : (

@@ -109,7 +109,7 @@ function FleetCard() {
       actions={
         <Button variant="ghost" size="xs" asChild>
           <Link to="/fleet">
-            Nodes <ArrowRight data-icon="inline-end" />
+            All nodes
           </Link>
         </Button>
       }
@@ -186,11 +186,11 @@ function RolloutCard() {
   return (
     <Panel
       title="Routing"
-      description={cfg ? `Strategy · ${titleCase(cfg.gateway.strategy)}` : undefined}
+      description={cfg ? `${titleCase(cfg.gateway.strategy)} strategy` : undefined}
       actions={
         <Button variant="ghost" size="xs" asChild>
           <Link to="/routing">
-            Details <ArrowRight data-icon="inline-end" />
+            Routing details
           </Link>
         </Button>
       }
@@ -371,7 +371,7 @@ export default function OverviewPage() {
               </>
             }
             tone={backends.length === 0 ? "warning" : healthy === backends.length ? "good" : healthy === 0 ? "critical" : "warning"}
-            hint={`Strategy · ${titleCase(status.data.strategy)}`}
+            hint={`${titleCase(status.data.strategy)} strategy`}
           />
         </div>
       )}
@@ -417,7 +417,7 @@ export default function OverviewPage() {
           actions={
             <Button variant="ghost" size="xs" asChild>
               <Link to="/backends">
-                All backends <ArrowRight data-icon="inline-end" />
+                All backends
               </Link>
             </Button>
           }
@@ -468,7 +468,7 @@ export default function OverviewPage() {
           actions={
             <Button variant="ghost" size="xs" asChild>
               <Link to="/requests?status=errors">
-                View all <ArrowRight data-icon="inline-end" />
+                All errors
               </Link>
             </Button>
           }

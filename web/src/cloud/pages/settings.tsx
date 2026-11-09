@@ -60,7 +60,7 @@ function WorkspaceTab() {
           <Field data-invalid={rename.isError}>
             <FieldLabel htmlFor="ws-rename">Name</FieldLabel>
             <div className="flex gap-2">
-              <Input id="ws-rename" value={name} onChange={(e) => setName(e.target.value)} disabled={!canAdmin} maxLength={120} />
+              <Input id="ws-rename" name="organization" autoComplete="organization" value={name} onChange={(e) => setName(e.target.value)} disabled={!canAdmin} maxLength={120} />
               {canAdmin && (
                 <Button onClick={() => rename.mutate()} disabled={rename.isPending || name.trim() === ws.name || name.trim().length < 2}>
                   {rename.isPending && <Spinner data-icon="inline-start" />}
@@ -132,7 +132,7 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
         >
           <Field data-invalid={invite.isError}>
             <FieldLabel htmlFor="inv-email">Email</FieldLabel>
-            <Input id="inv-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teammate@company.com" autoFocus />
+            <Input id="inv-email" name="invite-email" type="email" autoComplete="off" spellCheck={false} value={email} onChange={(e) => setEmail(e.target.value)} placeholder="teammate@company.com" />
             {invite.isError && <FieldError>{errMsg(invite.error)}</FieldError>}
           </Field>
           <Field>
@@ -231,7 +231,9 @@ function MembersTab() {
                 <TableHead className="text-xs">Role</TableHead>
                 <TableHead className="text-xs">Joined</TableHead>
                 <TableHead className="text-xs">Last sign-in</TableHead>
-                <TableHead className="pr-4 text-right text-xs" />
+                <TableHead className="pr-4 text-right text-xs">
+                  <span className="sr-only">Actions</span>
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -262,7 +264,7 @@ function MembersTab() {
                     <TableCell>
                       {editable ? (
                         <Select value={m.role} onValueChange={(r) => setRole.mutate({ id: m.id, role: r as WorkspaceRole })}>
-                          <SelectTrigger size="sm" className="w-32 capitalize">
+                          <SelectTrigger size="sm" className="w-32 capitalize" aria-label={`Role for ${m.name || m.email}`}>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -378,7 +380,9 @@ function TokensTab() {
               <TableHead className="text-xs">Created</TableHead>
               <TableHead className="text-xs">Last used</TableHead>
               <TableHead className="text-xs">Status</TableHead>
-              <TableHead className="pr-4" />
+              <TableHead className="pr-4">
+                <span className="sr-only">Actions</span>
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -452,7 +456,7 @@ function AccountTab() {
           <Field data-invalid={save.isError}>
             <FieldLabel htmlFor="me-name">Display name</FieldLabel>
             <div className="flex gap-2">
-              <Input id="me-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} />
+              <Input id="me-name" name="name" autoComplete="name" value={name} onChange={(e) => setName(e.target.value)} maxLength={200} />
               <Button onClick={() => save.mutate()} disabled={save.isPending || !name.trim() || name.trim() === me?.user.name}>
                 Save
               </Button>

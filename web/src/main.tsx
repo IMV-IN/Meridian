@@ -12,7 +12,7 @@ import { AuthProvider } from "@/providers/auth-provider"
 import { SettingsProvider } from "@/providers/settings-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
 
-import { detectCloud, type CloudInfo } from "./cloud/api"
+import { detectCloud, readBootInfo, type CloudInfo } from "./cloud/api"
 import { createRouter } from "./routes"
 
 function Frame({ client, children }: { client: QueryClient; children: ReactNode }) {
@@ -34,7 +34,10 @@ function Frame({ client, children }: { client: QueryClient; children: ReactNode 
 
 async function boot() {
   const root = createRoot(document.getElementById("root")!)
-  const info: CloudInfo | null = await detectCloud()
+  // Production: the page says which console it is (no request before first
+  // render). Vite's dev server serves a plain page, so probe there instead.
+  const embedded = readBootInfo()
+  const info: CloudInfo | null = embedded !== undefined ? embedded : import.meta.env.DEV ? await detectCloud() : null
   if (info) {
     // Meridian Cloud: accounts + workspaces; loaded on demand so the
     // self-hosted console bundle stays unchanged.

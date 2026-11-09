@@ -61,16 +61,16 @@ function PlacementSimulator() {
           <div className="grid gap-3 sm:grid-cols-[1fr_1fr_2fr]">
             <Field>
               <FieldLabel htmlFor="pl-vram">VRAM per device (GiB)</FieldLabel>
-              <Input id="pl-vram" type="number" min={0} step={0.5} value={gib} onChange={(e) => setGib(e.target.value)} />
+              <Input id="pl-vram" name="vram-gib" type="number" inputMode="decimal" autoComplete="off" min={0} step={0.5} value={gib} onChange={(e) => setGib(e.target.value)} />
             </Field>
             <Field>
               <FieldLabel htmlFor="pl-count">Devices</FieldLabel>
-              <Input id="pl-count" type="number" min={1} max={16} value={count} onChange={(e) => setCount(e.target.value)} />
+              <Input id="pl-count" name="device-count" type="number" inputMode="numeric" autoComplete="off" min={1} max={16} value={count} onChange={(e) => setCount(e.target.value)} />
               <FieldDescription>&gt;1 requires one NVLink group</FieldDescription>
             </Field>
             <Field>
               <FieldLabel htmlFor="pl-digest">Artifact digest (optional)</FieldLabel>
-              <Input id="pl-digest" value={digest} onChange={(e) => setDigest(e.target.value)} placeholder="sha256:…" className="font-mono text-xs" />
+              <Input id="pl-digest" name="artifact-digest" autoComplete="off" spellCheck={false} value={digest} onChange={(e) => setDigest(e.target.value)} placeholder="sha256:…" className="font-mono text-xs" />
             </Field>
           </div>
           <Button type="submit" className="w-fit" disabled={place.isPending}>
@@ -154,7 +154,7 @@ function RestorePanel() {
         <Field>
           <FieldLabel htmlFor="restore-epoch">High-water epoch</FieldLabel>
           <div className="flex gap-2">
-            <Input id="restore-epoch" type="number" min={0} value={epoch} onChange={(e) => setEpoch(e.target.value)} placeholder="e.g. 1842" className="w-40" />
+            <Input id="restore-epoch" name="high-water-epoch" type="number" inputMode="numeric" autoComplete="off" min={0} value={epoch} onChange={(e) => setEpoch(e.target.value)} placeholder="e.g. 1842" className="w-40" />
             <Button variant="destructive" disabled={epoch === "" || Number(epoch) < 0} onClick={() => setOpen(true)}>
               Record restore
             </Button>

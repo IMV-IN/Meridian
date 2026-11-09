@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 
@@ -115,14 +115,18 @@ export function CodeBlock({
   return (
     <div className={cn("group/code relative max-w-full min-w-0 rounded-lg border bg-muted/50", className)}>
       {language && (
-        <span className="pointer-events-none absolute top-2 left-3 font-mono text-[10px] tracking-wide text-muted-foreground uppercase">
+        <span className="pointer-events-none absolute top-2 left-3 font-mono text-[11px] text-muted-foreground">
           {language}
         </span>
       )}
       <CopyButton value={code} label="Copy code" className="absolute top-1.5 right-1.5 bg-card/80 backdrop-blur" />
       <pre
+        // Focusable so keyboard users can scroll long lines; never machine-translated.
+        tabIndex={0}
+        translate="no"
+        aria-label={language ? `${language} code` : "Code"}
         className={cn(
-          "scrollbar-thin overflow-auto p-3 font-mono text-[12.5px] leading-relaxed",
+          "scrollbar-thin overflow-auto rounded-lg p-3 font-mono text-[12.5px] leading-relaxed outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
           language && "pt-7",
           wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre",
         )}
@@ -155,8 +159,12 @@ export function SnippetTabs({ snippets, className }: { snippets: Snippet[]; clas
             </TabsTrigger>
           ))}
         </TabsList>
+        {snippets.map((s) => (
+          <TabsContent key={s.id} value={s.id} tabIndex={-1} className="focus-visible:ring-0">
+            <CodeBlock code={s.code} language={s.language} />
+          </TabsContent>
+        ))}
       </Tabs>
-      <CodeBlock code={current.code} language={current.language} />
     </div>
   )
 }

@@ -16,6 +16,7 @@ import { useState, type ReactNode } from "react"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
+import { formatNumber } from "@/lib/format"
 
 import { LoadingRows } from "./states"
 
@@ -168,7 +169,7 @@ export function DataTable<T>({
                   }
                   tabIndex={onRowClick ? 0 : undefined}
                   className={cn(
-                    onRowClick && "cursor-pointer focus-visible:bg-muted/60 focus-visible:outline-none",
+                    onRowClick && "cursor-pointer focus-visible:bg-muted/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ring",
                     rowClassName?.(row),
                   )}
                 >
@@ -198,7 +199,7 @@ export function DataTable<T>({
       {pageCount > 1 && (
         <div className="flex items-center justify-between gap-2 px-1 text-xs text-muted-foreground">
           <span>
-            {filteredCount.toLocaleString()} rows · page {table.getState().pagination.pageIndex + 1} of {pageCount}
+            {formatNumber(filteredCount)} rows, page {table.getState().pagination.pageIndex + 1} of {pageCount}
           </span>
           <div className="flex items-center gap-1">
             <Button

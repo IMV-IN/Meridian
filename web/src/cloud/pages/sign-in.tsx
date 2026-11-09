@@ -10,6 +10,7 @@ import { InputOTP, InputOTPGroup, InputOTPSeparator, InputOTPSlot } from "@/comp
 import { Spinner } from "@/components/ui/spinner"
 import { ApiError } from "@/lib/api/client"
 import { BrandPanel } from "@/pages/sign-in"
+import { autoFocusDesktop } from "@/lib/utils"
 
 import { cloud } from "../api"
 import { useCloud } from "../session"
@@ -98,7 +99,7 @@ export function CloudSignIn() {
   return (
     <div className="grid min-h-svh lg:grid-cols-[1.05fr_1fr]">
       <BrandPanel />
-      <div className="flex flex-col items-center justify-center bg-background p-6 sm:p-10">
+      <main className="flex flex-col items-center justify-center bg-background p-6 sm:p-10">
         <div className="w-full max-w-sm space-y-7">
           <div className="flex items-center gap-3 lg:hidden">
             <MeridianMark className="size-9" />
@@ -142,14 +143,16 @@ export function CloudSignIn() {
                   <FieldLabel htmlFor="email">Work email</FieldLabel>
                   <Input
                     id="email"
+                    name="email"
                     type="email"
                     autoComplete="email"
+                    spellCheck={false}
                     inputMode="email"
                     placeholder="you@company.com"
                     className="h-10"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    autoFocus={!info.providers.google}
+                    autoFocus={!info.providers.google && autoFocusDesktop()}
                     aria-invalid={!!error}
                   />
                   {error ? <FieldError>{error}</FieldError> : <FieldDescription>We'll email you a 6-digit code.</FieldDescription>}
@@ -178,7 +181,11 @@ export function CloudSignIn() {
                     if (v.length === 6) void verify(v)
                   }}
                   disabled={busy}
+                  // The person just asked for this code: focusing it is the next step.
                   autoFocus
+                  name="code"
+                  autoComplete="one-time-code"
+                  inputMode="numeric"
                   aria-label="Sign-in code"
                   pattern="^[0-9]*$"
                 >
@@ -225,7 +232,7 @@ export function CloudSignIn() {
             {window.location.host} · Meridian Cloud v{info.version}
           </p>
         </div>
-      </div>
+      </main>
     </div>
   )
 }

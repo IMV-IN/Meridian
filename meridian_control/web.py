@@ -18,7 +18,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from .accounts import AccountsService, GatewayPrincipal, Principal, err
 from .config import ControlConfig
@@ -168,21 +168,24 @@ def logout(request: Request):
 api_router = APIRouter(prefix="/api")
 
 
-@api_router.get("/cloud/info")
-def cloud_info(request: Request):
+def cloud_info_payload(app: FastAPI, cfg: ControlConfig) -> dict:
     """Public bootstrap for the console (no secrets)."""
-    cfg = _cfg(request)
     from meridian import __version__
 
     return {
         "mode": "cloud",
         "version": __version__,
         "providers": {"google": cfg.google_enabled, "email": True},
-        "email_delivery": request.app.state.mailer.kind,
+        "email_delivery": app.state.mailer.kind,
         "signup": cfg.signup,
         "public_url": cfg.public_url,
         "node_url": cfg.node_url or cfg.public_url,
     }
+
+
+@api_router.get("/cloud/info")
+def cloud_info(request: Request):
+    return cloud_info_payload(request.app, _cfg(request))
 
 
 @api_router.get("/me")
@@ -443,8 +446,19 @@ def console_dir(cfg: ControlConfig) -> Path:
     return Path(meridian.__file__).resolve().parent / "ui" / "dist"
 
 
+def boot_script(payload: dict) -> str:
+    """The console's boot info as a JSON data block.
+
+    It is not executable (``type="application/json"``), so ``script-src 'self'``
+    still holds; ``<`` is escaped so no value can close the element.
+    """
+    data = json.dumps(payload, separators=(",", ":")).replace("<", "\\u003c")
+    return f'<script id="meridian-boot" type="application/json">{data}</script>'
+
+
 def mount_console(app: FastAPI, cfg: ControlConfig) -> None:
     dist = console_dir(cfg)
+    cache: dict[str, Any] = {}
 
     def index() -> Response:
         page = dist / "index.html"
@@ -453,7 +467,14 @@ def mount_console(app: FastAPI, cfg: ControlConfig) -> None:
                 "<h1>Meridian Cloud</h1><p>The console is not built. Run <code>cd web && npm run build</code>.</p>",
                 status_code=503,
             )
-        return FileResponse(page, media_type="text/html", headers={**_UI_HEADERS, "Cache-Control": "no-cache"})
+        # Embed the boot info so the console renders without a round trip to
+        # /api/cloud/info first (one less request on the critical path).
+        mtime = page.stat().st_mtime
+        if cache.get("mtime") != mtime:
+            html = page.read_text(encoding="utf-8")
+            boot = boot_script(cloud_info_payload(app, cfg))
+            cache.update(mtime=mtime, html=html.replace("</head>", boot + "</head>", 1))
+        return HTMLResponse(cache["html"], headers={**_UI_HEADERS, "Cache-Control": "no-cache"})
 
     @app.get("/", include_in_schema=False)
     def root():
@@ -464,13 +485,16 @@ def mount_console(app: FastAPI, cfg: ControlConfig) -> None:
         return index()
 
     @app.get("/ui/{path:path}", include_in_schema=False)
-    def ui_path(path: str):
+    def ui_path(path: str, request: Request):
+        from meridian.api.static_files import static_file
+
         if dist.is_dir() and path:
             root = dist.resolve()
             candidate = (root / path).resolve()
             if candidate.is_file() and root in candidate.parents:
                 cache = "public, max-age=31536000, immutable" if path.startswith("assets/") else "no-cache"
-                return FileResponse(candidate, headers={**_UI_HEADERS, "Cache-Control": cache})
+                accept = request.headers.get("accept-encoding", "")
+                return static_file(candidate, accept, {**_UI_HEADERS, "Cache-Control": cache})
             if path.startswith("assets/"):
                 return Response(status_code=404, headers=_UI_HEADERS)
         return index()

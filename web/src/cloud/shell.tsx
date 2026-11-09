@@ -74,6 +74,7 @@ import { useClaims, useNodes } from "@/hooks/queries"
 import { ApiError } from "@/lib/api/client"
 import { BootScreen } from "@/pages/sign-in"
 import { useTheme } from "@/providers/theme-provider"
+import { autoFocusDesktop } from "@/lib/utils"
 
 import { cloud } from "./api"
 import { CloudSignIn } from "./pages/sign-in"
@@ -168,7 +169,7 @@ function WorkspaceNameForm({
     >
       <Field data-invalid={!!err}>
         <FieldLabel htmlFor="ws-name">Workspace name</FieldLabel>
-        <Input id="ws-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="Acme AI platform" autoFocus maxLength={120} />
+        <Input id="ws-name" name="organization" autoComplete="organization" value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Acme AI platform" autoFocus={autoFocusDesktop()} maxLength={120} />
         {err ? <FieldError>{err}</FieldError> : <FieldDescription>Usually your company or team. You can rename it later.</FieldDescription>}
       </Field>
     </form>
@@ -186,7 +187,7 @@ function Onboarding() {
     },
   })
   return (
-    <div className="flex min-h-svh items-center justify-center bg-background p-6">
+    <main className="flex min-h-svh items-center justify-center bg-background p-6">
       <div className="w-full max-w-md space-y-8">
         <MeridianMark className="size-10" />
         <div className="space-y-2">
@@ -213,7 +214,7 @@ function Onboarding() {
           Sign out ({me?.user.email})
         </button>
       </div>
-    </div>
+    </main>
   )
 }
 
@@ -231,7 +232,7 @@ function WorkspaceSwitcher() {
               <MeridianMark className="size-8" />
               <div className="grid flex-1 text-left leading-tight">
                 <span className="truncate text-sm font-semibold">{workspace.name}</span>
-                <span className="truncate text-[11px] text-sidebar-foreground/60">Meridian Cloud · {workspace.role}</span>
+                <span className="truncate text-[11px] text-sidebar-foreground/75">Meridian Cloud · {workspace.role}</span>
               </div>
               <ChevronsUpDown className="ml-auto size-4 opacity-60" />
             </SidebarMenuButton>
@@ -276,7 +277,7 @@ function UserMenu() {
             </Avatar>
             <div className="grid flex-1 text-left text-sm leading-tight">
               <span className="truncate font-medium">{user.name || user.email}</span>
-              <span className="truncate text-[11px] text-sidebar-foreground/60">{user.email}</span>
+              <span className="truncate text-[11px] text-sidebar-foreground/75">{user.email}</span>
             </div>
             <ChevronsUpDown className="ml-auto size-4 opacity-60" />
           </SidebarMenuButton>
@@ -332,7 +333,8 @@ function CloudSidebar() {
       <SidebarHeader>
         <WorkspaceSwitcher />
       </SidebarHeader>
-      <SidebarContent className="scrollbar-thin">
+      <nav aria-label="Primary" className="flex min-h-0 flex-1 flex-col">
+        <SidebarContent className="scrollbar-thin">
         {NAV.map((g) => (
           <SidebarGroup key={g.label}>
             <SidebarGroupLabel>{g.label}</SidebarGroupLabel>
@@ -354,6 +356,7 @@ function CloudSidebar() {
           </SidebarGroup>
         ))}
       </SidebarContent>
+      </nav>
       <SidebarFooter>
         <SidebarMenu>
           <SidebarMenuItem>
@@ -484,16 +487,17 @@ export function CloudShell() {
   if (phase === "onboarding") return <Onboarding />
   if (phase === "unreachable")
     return (
-      <div className="flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center">
+      <main className="flex min-h-svh flex-col items-center justify-center gap-4 p-6 text-center">
         <MeridianMark className="size-10" />
-        <p className="max-w-sm text-sm text-muted-foreground">{error?.message ?? "Meridian Cloud is unreachable."}</p>
+        <h1 className="text-base font-semibold">Can't reach Meridian Cloud</h1>
+        <p className="max-w-sm text-sm text-muted-foreground">{error?.message ?? "Check your connection, then try again."}</p>
         <Button variant="outline" onClick={() => void refresh()}>
           Try again
         </Button>
         <Link to="/" className="sr-only">
           home
         </Link>
-      </div>
+      </main>
     )
   return <SignedInShell />
 }

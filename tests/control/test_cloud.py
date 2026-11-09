@@ -30,8 +30,7 @@ def make(tmp_path, clock, **over) -> TestClient:
         ca_dir=tmp_path / "ca",
         cloud=True,
         dev_mail_outbox=str(tmp_path / "outbox"),
-        public_url="http://testserver",
-        **over,
+        **{"public_url": "http://testserver", **over},
     )
     return TestClient(create_app(cfg, now=clock))
 
@@ -353,6 +352,27 @@ def test_console_served_with_security_headers(tmp_path, clock):
     assert "Meridian Console" in page.text
     assert "frame-ancestors 'none'" in page.headers["content-security-policy"]
     assert c.get("/api/cloud/info").headers["cache-control"] == "no-store"
+
+
+def test_console_page_embeds_boot_info(tmp_path, clock):
+    """The console boots without a round trip: the page carries /api/cloud/info."""
+    import html
+    import json
+    import re
+
+    dist = tmp_path / "dist"
+    dist.mkdir()
+    (dist / "index.html").write_text("<html><head><title>Meridian</title></head><body></body></html>")
+    # A hostile value must not be able to close the data block.
+    c = make(tmp_path, clock, console_dir=str(dist), public_url="https://x.example/</script><script>alert(1)</script>")
+    page = c.get("/ui/").text
+    m = re.search(r'<script id="meridian-boot" type="application/json">(.*?)</script>', page)
+    assert m, page
+    assert "<" not in m.group(1)
+    boot = json.loads(html.unescape(m.group(1)))
+    assert boot == c.get("/api/cloud/info").json()
+    assert boot["mode"] == "cloud" and boot["public_url"].endswith("</script>")
+    assert page.count("<script") == 1  # nothing executable was injected
 
 
 def test_der_base64_client_cert_header_is_accepted(tmp_path, clock):

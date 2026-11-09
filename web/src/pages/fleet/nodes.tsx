@@ -1,5 +1,5 @@
 import { Cpu, GitCompareArrows, HardDrive, Plus, Router, Ticket } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { Link, useNavigate } from "react-router"
 
 import { SegmentedBar } from "@/components/charts"
@@ -14,6 +14,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useControlOverview, useNodes } from "@/hooks/queries"
 import type { NodeSummary } from "@/lib/api/types"
 import { formatBytes, formatNumber } from "@/lib/format"
+import { useUrlState } from "@/hooks/use-url-state"
 
 import { ControlGate, LeaseText, NodeStatusBadge } from "./shared"
 
@@ -117,8 +118,8 @@ export default function NodesPage() {
   const nodes = useNodes()
   const ov = useControlOverview()
   const navigate = useNavigate()
-  const [q, setQ] = useState("")
-  const [status, setStatus] = useState("all")
+  const [q, setQ] = useUrlState("q")
+  const [status, setStatus] = useUrlState("status", "all")
   const data = useMemo(() => (nodes.data ?? []).filter((n) => status === "all" || n.status === status), [nodes.data, status])
   const d = ov.data
 
@@ -188,7 +189,7 @@ export default function NodesPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <SearchInput value={q} onChange={setQ} placeholder="Search hostname or node ID…" />
         <Select value={status} onValueChange={setStatus}>
-          <SelectTrigger size="sm" className="w-full sm:w-44">
+          <SelectTrigger aria-label="Filter by status" size="sm" className="w-full sm:w-44">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

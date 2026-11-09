@@ -9,7 +9,7 @@ import { makeQueryClient } from "@/lib/query-client"
 import { SettingsProvider } from "@/providers/settings-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
 
-import { atLeast, detectCloud, type CloudInfo, type Me } from "./api"
+import { atLeast, detectCloud, readBootInfo, type CloudInfo, type Me } from "./api"
 import { cloudRoutes } from "./app"
 import { CloudSessionProvider } from "./session"
 
@@ -100,6 +100,18 @@ describe("detectCloud()", () => {
     const down = vi.fn<typeof fetch>().mockRejectedValue(new TypeError("offline"))
     expect(await detectCloud(down, [0, 0])).toBeNull()
     expect(down).toHaveBeenCalledTimes(3)
+  })
+})
+
+describe("readBootInfo()", () => {
+  const doc = (html: string) => new DOMParser().parseFromString(`<!doctype html><html><head>${html}</head><body></body></html>`, "text/html")
+
+  it("reads the boot info meridian-control embeds, and knows when there is none", () => {
+    expect(readBootInfo(doc(`<script id="meridian-boot" type="application/json">${JSON.stringify(INFO)}</script>`))).toEqual(INFO)
+    // A self-hosted gateway serves the page without the block: gateway mode, no probe.
+    expect(readBootInfo(doc(""))).toBeUndefined()
+    expect(readBootInfo(doc(`<script id="meridian-boot" type="application/json">{"mode":"gateway"}</script>`))).toBeNull()
+    expect(readBootInfo(doc(`<script id="meridian-boot" type="application/json">not json</script>`))).toBeNull()
   })
 })
 

@@ -1,7 +1,37 @@
+import fs from 'node:fs'
 import path from 'node:path'
+import zlib from 'node:zlib'
 import tailwindcss from '@tailwindcss/vite'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
+
+// Precompress text assets (.br + .gz) at build time. The gateway and
+// meridian-control send them when the browser accepts the encoding, so the
+// console ships ~70% fewer bytes without compressing API/SSE responses.
+function precompress(): Plugin {
+  let outDir = ''
+  return {
+    name: 'meridian-precompress',
+    apply: 'build',
+    configResolved(c) {
+      outDir = path.resolve(c.root, c.build.outDir)
+    },
+    closeBundle() {
+      const walk = (dir: string): string[] =>
+        fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+          const p = path.join(dir, e.name)
+          return e.isDirectory() ? walk(p) : [p]
+        })
+      for (const file of walk(outDir)) {
+        if (!/\.(js|css|svg|json|txt|webmanifest)$/.test(file)) continue
+        const raw = fs.readFileSync(file)
+        if (raw.length < 1024) continue
+        fs.writeFileSync(`${file}.br`, zlib.brotliCompressSync(raw, { params: { [zlib.constants.BROTLI_PARAM_QUALITY]: 11 } }))
+        fs.writeFileSync(`${file}.gz`, zlib.gzipSync(raw, { level: 9 }))
+      }
+    },
+  }
+}
 
 // The console is served by the gateway at /ui (see meridian/api/main.py).
 // `npm run build` writes straight into the Python package so the gateway
@@ -13,7 +43,7 @@ const CLOUD = process.env.MERIDIAN_CLOUD_URL
 
 export default defineConfig({
   base: '/ui/',
-  plugins: [react(), tailwindcss()],
+  plugins: [react(), tailwindcss(), precompress()],
   resolve: {
     alias: { '@': path.resolve(import.meta.dirname, './src') },
   },

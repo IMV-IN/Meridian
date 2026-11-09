@@ -5,4 +5,6 @@ try {
   var d = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
   document.documentElement.classList.toggle("dark", d)
   document.documentElement.style.colorScheme = d ? "dark" : "light"
+  var m = document.querySelector('meta[name="theme-color"]')
+  if (m) m.setAttribute("content", d ? "#0b0e0d" : "#f6f6f3")
 } catch (e) {}

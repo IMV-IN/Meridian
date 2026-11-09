@@ -177,7 +177,27 @@ export function atLeast(role: WorkspaceRole | undefined, minimum: WorkspaceRole)
 }
 
 /**
- * Decide at boot whether this console is served by Meridian Cloud.
+ * Boot info embedded by meridian-control in the page it serves
+ * (`<script id="meridian-boot" type="application/json">`).
+ *
+ * Returns the info in cloud mode, `null` if the block is present but not
+ * cloud, and `undefined` when there is no block (a self-hosted gateway
+ * served this page) — so production boot needs no network round trip.
+ */
+export function readBootInfo(doc: Document = document): CloudInfo | null | undefined {
+  const el = doc.getElementById("meridian-boot")
+  if (!el) return undefined
+  try {
+    const body = JSON.parse(el.textContent ?? "") as Partial<CloudInfo> | null
+    return body?.mode === "cloud" ? (body as CloudInfo) : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Decide at boot whether this console is served by Meridian Cloud (dev
+ * server only: production pages carry the answer, see readBootInfo).
  *
  * A self-hosted gateway answers /api/cloud/info with a fast 404, so that
  * means "gateway mode". Network errors and 5xx (control plane restarting

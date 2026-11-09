@@ -18,7 +18,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { useConfig, useUsage } from "@/hooks/queries"
 import { gateway } from "@/lib/api/gateway"
 import type { UsageQuery, UsageRow } from "@/lib/api/types"
-import { formatCurrency, formatNumber, formatPercent } from "@/lib/format"
+import { LOCALE, formatCurrency, formatNumber, formatPercent } from "@/lib/format"
 import { useAuth } from "@/providers/auth-provider"
 
 const WINDOWS = [7, 30, 90] as const
@@ -35,7 +35,7 @@ function dayRange(days: number): string[] {
 
 const shortDay = (d: string) => {
   const dt = new Date(`${d}T00:00:00Z`)
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: "UTC" }).format(dt)
+  return new Intl.DateTimeFormat(LOCALE, { month: "short", day: "numeric", timeZone: "UTC" }).format(dt)
 }
 
 type Dim = "org_id" | "team_id" | "key_id" | "model"
@@ -233,7 +233,7 @@ export default function UsagePage() {
         </ToggleGroup>
         {admin ? (
           <Select value={org || "all"} onValueChange={(v) => setParam("org", v)}>
-            <SelectTrigger size="sm" className="w-full sm:w-40">
+            <SelectTrigger aria-label="Filter by org" size="sm" className="w-full sm:w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -252,7 +252,7 @@ export default function UsagePage() {
         )}
         {(!identity?.team_id || admin) && (
           <Select value={team || "all"} onValueChange={(v) => setParam("team", v)}>
-            <SelectTrigger size="sm" className="w-full sm:w-40">
+            <SelectTrigger aria-label="Filter by team" size="sm" className="w-full sm:w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -266,7 +266,7 @@ export default function UsagePage() {
           </Select>
         )}
         <Select value={key || "all"} onValueChange={(v) => setParam("key", v)}>
-          <SelectTrigger size="sm" className="w-full sm:w-48">
+          <SelectTrigger aria-label="Filter by API key" size="sm" className="w-full sm:w-48">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -304,7 +304,7 @@ export default function UsagePage() {
           </div>
 
           <div className="grid gap-4 xl:grid-cols-2">
-            <Panel title="Daily cost by model" description={`UTC days · ${currency}`}>
+            <Panel title="Daily cost by model" description={`Per UTC day, in ${currency}`}>
               <StackedColumnChart data={charts.costByDay} xKey="day" series={charts.series} xFormatter={shortDay} valueFormatter={(v) => formatCurrency(v, currency)} height={260} />
             </Panel>
             <Panel title="Daily tokens" description="Prompt vs completion">

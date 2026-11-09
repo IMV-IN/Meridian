@@ -143,7 +143,48 @@ each role's view. To use a gateway other than `127.0.0.1:8080`, set
 | Command | Purpose |
 |---|---|
 | `npm run check` | typecheck, lint (oxlint) and unit tests (vitest) |
-| `npm run build` | production build written to `meridian/ui/dist/` (gitignored, shipped in the wheel and the image) |
+| `npm run build` | production build written to `meridian/ui/dist/` (gitignored, shipped in the wheel and the image), with `.br`/`.gz` copies of every text asset |
+| `npm run audit:ui` | UI audit of every page against a running demo (see below) |
+
+### UI quality bar
+
+Every page is held to:
+
+- **WCAG 2.2 AA**: one `main` landmark, a named sidebar and `nav`, an `h1` on every
+  page, labels for every control, text contrast of at least 4.5:1 in both themes,
+  and a visible focus ring on every Tab stop (including tab panels, charts,
+  clickable rows and scrollable tables and code blocks).
+- **[Vercel Web Interface Guidelines](https://vercel.com/design/guidelines)**:
+  - forms: `name`, `autocomplete`, `inputmode` and no spellcheck on IDs, emails
+    and codes; `autoFocus` only on desktop;
+  - motion: `prefers-reduced-motion` honoured and no `transition: all`;
+  - touch: `touch-action: manipulation` and contained overscroll in overlays;
+  - theming: `theme-color` follows the theme;
+  - formats: numbers and dates use the viewer's locale;
+  - URLs: filters and tabs live in the query string, so views can be linked.
+- **Reflow**: no horizontal page scroll at 390 px. Wide tables and tab bars
+  scroll inside their own container.
+- **Performance**:
+  - assets are served precompressed (Brotli or gzip, about 70% smaller);
+  - meridian-control embeds the console's boot info in the page, so the first
+    render needs no extra request;
+  - layout shift stays under 0.1.
+
+`npm run audit:ui` checks the first three automatically, running axe-core plus
+reflow, console-error and focus checks across light, dark and mobile views. It
+exits non-zero on any finding:
+
+```bash
+python scripts/console_demo.py            # gateway console on :8080
+cd web && npm run audit:ui -- --mode gateway
+```
+
+```bash
+python scripts/console_demo.py --cloud    # Meridian Cloud on :8443; note the printed state dir
+cd web && npm run audit:ui -- --mode cloud --outbox <state-dir>/outbox
+```
+
+Screenshots of every page land in `web/audit-ui-shots/` for a visual review.
 
 **Stack:** React 19, TypeScript, Vite, Tailwind CSS v4 and
 [shadcn/ui](https://ui.shadcn.com) on Radix primitives, with Recharts for charts,

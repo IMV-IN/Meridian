@@ -338,7 +338,7 @@ export default function RequestsPage() {
           className="sm:w-72"
         />
         <Select value={statusF} onValueChange={(v) => setParam("status", v)}>
-          <SelectTrigger size="sm" className="w-full sm:w-36">
+          <SelectTrigger aria-label="Filter by status" size="sm" className="w-full sm:w-36">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -350,7 +350,7 @@ export default function RequestsPage() {
           </SelectContent>
         </Select>
         <Select value={backendF} onValueChange={(v) => setParam("backend", v)}>
-          <SelectTrigger size="sm" className="w-full sm:w-44">
+          <SelectTrigger aria-label="Filter by backend" size="sm" className="w-full sm:w-44">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -363,7 +363,7 @@ export default function RequestsPage() {
           </SelectContent>
         </Select>
         <Select value={orgF} onValueChange={(v) => setParam("org", v)}>
-          <SelectTrigger size="sm" className="w-full sm:w-36">
+          <SelectTrigger aria-label="Filter by org" size="sm" className="w-full sm:w-36">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -376,7 +376,7 @@ export default function RequestsPage() {
           </SelectContent>
         </Select>
         <Select value={modeF} onValueChange={(v) => setParam("mode", v)}>
-          <SelectTrigger size="sm" className="w-full sm:w-32">
+          <SelectTrigger aria-label="Filter by mode" size="sm" className="w-full sm:w-32">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

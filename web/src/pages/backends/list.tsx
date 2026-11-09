@@ -252,7 +252,7 @@ export default function BackendsPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center">
         <SearchInput value={query} onChange={setQuery} placeholder="Search name, model, tag, URL…" />
         <Select value={health} onValueChange={(v) => setParam("health", v, "all")}>
-          <SelectTrigger size="sm" className="w-full sm:w-40">
+          <SelectTrigger aria-label="Filter by health" size="sm" className="w-full sm:w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -265,7 +265,7 @@ export default function BackendsPage() {
           </SelectContent>
         </Select>
         <Select value={engine} onValueChange={(v) => setParam("engine", v, "all")}>
-          <SelectTrigger size="sm" className="w-full sm:w-40">
+          <SelectTrigger aria-label="Filter by engine" size="sm" className="w-full sm:w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -278,7 +278,7 @@ export default function BackendsPage() {
           </SelectContent>
         </Select>
         <Select value={source} onValueChange={(v) => setParam("source", v, "all")}>
-          <SelectTrigger size="sm" className="w-full sm:w-44">
+          <SelectTrigger aria-label="Filter by source" size="sm" className="w-full sm:w-44">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

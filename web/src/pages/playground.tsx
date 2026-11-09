@@ -258,6 +258,8 @@ export default function PlaygroundPage() {
             className="relative"
           >
             <Textarea
+              name="message"
+              autoComplete="off"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={(e) => {
@@ -311,11 +313,11 @@ export default function PlaygroundPage() {
               <div className="grid grid-cols-2 gap-3">
                 <Field>
                   <FieldLabel htmlFor="pg-max">Max tokens</FieldLabel>
-                  <Input id="pg-max" type="number" min={1} max={32768} value={maxTokens} onChange={(e) => setMaxTokens(Math.max(1, Number(e.target.value) || 1))} />
+                  <Input id="pg-max" name="max-tokens" type="number" inputMode="numeric" autoComplete="off" min={1} max={32768} value={maxTokens} onChange={(e) => setMaxTokens(Math.max(1, Number(e.target.value) || 1))} />
                 </Field>
                 <Field>
                   <FieldLabel htmlFor="pg-temp">Temperature</FieldLabel>
-                  <Input id="pg-temp" type="number" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} />
+                  <Input id="pg-temp" name="temperature" type="number" inputMode="decimal" autoComplete="off" min={0} max={2} step={0.1} value={temperature} onChange={(e) => setTemperature(Number(e.target.value))} />
                 </Field>
               </div>
               <Field orientation="horizontal" className="items-center justify-between">
@@ -330,7 +332,7 @@ export default function PlaygroundPage() {
                   <Hint content={`Sent as ${sessionHeader}. With session affinity on, the same id sticks to one backend while it stays healthy.`}>Session id</Hint>
                 </FieldLabel>
                 <InputGroup>
-                  <InputGroupInput id="pg-session" value={session} onChange={(e) => setSession(e.target.value)} placeholder="optional" className="font-mono text-xs" />
+                  <InputGroupInput id="pg-session" name="session" autoComplete="off" spellCheck={false} value={session} onChange={(e) => setSession(e.target.value)} placeholder="e.g. conv-42 (optional)" className="font-mono text-xs" />
                   <InputGroupAddon align="inline-end">
                     <InputGroupButton size="icon-xs" onClick={() => setSession(`pg-${crypto.randomUUID().slice(0, 8)}`)} aria-label="Generate session id">
                       <Dices />
@@ -341,7 +343,7 @@ export default function PlaygroundPage() {
               </Field>
               <Field>
                 <FieldLabel htmlFor="pg-system">System prompt</FieldLabel>
-                <Textarea id="pg-system" value={system} onChange={(e) => setSystem(e.target.value)} className="min-h-16 text-sm" />
+                <Textarea id="pg-system" name="system-prompt" autoComplete="off" value={system} onChange={(e) => setSystem(e.target.value)} className="min-h-16 text-sm" />
               </Field>
             </FieldGroup>
           </Panel>

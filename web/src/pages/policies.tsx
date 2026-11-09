@@ -1,5 +1,5 @@
 import { Ban, Check, Gauge, ScrollText, ShieldCheck, Wallet } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useMemo } from "react"
 import { useSearchParams } from "react-router"
 
 import { BarList } from "@/components/charts"
@@ -17,6 +17,7 @@ import type { BudgetRow, ConfigSummary } from "@/lib/api/types"
 import { formatNumber, formatPercent, formatSeconds, titleCase } from "@/lib/format"
 import { select, sumBy } from "@/lib/prometheus"
 import { cn } from "@/lib/utils"
+import { useUrlState } from "@/hooks/use-url-state"
 
 function utilTone(u: number | null): Tone {
   if (u === null) return "neutral"
@@ -28,8 +29,8 @@ function utilTone(u: number | null): Tone {
 function BudgetsTab() {
   const budgets = useBudgets()
   const metrics = useMetrics()
-  const [q, setQ] = useState("")
-  const [level, setLevel] = useState("all")
+  const [q, setQ] = useUrlState("q")
+  const [level, setLevel] = useUrlState("level", "all")
 
   const scopes = useMemo(() => {
     const m = new Map<string, { level: BudgetRow["scope_level"]; id: string; rows: BudgetRow[]; max: number }>()
@@ -88,7 +89,7 @@ function BudgetsTab() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <SearchInput value={q} onChange={setQ} placeholder="Search scope…" />
         <Select value={level} onValueChange={setLevel}>
-          <SelectTrigger size="sm" className="w-full sm:w-36">
+          <SelectTrigger aria-label="Filter by scope level" size="sm" className="w-full sm:w-36">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -111,7 +112,7 @@ function BudgetsTab() {
             <Card key={`${s.level}:${s.id}`} className="gap-3 px-4 py-4">
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
-                  <div className="text-xs text-muted-foreground uppercase">{s.level}</div>
+                  <div className="text-xs text-muted-foreground capitalize">{s.level}</div>
                   <div className="truncate font-mono text-sm font-medium">{s.id}</div>
                 </div>
                 <StatusBadge tone={utilTone(s.max)} size="sm">
@@ -243,7 +244,7 @@ function PiiTab({ cfg }: { cfg: ConfigSummary }) {
     <div className="grid gap-4 xl:grid-cols-3">
       <Panel
         className="xl:col-span-2"
-        title="PII protection · India pack"
+        title="PII protection (India pack)"
         description="Scans request messages before routing. Matched values are never logged — only entity type counts."
         actions={<StatusBadge tone={pii.enabled ? "good" : "neutral"}>{pii.enabled ? "Enforcing" : "Disabled"}</StatusBadge>}
       >

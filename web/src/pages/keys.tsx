@@ -39,6 +39,7 @@ import type { ApiKeyView, Capabilities, KeyCreateResult, Role } from "@/lib/api/
 import { capabilitiesFor } from "@/lib/rbac"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
+import { useUrlState } from "@/hooks/use-url-state"
 
 const CAP_ROWS: { cap: keyof Capabilities; label: string; detail: string }[] = [
   { cap: "view_ops", label: "Operator views", detail: "status, requests, config, budgets, console" },
@@ -231,7 +232,7 @@ function CreateKeyDialog({
                 <div className="grid gap-3 sm:grid-cols-3">
                   <Field data-invalid={!!errors.org_id} className="sm:col-span-3">
                     <FieldLabel htmlFor="k-org">Org *</FieldLabel>
-                    <Input id="k-org" list="k-org-list" placeholder="acme" autoComplete="off" aria-invalid={!!errors.org_id} {...form.register("org_id")} />
+                    <Input id="k-org" list="k-org-list" placeholder="e.g. acme" autoComplete="off" spellCheck={false} aria-invalid={!!errors.org_id} {...form.register("org_id")} />
                     <datalist id="k-org-list">
                       {orgs.map((o) => (
                         <option key={o} value={o} />
@@ -241,16 +242,16 @@ function CreateKeyDialog({
                   </Field>
                   <Field data-invalid={!!errors.team_id}>
                     <FieldLabel htmlFor="k-team">Team</FieldLabel>
-                    <Input id="k-team" placeholder="search" autoComplete="off" {...form.register("team_id")} />
+                    <Input id="k-team" placeholder="e.g. ml-platform" autoComplete="off" spellCheck={false} {...form.register("team_id")} />
                     {errors.team_id && <FieldError>{errors.team_id.message}</FieldError>}
                   </Field>
                   <Field data-invalid={!!errors.user_id}>
                     <FieldLabel htmlFor="k-user">User</FieldLabel>
-                    <Input id="k-user" placeholder="dana" autoComplete="off" {...form.register("user_id")} />
+                    <Input id="k-user" placeholder="e.g. dana" autoComplete="off" spellCheck={false} {...form.register("user_id")} />
                   </Field>
                   <Field data-invalid={!!errors.key_id}>
                     <FieldLabel htmlFor="k-id">Key ID</FieldLabel>
-                    <Input id="k-id" placeholder="auto (mrdn_xxxxxxxx)" autoComplete="off" className="font-mono text-xs" {...form.register("key_id")} />
+                    <Input id="k-id" placeholder="Generated if blank" autoComplete="off" spellCheck={false} className="font-mono text-xs" {...form.register("key_id")} />
                     {errors.key_id && <FieldError>{errors.key_id.message}</FieldError>}
                   </Field>
                 </div>
@@ -329,9 +330,13 @@ function CreateKeyDialog({
                   })}
                   <span className="inline-flex items-center gap-1">
                     <Input
+                      name="custom-model"
+                      autoComplete="off"
+                      spellCheck={false}
+                      aria-label="Add another model ID"
                       value={customModel}
                       onChange={(e) => setCustomModel(e.target.value)}
-                      placeholder="other model id"
+                      placeholder="Other model ID…"
                       className="h-7 w-36 font-mono text-xs"
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
@@ -437,9 +442,9 @@ export default function KeysPage() {
   const qc = useQueryClient()
   const navigate = useNavigate()
   const [params, setParams] = useSearchParams()
-  const [search, setSearch] = useState("")
-  const [orgF, setOrgF] = useState("all")
-  const [roleF, setRoleF] = useState("all")
+  const [search, setSearch] = useUrlState("q")
+  const [orgF, setOrgF] = useUrlState("org", "all")
+  const [roleF, setRoleF] = useUrlState("role", "all")
   const [created, setCreated] = useState<KeyCreateResult | null>(null)
   const [victim, setVictim] = useState<ApiKeyView | null>(null)
   const createOpen = params.get("create") === "1"
@@ -529,7 +534,7 @@ export default function KeysPage() {
       },
       {
         id: "actions",
-        header: "",
+        header: () => <span className="sr-only">Actions</span>,
         enableSorting: false,
         meta: { align: "right" },
         cell: ({ row }) => {
@@ -611,7 +616,7 @@ export default function KeysPage() {
       <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
         <SearchInput value={search} onChange={setSearch} placeholder="Search key, org, team, user…" />
         <Select value={orgF} onValueChange={setOrgF}>
-          <SelectTrigger size="sm" className="w-full sm:w-40">
+          <SelectTrigger aria-label="Filter by org" size="sm" className="w-full sm:w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -624,7 +629,7 @@ export default function KeysPage() {
           </SelectContent>
         </Select>
         <Select value={roleF} onValueChange={setRoleF}>
-          <SelectTrigger size="sm" className="w-full sm:w-40">
+          <SelectTrigger aria-label="Filter by role" size="sm" className="w-full sm:w-40">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>

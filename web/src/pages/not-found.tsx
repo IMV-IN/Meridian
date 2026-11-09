@@ -9,7 +9,7 @@ export default function NotFoundPage() {
   const { pathname } = useLocation()
   return (
     <Page className="max-w-3xl pt-16">
-      <EmptyState icon={Compass} title="Page not found" description={<>Nothing lives at <code className="text-xs">{pathname}</code> in the console.</>}>
+      <EmptyState icon={Compass} title={<h1>Page not found</h1>} description={<>Nothing lives at <code className="text-xs">{pathname}</code> in this console. Check the address, or go back to the overview.</>}>
         <Button size="sm" asChild>
           <Link to="/">Back to overview</Link>
         </Button>
