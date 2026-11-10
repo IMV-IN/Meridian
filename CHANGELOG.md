@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Own domain for Meridian Cloud via Cloudflare Tunnel.** Optional `cloudflared` service
+  (`docker compose --profile cloudflare up -d`, token in `.env`), a localhost-only Caddy
+  listener on `:8444` with the same protections as the Funnel one (no node calls, client
+  certificate header stripped, visitor IP from `Cf-Connecting-Ip`), and `MERIDIAN_PUBLIC_URL`
+  to move browsers, gateways and the installer to the domain while GPU nodes stay on the
+  Funnel `:8443` address. Steps in `docs/CLOUD.md` ("Use your own domain").
+
 - **Public site and one-line installer on Meridian Cloud.**
   - `/` explains the product (a live routing diagram, what the gateway does, how gateways,
     Meridian Cloud and GPU nodes fit, and exactly what reaches the cloud).

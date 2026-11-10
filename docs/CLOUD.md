@@ -388,16 +388,56 @@ database, node CA and sessions in `data/` carry over, so nobody is signed out.
 On a published release (`MERIDIAN_VERSION` in `.env` set to that tag), use
 `docker compose pull` in place of `docker compose build control`.
 
+## Use your own domain
+
+Funnel only answers for `*.ts.net` names, so a DNS record pointing your domain
+at it fails at TLS. Use a free **Cloudflare Tunnel** instead: `cloudflared` on
+this machine connects out to Cloudflare, which serves your domain and sends the
+traffic through the tunnel to Caddy on `127.0.0.1:8444`. Nothing new is opened
+to the internet. GPU nodes keep using `https://<MERIDIAN_HOST>:8443`: Cloudflare
+terminates TLS, which would strip their client certificates.
+
+You need the domain on Cloudflare (its nameservers point to Cloudflare).
+
+1. In the Cloudflare dashboard, go to **Zero Trust → Networks → Tunnels →
+   Create a tunnel**, choose **Cloudflared**, and name it `meridian`. On the
+   install step, copy the token from the shown command (the long value after
+   `--token`). You don't run that command: Docker Compose runs cloudflared.
+2. Still in the tunnel, add a **Public hostname**: subdomain `meridian`,
+   domain `example.com`, service type **HTTP**, URL `127.0.0.1:8444`.
+   Cloudflare creates the DNS record for you.
+3. In `deploy/cloud/.env` (never in chat or git):
+
+   ```bash
+   MERIDIAN_PUBLIC_URL=https://meridian.example.com
+   CLOUDFLARE_TUNNEL_TOKEN=<the token>
+   ```
+
+4. If you use Google sign-in, add
+   `https://meridian.example.com/auth/google/callback` to the OAuth client's
+   authorized redirect URIs.
+5. Restart with the tunnel:
+
+   ```bash
+   docker compose --profile cloudflare up -d
+   ```
+
+6. Open `https://meridian.example.com`. Sign in again there: sessions belong
+   to the address you signed in on. Point gateways at the new address
+   (`control_plane.url`, then restart them); the install page and the Connect
+   gateway dialog already use it. The `*.ts.net` address keeps working.
+
+Cloudflare can see console and API traffic in transit (it holds the TLS
+certificate), never prompts: gateways send only metadata.
+
 ## Limits and when to move
 
 - **Availability is your machine's.** For always-on hosting at no cost, move
   the same `deploy/cloud` kit to an Oracle Cloud Always Free Ampere VM
   (arm64, same image). Restore a backup there and run `./funnel.sh on` on the
   new machine.
-- **Custom domain.** Funnel serves `*.ts.net` names only. For the console on
-  your own domain, you could put a Cloudflare Tunnel (free) in front of the
-  443 listener. Cloudflare terminates TLS, though, so keep GPU nodes on the
-  Funnel `:8443` address, where client certificates pass through untouched.
+- **Custom domain.** Funnel serves `*.ts.net` names only; see
+  [Use your own domain](#use-your-own-domain) for Cloudflare Tunnel.
 - **Scale.** SQLite with one writer suits a small team's fleet. Point
   `MERIDIAN_CONTROL_DB_URL` at Postgres when you outgrow it; migrations are
   the same.

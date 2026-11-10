@@ -3,6 +3,7 @@
 # Tailscale Funnel forwards raw TCP (TLS untouched) from the internet:
 #   https://$MERIDIAN_HOST       (443)  → 127.0.0.1:8441  console, /api, /auth, gateways
 #   https://$MERIDIAN_HOST:8443  (8443) → 127.0.0.1:8442  node agents (client certificates)
+# Optional custom domain: Cloudflare Tunnel (cloudflared) → 127.0.0.1:8444.
 # Caddy terminates TLS with the *.ts.net certificate it fetches from the local
 # tailscaled, and proxies to meridian-control on 127.0.0.1:8090.
 {
@@ -10,6 +11,12 @@
 	default_bind 127.0.0.1
 	# Certificates come from tailscaled; there is no port 80 to redirect.
 	auto_https disable_redirects
+	# The Cloudflare Tunnel listener (custom domain, optional) is plain HTTP on
+	# localhost from cloudflared, with no PROXY header. This scoped block keeps
+	# the Funnel listener wrappers below off it.
+	servers 127.0.0.1:8444 {
+		protocols h1 h2c
+	}
 	servers {
 		# Funnel prepends a PROXY v2 header so per-IP sign-in limits see the
 		# real client address. Connections without one still work.
@@ -34,6 +41,23 @@
 		# A certificate in this header would be trusted as a node identity:
 		# never let a browser or gateway supply one.
 		header_up -X-Client-Cert
+	}
+}
+
+# Your own domain through Cloudflare Tunnel (optional; docs/CLOUD.md, "Use your
+# own domain"). cloudflared runs on this machine and connects here; Cloudflare
+# holds the TLS certificate for the domain. Same rules as :8441.
+http://:8444 {
+	encode zstd gzip
+
+	@nodes path /control/v1/*
+	respond @nodes "use the node endpoint on port 8443" 421
+
+	reverse_proxy 127.0.0.1:8090 {
+		header_up -X-Client-Cert
+		# cloudflared is the only client here; Cloudflare puts the visitor's
+		# address in Cf-Connecting-Ip (per-IP sign-in limits use it).
+		header_up X-Forwarded-For {http.request.header.Cf-Connecting-Ip}
 	}
 }
 

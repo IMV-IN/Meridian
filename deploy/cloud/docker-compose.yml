@@ -21,7 +21,9 @@ x-control: &control
   env_file: .env
   environment:
     MERIDIAN_CONTROL_CLOUD: "1"
-    MERIDIAN_CONTROL_PUBLIC_URL: https://${MERIDIAN_HOST:?set MERIDIAN_HOST in .env}
+    # Where browsers and gateways reach this server: your own domain when
+    # MERIDIAN_PUBLIC_URL is set (Cloudflare Tunnel), else the Funnel name.
+    MERIDIAN_CONTROL_PUBLIC_URL: ${MERIDIAN_PUBLIC_URL:-https://${MERIDIAN_HOST:?set MERIDIAN_HOST in .env}}
     MERIDIAN_CONTROL_NODE_URL: https://${MERIDIAN_HOST}:8443
     MERIDIAN_CONTROL_DB_URL: sqlite:////var/lib/meridian-control/control.db
     MERIDIAN_CONTROL_CA_DIR: /var/lib/meridian-control/ca
@@ -69,6 +71,20 @@ services:
       - /var/run/tailscale/tailscaled.sock:/var/run/tailscale/tailscaled.sock
       - caddy-data:/data
       - caddy-config:/config
+
+  # Optional: serve the console on your own domain through Cloudflare Tunnel.
+  # Start with: docker compose --profile cloudflare up -d
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.0
+    profiles: ["cloudflare"]
+    network_mode: host
+    restart: unless-stopped
+    command: ["tunnel", "--no-autoupdate", "run"]
+    environment:
+      # From Cloudflare Zero Trust → Networks → Tunnels. Keep it in .env only.
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:-}
+    depends_on:
+      - caddy
 
 volumes:
   caddy-data:
