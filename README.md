@@ -51,6 +51,20 @@ Operator console: http://localhost:8080/ui — live health, routing, request log
 This compose stack is **gateway + 2 mock backends only** (no Kafka).  
 Optional Kafka/audit: `docker compose -f docker-compose.kafka-demo.yml up --build` or `docker-compose.audit.yaml`.
 
+## Install with one command
+
+If your team runs Meridian Cloud (see [docs/CLOUD.md](docs/CLOUD.md)), open its
+`/install` page, choose options, and paste the command it builds on the gateway
+machine. It installs into `~/.meridian`, asks for anything missing, and starts
+the gateway:
+
+```bash
+curl -fsSL https://<your-meridian-cloud>/install.sh | bash
+```
+
+Already have Meridian installed from source? `meridian init` runs the same
+guided setup.
+
 ## Install without Docker
 
 Requires **Python 3.11 or newer**; **3.14 is recommended** (the images, CI and docs run on it).

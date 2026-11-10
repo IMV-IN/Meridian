@@ -52,6 +52,13 @@ export default defineConfig({
     emptyOutDir: true,
     chunkSizeWarningLimit: 900,
     rollupOptions: {
+      // The console (index.html, served at /ui) and the public site
+      // (site.html: landing page + install configurator, served at / and
+      // /install by Meridian Cloud).
+      input: {
+        main: path.resolve(import.meta.dirname, 'index.html'),
+        site: path.resolve(import.meta.dirname, 'site.html'),
+      },
       output: {
         manualChunks(id) {
           if (!id.includes('node_modules')) return undefined

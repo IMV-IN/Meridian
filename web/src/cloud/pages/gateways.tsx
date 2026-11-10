@@ -65,11 +65,8 @@ control_plane:
   url: ${info.public_url}
   gateway_name: ${gwName}
   # token is read from MERIDIAN_CLOUD_TOKEN — keep it out of this file`
-  const docker = `docker run -d --name meridian -p 8080:8080 \\
-  -e MERIDIAN_CONFIG=/app/config.yaml \\
-  -e MERIDIAN_CLOUD_TOKEN='<paste token>' \\
-  -v "$PWD/config.yaml:/app/config.yaml:ro" \\
-  ghcr.io/imv-in/meridian:${info.version}`
+  const install = `curl -fsSL ${info.public_url}/install.sh | bash -s -- \\
+  --cloud ${info.public_url} --gateway-name ${gwName}`
 
   return (
     <>
@@ -110,12 +107,22 @@ control_plane:
               </div>
             </div>
             <div className="space-y-2">
-              <div className="text-sm font-medium">2. Point the gateway at Meridian Cloud</div>
-              <CodeBlock language="yaml" code={yaml} />
+              <div className="text-sm font-medium">2. On a new machine, run this and paste the token when it asks</div>
+              <CodeBlock language="shell" code={install} />
+              <p className="text-sm text-muted-foreground">
+                Installs the gateway into ~/.meridian and starts it.{" "}
+                <a href="/install" target="_blank" rel="noopener noreferrer" className="text-foreground underline underline-offset-4">
+                  Choose routing, keys and limits
+                </a>{" "}
+                for more options.
+              </p>
             </div>
             <div className="space-y-2">
-              <div className="text-sm font-medium">3. Start (or restart) it with the token in the environment</div>
-              <CodeBlock language="shell" code={docker} />
+              <div className="text-sm font-medium">Already running a gateway? Add this to its config.yaml</div>
+              <CodeBlock language="yaml" code={yaml} />
+              <p className="text-sm text-muted-foreground">
+                Then restart it with <code className="font-mono text-[0.85em]">MERIDIAN_CLOUD_TOKEN</code> set to the token.
+              </p>
             </div>
             {connected ? (
               <Alert>
