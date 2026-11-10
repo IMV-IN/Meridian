@@ -1,0 +1,100 @@
+/* Public site (landing + install configurator). Shares the console's
+   components and tokens, re-tuned to a survey-map palette: cool sage paper,
+   brand ink, contour lines, and amber for requests in flight. */
+@import "../index.css";
+@import "@fontsource/ibm-plex-sans-condensed/500.css";
+@import "@fontsource/ibm-plex-sans-condensed/600.css";
+
+@theme inline {
+  --font-display: "IBM Plex Sans Condensed", "IBM Plex Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --color-paper: var(--paper);
+  --color-ink: var(--ink);
+  --color-contour: var(--contour);
+  --color-signal: var(--signal);
+  --color-signal-ink: var(--signal-ink);
+  --color-deep: var(--deep);
+}
+
+body.site {
+  --paper: #edf1ec;
+  --ink: #10211f;
+  --contour: #b9c9c0;
+  --signal: #e39b0b;
+  --signal-ink: #855400; /* text-safe amber: 5.4:1 on paper */
+  --deep: #34504a;
+
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: #f6f8f5;
+  --card-foreground: var(--ink);
+  --popover: #f8faf7;
+  --muted: #e2e8e3;
+  --muted-foreground: #46564f;
+  --border: #cfdad3;
+  --input: #778c84; /* control edges and switch tracks: 3.1:1 on paper */
+  --secondary: #e0e7e1;
+  --accent: #dfe7e0;
+  --ring: #2f6f5e;
+  background: var(--paper);
+}
+
+.dark body.site {
+  --paper: #0e1b19;
+  --ink: #e7eee9;
+  --contour: #2c433d;
+  --signal: #f0b23a;
+  --signal-ink: #f0b23a;
+  --deep: #a9bdb5;
+
+  --card: #132421;
+  --popover: #152724;
+  --muted: #172b28;
+  --muted-foreground: #a3b4ad;
+  --border: #223833;
+  --input: #5b766e;
+  --secondary: #1a2e2a;
+  --accent: #1c312d;
+  --primary: #e4f6c9;
+  --primary-foreground: #10211f;
+  --ring: #8cc7b3;
+}
+
+.site-display {
+  font-family: var(--font-display);
+  font-weight: 600;
+  letter-spacing: -0.012em;
+  line-height: 0.98;
+  font-kerning: normal;
+  text-wrap: balance;
+}
+
+/* A survey line: hairline with a tick at each end. */
+.site-rule {
+  height: 1px;
+  background: var(--contour);
+  position: relative;
+}
+.site-rule::before,
+.site-rule::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  width: 1px;
+  height: 9px;
+  background: var(--contour);
+}
+.site-rule::before {
+  left: 0;
+}
+.site-rule::after {
+  right: 0;
+}
+
+.site-map .request {
+  fill: var(--signal);
+}
+@media (prefers-reduced-motion: reduce) {
+  .site-map .request {
+    display: none;
+  }
+}

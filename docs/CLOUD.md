@@ -187,7 +187,14 @@ your first workspace.
   viewer, operator or admin. They join as soon as they sign in with that
   address, by Google or email code.
 - **Connect a gateway.** On **Gateways → Connect gateway**, mint a token (shown
-  once). On the gateway host:
+  once). On a new machine, install and connect in one step (see
+  [Install a gateway with one command](#install-a-gateway-with-one-command)):
+
+  ```bash
+  curl -fsSL https://<MERIDIAN_HOST>/install.sh | bash -s -- --cloud https://<MERIDIAN_HOST>
+  ```
+
+  For a gateway you already run, add this to its config instead:
 
   ```yaml
   # config.yaml
@@ -219,6 +226,41 @@ your first workspace.
   node CA. Every later call is mutually authenticated. The node verifies the
   server with its normal trust store, because `*.ts.net` certificates are
   publicly trusted.
+
+## Install a gateway with one command
+
+Meridian Cloud serves a public site: `/` explains the product and `/install`
+builds an install command from the options you pick (port, model servers,
+routing strategy, retries and circuit breaker, session affinity, tiering, API
+keys, Meridian Cloud connection, rate limits, budgets, PII policy, cost
+tracking, request log, and how it runs). The result is one line:
+
+```bash
+curl -fsSL https://<MERIDIAN_HOST>/install.sh | bash -s -- --cloud https://<MERIDIAN_HOST> --service user
+```
+
+On Linux or macOS (Windows: inside WSL), the script:
+
+1. finds Python 3.11+, or with your agreement installs [uv](https://docs.astral.sh/uv/) to get one;
+2. creates a private environment in `~/.meridian/venv`, touching no system packages;
+3. downloads the gateway package from **this server** (`/download/…`) and checks its SHA-256;
+4. runs `meridian init` with your flags. It looks for Ollama, vLLM, SGLang and
+   LM Studio on the machine, asks for anything missing (on the terminal, even
+   when piped from curl), and asks for secrets such as the gateway token with
+   hidden input, so they never appear in the command or shell history;
+5. writes `config.yaml`, `keys.yaml` and `meridian.env` (mode 0600), validates
+   the config, installs a systemd or launchd service if you chose one, starts
+   the gateway and prints the console address and any generated API keys.
+
+`--upgrade` installs the newest package and restarts the service, keeping the
+config; `--uninstall` removes the service and `~/.meridian`. Every flag is
+listed by `~/.meridian/venv/bin/meridian init --help`, and the script can be
+read at `/install.sh` before running it.
+
+The control image builds the gateway package (with the console) into
+`/opt/meridian/downloads`, so rebuilding the image updates what the installer
+serves. Elsewhere, set `MERIDIAN_CONTROL_DOWNLOADS_DIR` to a folder holding
+the wheel and a `meridian.whl.sha256` file (`sha256sum meridian-*.whl`).
 
 ## Gateway console sign-in
 

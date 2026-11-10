@@ -37,12 +37,18 @@ RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade "pip>=26.1.2" \
     && /opt/venv/bin/pip install --no-cache-dir ".[control]"
 
+# The gateway package (with the built console) that the one-line installer
+# downloads from this server: /install.sh → /download/meridian-*.whl.
+RUN /opt/venv/bin/pip wheel --no-cache-dir --no-deps -w /downloads . \
+    && cd /downloads && sha256sum meridian-*.whl > meridian.whl.sha256
+
 
 FROM python:3.14-slim-trixie AS runtime
 RUN apt-get update && apt-get upgrade -y --no-install-recommends && rm -rf /var/lib/apt/lists/* \
     && useradd --system --uid 10002 --create-home meridian-control
 
 COPY --from=builder /opt/venv /opt/venv
+COPY --from=builder /downloads /opt/meridian/downloads
 ENV PATH="/opt/venv/bin:$PATH"
 
 # CA material and (for SQLite dev) the DB live here; mount a volume in production.

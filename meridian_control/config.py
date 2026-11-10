@@ -79,6 +79,9 @@ class ControlConfig:
     trust_proxy_headers: bool = False
     # Built console bundle to serve at /ui (default: the meridian package's ui/dist).
     console_dir: str = ""
+    # Gateway package (wheel + .sha256) the one-line installer downloads from
+    # this server (/download/*). The control image builds it at /opt/meridian/downloads.
+    downloads_dir: str = "/opt/meridian/downloads"
     # Gateway status reports kept per gateway (bytes of JSON).
     max_report_bytes: int = 256 * 1024
     extra: dict = field(default_factory=dict)
@@ -119,6 +122,7 @@ class ControlConfig:
             session_ttl_days=int(os.environ.get("MERIDIAN_CONTROL_SESSION_TTL_DAYS", "14")),
             google_client_id=os.environ.get("MERIDIAN_CONTROL_GOOGLE_CLIENT_ID", ""),
             google_client_secret=os.environ.get("MERIDIAN_CONTROL_GOOGLE_CLIENT_SECRET", ""),
+            downloads_dir=os.environ.get("MERIDIAN_CONTROL_DOWNLOADS_DIR", cls.downloads_dir),
             smtp_host=os.environ.get("MERIDIAN_CONTROL_SMTP_HOST", ""),
             smtp_port=int(os.environ.get("MERIDIAN_CONTROL_SMTP_PORT", "587")),
             smtp_username=os.environ.get("MERIDIAN_CONTROL_SMTP_USERNAME", ""),

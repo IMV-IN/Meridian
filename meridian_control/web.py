@@ -15,12 +15,13 @@ from __future__ import annotations
 import html
 import json
 import mimetypes
+import re
 import urllib.parse
 from pathlib import Path
 from typing import Any, Optional
 
 from fastapi import APIRouter, Body, Depends, FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
 from .accounts import AccountsService, GatewayPrincipal, Principal, err
 from .config import ControlConfig
@@ -495,6 +496,43 @@ def gateway_authorize(
     return RedirectResponse(url, status_code=302, headers=no_store)
 
 
+# ── one-line gateway installer ────────────────────────────────────────────
+install_router = APIRouter()
+_INSTALLER = Path(__file__).parent / "install" / "install.sh"
+_DOWNLOAD_NAME = re.compile(r"meridian-[0-9A-Za-z.+_-]+-py3-none-any\.whl|meridian\.whl\.sha256")
+
+
+@install_router.get("/install.sh", include_in_schema=False)
+def install_script(request: Request) -> Response:
+    """The installer, with this server's address filled in. Served as plain
+    text so it reads in a browser before anyone pipes it to a shell."""
+    script = _INSTALLER.read_text().replace("__MERIDIAN_BASE__", _cfg(request).public_url)
+    return Response(
+        script,
+        media_type="text/plain; charset=utf-8",
+        headers={"Cache-Control": "no-cache", "X-Content-Type-Options": "nosniff"},
+    )
+
+
+@install_router.get("/download/{name}", include_in_schema=False)
+def download(request: Request, name: str) -> Response:
+    """The gateway package the installer fetches (and its SHA-256)."""
+    root = Path(_cfg(request).downloads_dir)
+    if not _DOWNLOAD_NAME.fullmatch(name):
+        return Response("not found", status_code=404, media_type="text/plain")
+    path = root / name
+    if not path.is_file():
+        return Response(
+            "The gateway package isn't on this server. Rebuild the meridian-control image, or set "
+            "MERIDIAN_CONTROL_DOWNLOADS_DIR to a folder with the wheel and meridian.whl.sha256.\n",
+            status_code=404,
+            media_type="text/plain",
+        )
+    media = "text/plain; charset=utf-8" if name.endswith(".sha256") else "application/octet-stream"
+    cache = "no-cache" if name.endswith(".sha256") else "public, max-age=31536000, immutable"
+    return FileResponse(path, media_type=media, headers={"Cache-Control": cache, "X-Content-Type-Options": "nosniff"})
+
+
 # ── console bundle ────────────────────────────────────────────────────────
 _UI_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -546,9 +584,20 @@ def mount_console(app: FastAPI, cfg: ControlConfig) -> None:
             cache.update(mtime=mtime, html=html.replace("</head>", boot + "</head>", 1))
         return HTMLResponse(cache["html"], headers={**_UI_HEADERS, "Cache-Control": "no-cache"})
 
+    def site() -> Response:
+        page = dist / "site.html"
+        if not page.is_file():  # an older console build without the public site
+            return RedirectResponse("/ui/", status_code=302)
+        return HTMLResponse(page.read_text(encoding="utf-8"), headers={**_UI_HEADERS, "Cache-Control": "no-cache"})
+
+    # Public site: what Meridian is (/) and the install configurator (/install).
     @app.get("/", include_in_schema=False)
     def root():
-        return RedirectResponse("/ui/", status_code=302)
+        return site()
+
+    @app.get("/install", include_in_schema=False)
+    def install_page():
+        return site()
 
     @app.get("/ui", include_in_schema=False)
     def ui_root():
@@ -576,6 +625,7 @@ def install_cloud(app: FastAPI, cfg: ControlConfig) -> None:
     app.include_router(w)
     app.include_router(gateway_router)
     app.include_router(oauth_router)
+    app.include_router(install_router)
     mount_console(app, cfg)
 
     @app.middleware("http")

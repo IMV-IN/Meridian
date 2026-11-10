@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Public site and one-line installer on Meridian Cloud.**
+  - `/` explains the product (a live routing diagram, what the gateway does, how gateways,
+    Meridian Cloud and GPU nodes fit, and exactly what reaches the cloud).
+  - `/install` builds an install command from every gateway option: how it runs, port and
+    reachability, model servers, routing strategy, health checks, retries, circuit breaker,
+    session affinity, tiering, API keys, Meridian Cloud connection and console sign-in, rate
+    limits, budgets, PII policy, cost tracking and the request log.
+  - `/install.sh` installs into `~/.meridian/venv` (Python 3.11+, or uv with consent), downloads
+    the gateway package from the same server with a SHA-256 check, and runs the new
+    `meridian init`. It asks on the terminal for anything missing, takes secrets with
+    hidden input, writes 0600 config/keys/env files, validates the config, installs a
+    systemd or launchd service, starts the gateway and prints the console address and keys.
+    `--upgrade` and `--uninstall` included.
+  - The control image builds and serves the gateway wheel (`/download/*`); the Connect gateway
+    dialog uses the one-liner instead of the unpublished Docker image.
+
 - **Sign in to a gateway's console with Meridian Cloud.** A gateway connected to a workspace
   offers *Sign in with Meridian Cloud* on its console; the person's workspace role sets their
   rights there (viewer reads, operator also reloads, admin/owner also manage API keys).

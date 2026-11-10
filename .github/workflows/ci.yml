@@ -133,7 +133,7 @@ jobs:
           for i in $(seq 1 40); do curl -sf http://127.0.0.1:8080/meridian/version && break; sleep 0.5; done
           curl -sf http://127.0.0.1:8080/ui | grep -q "<title>Meridian Console</title>"
           curl -sf http://127.0.0.1:8080/ui/backends/anything | grep -q "Meridian Console"
-          asset=$(ls meridian/ui/dist/assets | grep -E '^index-.*\.js$' | head -1)
+          asset=$(ls meridian/ui/dist/assets | grep -E '^(index|main)-.*\.js$' | head -1)
           curl -sf -D - -o /dev/null "http://127.0.0.1:8080/ui/assets/$asset" | grep -qi "immutable"
           curl -sf http://127.0.0.1:8080/meridian/whoami | grep -q '"auth_enabled":false'
           echo "console served OK"
