@@ -66,6 +66,7 @@ nav:
       - Configuration: CONFIGURATION.md
       - Operator console: CONSOLE.md
       - Meridian Cloud (free hosting): CLOUD.md
+      - Meridian Compute (marketplace and jobs): COMPUTE.md
       - Flagship Phase 3 demo: https://github.com/IMV-IN/Meridian/blob/main/scripts/demo_phase3.sh
   - Deploy:
       - Deployment guide: DEPLOY.md

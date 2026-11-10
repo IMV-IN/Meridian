@@ -23,7 +23,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, Body, Depends, FastAPI, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, Response
 
-from .accounts import AccountsService, GatewayPrincipal, Principal, err
+from .accounts import ROLE_RANK, AccountsService, GatewayPrincipal, Principal, err
 from .config import ControlConfig
 from .service import ControlService, ControlServiceError
 
@@ -193,7 +193,7 @@ def cloud_info(request: Request):
 
 @api_router.get("/me")
 def me(request: Request, p: Principal = Depends(principal)):
-    return _acc(request).me(p)
+    return {**_acc(request).me(p), "platform_admin": request.app.state.compute.is_platform_admin(p.email)}
 
 
 @api_router.patch("/me")
@@ -223,7 +223,17 @@ class WS:
     def __init__(self, minimum: str) -> None:
         self.minimum = minimum
 
-    def __call__(self, request: Request, ws: str, p: Principal = Depends(principal)) -> tuple[Principal, str, str]:
+    def __call__(self, request: Request, ws: str) -> tuple[Principal, str, str]:
+        auth = request.headers.get("authorization", "")
+        if auth.startswith("Bearer mck_"):
+            # Workspace API key (CLI, automation). No cookie, so no CSRF header.
+            found = request.app.state.compute.authenticate_api_key(auth[7:].strip())
+            if found is None or found[0] != ws:
+                raise err("UNAUTHENTICATED", "invalid API key for this workspace", 401)
+            if ROLE_RANK[found[1]] < ROLE_RANK[self.minimum]:
+                raise err("FORBIDDEN", f"requires the {self.minimum} role or higher", 403)
+            return Principal(user_id="", email=found[2], session_hash=""), ws, found[1]
+        p = principal(request)
         role = _acc(request).require_role(p, ws, self.minimum)
         return p, ws, role
 
@@ -319,7 +329,8 @@ def nodes(request: Request, ctx: Ctx = Depends(viewer)):
 
 @w.get("/nodes/{node_id}")
 def node(request: Request, node_id: str, ctx: Ctx = Depends(viewer)):
-    return _svc(request).node_detail(node_id, workspace_id=ctx[1])
+    detail = _svc(request).node_detail(node_id, workspace_id=ctx[1])
+    return request.app.state.compute.redact_node_detail(ctx[1], detail)
 
 
 @w.get("/claims")
@@ -620,6 +631,8 @@ def mount_console(app: FastAPI, cfg: ControlConfig) -> None:
 
 
 def install_cloud(app: FastAPI, cfg: ControlConfig) -> None:
+    from . import compute_web  # noqa: F401  registers the compute routes on `w` and `api_router`
+
     app.include_router(auth_router)
     app.include_router(api_router)
     app.include_router(w)

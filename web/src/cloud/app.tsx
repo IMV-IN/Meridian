@@ -8,6 +8,10 @@ import { CloudShell } from "./shell"
 const Overview = lazy(() => import("./pages/overview"))
 const Gateways = lazy(() => import("./pages/gateways"))
 const GatewayDetail = lazy(() => import("./pages/gateway-detail"))
+const Marketplace = lazy(() => import("./pages/marketplace"))
+const Jobs = lazy(() => import("./pages/jobs"))
+const JobDetail = lazy(() => import("./pages/job-detail"))
+const Billing = lazy(() => import("./pages/billing"))
 const Settings = lazy(() => import("./pages/settings"))
 const Nodes = lazy(() => import("@/pages/fleet/nodes"))
 const NodeDetail = lazy(() => import("@/pages/fleet/node-detail"))
@@ -56,6 +60,20 @@ export const cloudRoutes: RouteObject[] = [
           { path: "audit", element: <FleetAudit />, handle: crumb("Audit") },
         ],
       },
+      { path: "marketplace", element: <Marketplace />, handle: crumb("Marketplace") },
+      {
+        path: "jobs",
+        handle: crumb("Jobs"),
+        children: [
+          { index: true, element: <Jobs /> },
+          {
+            path: ":jobId",
+            element: <JobDetail />,
+            handle: { crumb: (p) => decodeURIComponent(p.jobId ?? "") } satisfies CrumbHandle,
+          },
+        ],
+      },
+      { path: "billing", element: <Billing />, handle: crumb("Billing") },
       { path: "settings", element: <Settings />, handle: crumb("Settings") },
       { path: "*", element: <NotFound />, handle: crumb("Not found") },
     ],

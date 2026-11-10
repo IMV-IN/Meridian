@@ -12,6 +12,7 @@ Start here if you are not sure which file to open.
 | **[CONFIGURATION.md](./CONFIGURATION.md)** | Config reference after the quickstart works |
 | **[CONSOLE.md](./CONSOLE.md)** | Operator console at `/ui`: pages, roles, fleet connection, development |
 | **[CLOUD.md](./CLOUD.md)** | Meridian Cloud: Google / email sign-in, workspaces, hybrid gateways, free hosting (Tailscale Funnel) |
+| **[COMPUTE.md](./COMPUTE.md)** | Meridian Compute: GPU marketplace (provider price + 2%), per-second billing, jobs and multi-node training |
 
 ## Operators
 

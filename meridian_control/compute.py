@@ -1,0 +1,1247 @@
+"""Meridian Compute: GPU marketplace, per-second billing, and job scheduling.
+
+Three things live here, on top of the node fleet the control plane already
+manages:
+
+- **Marketplace.** A provider workspace lists a node's GPUs at a price per
+  GPU-hour. A consumer workspace rents the listing and gets those GPUs
+  exclusively until it releases them.
+- **Billing.** A rental is metered per second. The consumer pays the provider's
+  price plus Meridian's fee (`market_fee_bps`, 2% by default); the provider
+  earns the price; the fee goes to the platform account. Money is integer
+  paise in an append-only ledger. Balances are prepaid.
+- **Jobs.** A workspace runs digest-pinned containers on its own nodes or on
+  GPUs it rents: a `job` runs to completion, a `service` runs until stopped
+  and exposes a port. A job with several replicas is placed all-or-nothing and
+  each replica is told its rank and its peers, which is what distributed
+  training needs to rendezvous.
+
+The control plane owns each node's desired snapshot. Engine assignments still
+come from the node's owner; the `jobs` list is composed here, so a tenant can
+never edit a provider's engines and a provider can never read or change a
+tenant's job.
+
+What this module does not do: take payments (credits are recorded by a
+platform admin against an external payment reference), issue tax invoices, or
+hold secrets for jobs. See docs/COMPUTE.md.
+"""
+
+from __future__ import annotations
+
+import functools
+import hashlib
+import hmac
+import json
+import re
+import secrets
+import threading
+from datetime import datetime, timedelta, timezone
+from typing import Any, Callable, Iterable, Optional, TypeVar, cast
+
+from sqlalchemy import func, select, update
+
+from .config import ControlConfig
+from .models import (
+    PLATFORM_ACCOUNT,
+    ApiKey,
+    AuditEvent,
+    DesiredSnapshotRow,
+    Job,
+    JobReplica,
+    LedgerEntry,
+    MarketOffer,
+    Membership,
+    Node,
+    ObservationRow,
+    Rental,
+    Workspace,
+)
+from .security import new_id, sha256_hex
+from .service import ControlServiceError
+
+CURRENCY = "INR"
+IMAGE_REF = re.compile(r"^[a-z0-9]([a-z0-9._:-]*[a-z0-9])?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)+@sha256:[0-9a-f]{64}$")
+ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+TERMINAL_JOB = ("succeeded", "failed", "cancelled")
+TERMINAL_REPLICA = frozenset({"Succeeded", "Failed", "Cancelled"})
+REPLICA_PHASES = frozenset({"Pending", "Starting", "Running"}) | TERMINAL_REPLICA
+API_KEY_ROLES = ("viewer", "operator", "admin")
+_F = TypeVar("_F", bound=Callable[..., Any])
+MAX_ACTIVE_JOBS = 200
+MAX_PRICE_PAISE = 100_000_00  # ₹1,00,000 per GPU-hour: a typo guard, not a market opinion
+MIN_PRICE_PAISE = 100  # ₹1
+# What a node's owner may see of a tenant's job: that it exists and what it holds.
+_OBSERVED_KEEP = ("job_id", "replica", "phase", "started_at", "finished_at")
+_DESIRED_KEEP = ("job_id", "replica", "kind", "device_ids", "port", "desired_phase")
+
+
+def _utcnow() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _aware(d: datetime) -> datetime:
+    return d if d.tzinfo is not None else d.replace(tzinfo=timezone.utc)
+
+
+def _iso(d: Optional[datetime]) -> Optional[str]:
+    return _aware(d).astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if d else None
+
+
+def err(code: str, message: str, status: int = 400) -> ControlServiceError:
+    return ControlServiceError(code, message, http_status=status)
+
+
+# --- money -------------------------------------------------------------------
+def rental_due(price_paise_per_gpu_hour: int, gpus: int, seconds: int) -> int:
+    """What the provider has earned after `seconds`. Integer paise, rounded down:
+    the consumer is never charged for a fraction of a paisa not yet used."""
+    return price_paise_per_gpu_hour * gpus * max(0, seconds) // 3600
+
+
+def fee_for(amount_paise: int, fee_bps: int) -> int:
+    """Meridian's fee on an amount, rounded half up to a paisa."""
+    return (amount_paise * fee_bps + 5000) // 10000
+
+
+def _int(body: dict, key: str, default: int, lo: int, hi: int) -> int:
+    v = body.get(key, default)
+    if isinstance(v, bool) or not isinstance(v, int) or not lo <= v <= hi:
+        raise err("INVALID_FIELD", f"{key} must be an integer between {lo} and {hi}")
+    return v
+
+
+def _text(body: dict, key: str, lo: int, hi: int, default: Optional[str] = None) -> str:
+    v = body.get(key, default)
+    if not isinstance(v, str) or not lo <= len(v.strip()) <= hi:
+        raise err("INVALID_FIELD", f"{key} must be {lo}–{hi} characters")
+    return v.strip()
+
+
+def _locked(fn: _F) -> _F:
+    """Run a method holding the service lock, so passes that read then write
+    placement or billing state never interleave."""
+    @functools.wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        with self._lock:
+            return fn(self, *args, **kwargs)
+    return cast(_F, wrapper)
+
+
+class ComputeService:
+    def __init__(self, session_factory, config: ControlConfig, secret: bytes, now: Callable[[], datetime] = _utcnow):
+        self._sf = session_factory
+        self._c = config
+        self._secret = secret
+        self._now = now
+        # shortcut: in-process lock, so run compute on one control replica; move to a DB advisory lock for multi-replica Postgres  # noqa: E501
+        self._lock = threading.RLock()
+
+    # ------------------------------------------------------------------ nodes
+    def _online(self, node: Node, now: datetime) -> bool:
+        return (not node.revoked) and node.lease_expires_at is not None and now < _aware(node.lease_expires_at)
+
+    def _lost(self, node: Optional[Node], now: datetime) -> bool:
+        """The node is gone, revoked, or silent for longer than the grace period."""
+        return node is None or node.revoked or node.lease_expires_at is None or (
+            now - _aware(node.lease_expires_at) > timedelta(seconds=self._c.node_lost_seconds)
+        )
+
+    @staticmethod
+    def _capacity(s, node_id: str) -> dict:
+        obs = s.get(ObservationRow, node_id)
+        cap = (obs.observation or {}).get("capacity") if obs is not None else None
+        return cap if isinstance(cap, dict) else {}
+
+    @staticmethod
+    def _gpu_facts(node: Node, device_ids: Iterable[str], cap: dict) -> tuple[str, int]:
+        """(model, VRAM per GPU) for a set of devices, from the node's inventory;
+        falls back to the committed VRAM budget when the inventory lacks them."""
+        inv = {g.get("device_id"): g for g in (node.inventory or []) if isinstance(g, dict)}
+        ids = list(device_ids)
+        models = [str(inv[d].get("model") or "") for d in ids if d in inv]
+        vram = [int(inv[d].get("memory_total_bytes") or 0) for d in ids if d in inv]
+        alloc = cap.get("allocatable_vram_bytes") or {}
+        if not vram or not all(vram):
+            vram = [int(alloc.get(d, 0)) for d in ids]
+        model = max(set(models), key=models.count) if models else ""
+        return model, (min(vram) if vram else 0)
+
+    def _held(self, s, node_id: str) -> tuple[set[str], set[int]]:
+        """Devices and ports held on a node by replicas it has not released."""
+        devices: set[str] = set()
+        ports: set[int] = set()
+        for r in s.scalars(select(JobReplica).where(JobReplica.node_id == node_id, JobReplica.released.is_(False))):
+            devices.update(r.device_ids or [])
+            if r.port:
+                ports.add(r.port)
+        return devices, ports
+
+    @staticmethod
+    def _active_rental_for_offer(s, offer_id: str) -> Optional[Rental]:
+        row: Optional[Rental] = s.scalar(
+            select(Rental).where(Rental.offer_id == offer_id, Rental.status == "active")
+        )
+        return row
+
+    def _audit(self, s, workspace_id: str, actor: str, kind: str, detail: str = "", node_id: str = "") -> None:
+        s.add(AuditEvent(
+            workspace_id=workspace_id, actor=actor, kind=kind, detail=detail[:1000], node_id=node_id,
+            created_at=self._now(),
+        ))
+
+    # ----------------------------------------------------------------- ledger
+    @staticmethod
+    def _balance(s, account: str) -> int:
+        total = s.scalar(select(func.coalesce(func.sum(LedgerEntry.amount_paise), 0)).where(
+            LedgerEntry.workspace_id == account
+        ))
+        return int(total or 0)
+
+    def _post(self, s, account: str, kind: str, amount: int, *, rental_id: Optional[str] = None,
+              reference: str = "", memo: str = "", actor: str = "") -> None:
+        if amount == 0:
+            return
+        s.add(LedgerEntry(
+            workspace_id=account, kind=kind, amount_paise=amount, rental_id=rental_id,
+            reference=reference[:200], memo=memo[:400], actor=actor, created_at=self._now(),
+        ))
+
+    def _due(self, r: Rental, now: datetime) -> tuple[int, int]:
+        """(provider amount, fee) owed for the whole rental up to `now`."""
+        end = _aware(r.ended_at) if r.ended_at is not None else now
+        seconds = int((end - _aware(r.started_at)).total_seconds())
+        amount = rental_due(r.price_paise_per_gpu_hour, r.gpu_count, seconds)
+        return amount, fee_for(amount, r.fee_bps)
+
+    def _unposted(self, r: Rental, now: datetime) -> tuple[int, int]:
+        amount, fee = self._due(r, now)
+        return amount - r.billed_paise, fee - r.fee_paise
+
+    def _meter(self, s, r: Rental, now: datetime, final: bool = False) -> None:
+        """Post what the rental has accrued since it was last metered. Amounts are
+        the cumulative total minus what is already posted, so repeated passes
+        (and concurrent control replicas) can never double-charge or drift."""
+        if not final and (now - _aware(r.billed_through)).total_seconds() < self._c.meter_interval_seconds:
+            return
+        for _attempt in range(2):
+            d_amount, d_fee = self._unposted(r, now)
+            memo = f"{r.gpu_count} GPU × {_iso(_aware(r.billed_through))} → {_iso(now)}"
+            # Compare-and-swap on what we loaded: another session may have metered
+            # since, and SQLite takes no row lock on read. Only the winner posts.
+            won = s.execute(
+                update(Rental).where(
+                    Rental.id == r.id, Rental.billed_paise == r.billed_paise, Rental.fee_paise == r.fee_paise
+                ).values(billed_paise=r.billed_paise + d_amount, fee_paise=r.fee_paise + d_fee, billed_through=now)
+                .execution_options(synchronize_session=False)
+            ).rowcount == 1
+            if won:
+                self._post(s, r.consumer_workspace_id, "rental_charge", -d_amount, rental_id=r.id, memo=memo)
+                self._post(s, r.consumer_workspace_id, "platform_fee", -d_fee, rental_id=r.id, memo=memo)
+                self._post(s, r.provider_workspace_id, "rental_earning", d_amount, rental_id=r.id, memo=memo)
+                self._post(s, PLATFORM_ACCOUNT, "fee_revenue", d_fee, rental_id=r.id, memo=memo)
+            s.refresh(r)
+            if won:
+                return
+
+    def _spendable(self, s, workspace_id: str, now: datetime) -> int:
+        """Balance minus what active rentals have accrued but not yet posted."""
+        pending = 0
+        for r in s.scalars(select(Rental).where(
+            Rental.consumer_workspace_id == workspace_id, Rental.status == "active"
+        )):
+            pending += sum(self._unposted(r, now))
+        return self._balance(s, workspace_id) - pending
+
+    def billing(self, workspace_id: str, limit: int = 200) -> dict:
+        now = self._now()
+        with self._sf() as s:
+            totals = {
+                kind: int(total) for kind, total in s.execute(
+                    select(LedgerEntry.kind, func.sum(LedgerEntry.amount_paise))
+                    .where(LedgerEntry.workspace_id == workspace_id).group_by(LedgerEntry.kind)
+                )
+            }
+            burn = accrued_spend = accrued_earn = 0
+            for r in s.scalars(select(Rental).where(Rental.status == "active").where(
+                (Rental.consumer_workspace_id == workspace_id) | (Rental.provider_workspace_id == workspace_id)
+            )):
+                hourly = r.price_paise_per_gpu_hour * r.gpu_count
+                d_amount, d_fee = self._unposted(r, now)
+                if r.consumer_workspace_id == workspace_id:
+                    burn += hourly + fee_for(hourly, r.fee_bps)
+                    accrued_spend += d_amount + d_fee
+                else:
+                    accrued_earn += d_amount
+            balance = self._balance(s, workspace_id)
+            entries = s.scalars(
+                select(LedgerEntry).where(LedgerEntry.workspace_id == workspace_id)
+                .order_by(LedgerEntry.id.desc()).limit(max(1, min(limit, 1000)))
+            )
+            return {
+                "currency": CURRENCY,
+                "fee_bps": self._c.market_fee_bps,
+                "balance_paise": balance,
+                # Accrued on running rentals, posted at the next metering pass.
+                "accrued_spend_paise": accrued_spend,
+                "accrued_earnings_paise": accrued_earn,
+                "available_paise": balance - accrued_spend,
+                "burn_paise_per_hour": burn,
+                "totals_paise": totals,
+                "entries": [
+                    {
+                        "id": e.id, "kind": e.kind, "amount_paise": e.amount_paise, "rental_id": e.rental_id,
+                        "reference": e.reference, "memo": e.memo, "created_at": _iso(e.created_at),
+                    }
+                    for e in entries
+                ],
+            }
+
+    # --------------------------------------------------------------- platform
+    def is_platform_admin(self, email: str) -> bool:
+        return bool(email) and email.lower() in self._c.admin_emails
+
+    def _require_platform(self, email: str) -> None:
+        if not self.is_platform_admin(email):
+            raise err("NOT_FOUND", "not found", 404)
+
+    @staticmethod
+    def _workspace_ref(s, ref: str) -> Workspace:
+        ws = s.get(Workspace, ref) or s.scalar(select(Workspace).where(Workspace.slug == ref))
+        if ws is None:
+            raise err("NOT_FOUND", "workspace not found", 404)
+        found: Workspace = ws
+        return found
+
+    def platform_credit(self, actor: str, body: dict) -> dict:
+        """Record money a workspace paid outside Meridian (bank transfer, a
+        payment link). `reference` is the proof: a UTR or payment id."""
+        self._require_platform(actor)
+        amount = _int(body, "amount_paise", 0, 1, 10**11)
+        reference = _text(body, "reference", 4, 200)
+        with self._sf() as s:
+            ws = self._workspace_ref(s, str(body.get("workspace", "")))
+            dup = s.scalar(select(LedgerEntry).where(LedgerEntry.kind == "topup", LedgerEntry.reference == reference))
+            if dup is not None:
+                raise err("DUPLICATE_REFERENCE", "a credit with this payment reference already exists", 409)
+            memo = str(body.get("memo", ""))[:400]
+            self._post(s, ws.id, "topup", amount, reference=reference, memo=memo, actor=actor)
+            self._audit(s, ws.id, actor, "credit_added", f"{amount} paise ref={reference}")
+            s.commit()
+            return {"workspace_id": ws.id, "balance_paise": self._balance(s, ws.id)}
+
+    def platform_payout(self, actor: str, body: dict) -> dict:
+        """Record that a provider's earnings were paid out to their bank."""
+        self._require_platform(actor)
+        amount = _int(body, "amount_paise", 0, 1, 10**11)
+        reference = _text(body, "reference", 4, 200)
+        now = self._now()
+        with self._sf() as s:
+            ws = self._workspace_ref(s, str(body.get("workspace", "")))
+            dup = s.scalar(select(LedgerEntry).where(LedgerEntry.kind == "payout", LedgerEntry.reference == reference))
+            if dup is not None:
+                raise err("DUPLICATE_REFERENCE", "a payout with this reference already exists", 409)
+            if self._spendable(s, ws.id, now) < amount:
+                raise err("INSUFFICIENT_FUNDS", "payout exceeds the workspace's available balance", 409)
+            memo = str(body.get("memo", ""))[:400]
+            self._post(s, ws.id, "payout", -amount, reference=reference, memo=memo, actor=actor)
+            self._audit(s, ws.id, actor, "payout_recorded", f"{amount} paise ref={reference}")
+            s.commit()
+            return {"workspace_id": ws.id, "balance_paise": self._balance(s, ws.id)}
+
+    def platform_summary(self, actor: str) -> dict:
+        self._require_platform(actor)
+        with self._sf() as s:
+            balances = {
+                ws: int(total) for ws, total in s.execute(
+                    select(LedgerEntry.workspace_id, func.sum(LedgerEntry.amount_paise))
+                    .group_by(LedgerEntry.workspace_id)
+                )
+            }
+            gmv = s.scalar(select(func.coalesce(func.sum(LedgerEntry.amount_paise), 0)).where(
+                LedgerEntry.kind == "rental_earning"
+            ))
+            return {
+                "currency": CURRENCY,
+                "fee_bps": self._c.market_fee_bps,
+                "fee_revenue_paise": balances.get(PLATFORM_ACCOUNT, 0),
+                "gross_rental_paise": int(gmv or 0),
+                "active_rentals": s.scalar(select(func.count()).select_from(Rental).where(Rental.status == "active")),
+                "listed_offers": s.scalar(
+                    select(func.count()).select_from(MarketOffer).where(MarketOffer.status == "listed")
+                ),
+                "workspaces": [
+                    {"id": w.id, "slug": w.slug, "name": w.name, "balance_paise": balances.get(w.id, 0)}
+                    for w in s.scalars(select(Workspace).order_by(Workspace.created_at))
+                ],
+            }
+
+    # ----------------------------------------------------------------- offers
+    def _offer_availability(self, s, o: MarketOffer, now: datetime) -> tuple[bool, str]:
+        if o.status != "listed":
+            return False, o.status
+        if self._active_rental_for_offer(s, o.id) is not None:
+            return False, "rented"
+        node = s.get(Node, o.node_id)
+        if node is None or not self._online(node, now):
+            return False, "offline"
+        if not self._capacity(s, o.node_id).get("jobs_enabled"):
+            return False, "jobs are not enabled on the host"
+        held, _ = self._held(s, o.node_id)
+        free = self._capacity(s, o.node_id).get("free_devices")
+        if held & set(o.device_ids or []) or (isinstance(free, list) and not set(o.device_ids or []) <= set(free)):
+            return False, "in use by the provider"
+        return True, ""
+
+    def _offer_view(self, s, o: MarketOffer, viewer_ws: str, now: datetime) -> dict:
+        ws = s.get(Workspace, o.workspace_id)
+        available, why = self._offer_availability(s, o, now)
+        hourly = o.price_paise_per_gpu_hour * o.gpu_count
+        fee = fee_for(hourly, self._c.market_fee_bps)
+        mine = o.workspace_id == viewer_ws
+        view = {
+            "id": o.id, "title": o.title, "description": o.description, "region": o.region,
+            "gpu_model": o.gpu_model, "gpu_count": o.gpu_count, "vram_bytes_per_gpu": o.vram_bytes_per_gpu,
+            "price_paise_per_gpu_hour": o.price_paise_per_gpu_hour,
+            "fee_bps": self._c.market_fee_bps,
+            # What renting the whole listing costs per hour, fee included.
+            "hourly_paise": hourly, "hourly_fee_paise": fee, "hourly_total_paise": hourly + fee,
+            "status": o.status, "available": available, "unavailable_reason": why,
+            "provider": {"name": ws.name if ws else "", "slug": ws.slug if ws else ""},
+            "mine": mine, "created_at": _iso(o.created_at), "updated_at": _iso(o.updated_at),
+        }
+        if mine:
+            view["node_id"] = o.node_id
+            view["device_ids"] = list(o.device_ids or [])
+        return view
+
+    def list_offers(self, workspace_id: str, mine: bool = False) -> list[dict]:
+        now = self._now()
+        with self._sf() as s:
+            q = select(MarketOffer).where(MarketOffer.status != "retired")
+            q = q.where(MarketOffer.workspace_id == workspace_id) if mine else q.where(MarketOffer.status == "listed")
+            offers = [self._offer_view(s, o, workspace_id, now) for o in s.scalars(q)]
+        # Cheapest available first: the comparison a renter actually makes.
+        offers.sort(key=lambda o: (not o["available"], o["price_paise_per_gpu_hour"], o["title"]))
+        return offers
+
+    def listable_nodes(self, workspace_id: str) -> list[dict]:
+        """The workspace's nodes and whether each can be listed, for the form."""
+        now = self._now()
+        with self._sf() as s:
+            listed = {
+                o.node_id for o in s.scalars(select(MarketOffer).where(
+                    MarketOffer.workspace_id == workspace_id, MarketOffer.status != "retired"
+                ))
+            }
+            out = []
+            for node in s.scalars(select(Node).where(Node.workspace_id == workspace_id, Node.revoked.is_(False))):
+                cap = self._capacity(s, node.node_id)
+                devices = sorted((cap.get("allocatable_vram_bytes") or {}).keys())
+                model, vram = self._gpu_facts(node, devices, cap)
+                reason = ""
+                if node.node_id in listed:
+                    reason = "already listed"
+                elif not self._online(node, now):
+                    reason = "offline"
+                elif not cap.get("jobs_enabled"):
+                    reason = "jobs are not enabled in the node's policy"
+                elif not devices:
+                    reason = "no GPUs committed in the node's policy"
+                out.append({
+                    "node_id": node.node_id, "display_name": node.display_name, "gpu_model": model,
+                    "gpu_count": len(devices), "vram_bytes_per_gpu": vram, "listable": not reason, "reason": reason,
+                })
+            return out
+
+    @_locked
+    def create_offer(self, workspace_id: str, actor: str, body: dict) -> dict:
+        now = self._now()
+        title = _text(body, "title", 3, 120)
+        region = _text(body, "region", 2, 80)
+        description = _text(body, "description", 0, 2000, default="")
+        price = _int(body, "price_paise_per_gpu_hour", 0, MIN_PRICE_PAISE, MAX_PRICE_PAISE)
+        node_id = str(body.get("node_id", ""))
+        with self._sf() as s:
+            node = s.get(Node, node_id)
+            if node is None or node.workspace_id != workspace_id or node.revoked:
+                raise err("NODE_NOT_FOUND", "unknown node", 404)
+            if s.scalar(select(MarketOffer).where(MarketOffer.node_id == node_id, MarketOffer.status != "retired")):
+                raise err("ALREADY_LISTED", "this node already has a listing", 409)
+            if not self._online(node, now):
+                raise err("NODE_OFFLINE", "the node must be online to be listed", 409)
+            cap = self._capacity(s, node_id)
+            if not cap.get("jobs_enabled"):
+                raise err(
+                    "JOBS_DISABLED",
+                    "the node's policy does not allow jobs; set policy.jobs_enabled on the host first", 409,
+                )
+            devices = sorted((cap.get("allocatable_vram_bytes") or {}).keys())
+            if not devices:
+                raise err("NO_GPUS", "the node reports no GPUs it will commit", 409)
+            free = cap.get("free_devices")
+            if isinstance(free, list) and not set(devices) <= set(free):
+                raise err("DEVICES_BUSY", "stop the engines or jobs using these GPUs before listing", 409)
+            model, vram = self._gpu_facts(node, devices, cap)
+            offer = MarketOffer(
+                id=new_id("off"), workspace_id=workspace_id, node_id=node_id, title=title, description=description,
+                region=region, gpu_model=model or "GPU", gpu_count=len(devices), vram_bytes_per_gpu=vram,
+                device_ids=devices, price_paise_per_gpu_hour=price, status="listed", created_by=actor,
+                created_at=now, updated_at=now,
+            )
+            s.add(offer)
+            self._audit(s, workspace_id, actor, "offer_listed", f"{offer.id} {price} paise/GPU-hour", node_id)
+            s.commit()
+            return self._offer_view(s, offer, workspace_id, now)
+
+    def _own_offer(self, s, workspace_id: str, offer_id: str) -> MarketOffer:
+        o = s.get(MarketOffer, offer_id)
+        if o is None or o.workspace_id != workspace_id or o.status == "retired":
+            raise err("NOT_FOUND", "listing not found", 404)
+        found: MarketOffer = o
+        return found
+
+    def update_offer(self, workspace_id: str, actor: str, offer_id: str, body: dict) -> dict:
+        """Edit a listing. A price change applies to new rentals only: a running
+        rental keeps the price it started at."""
+        now = self._now()
+        with self._sf() as s:
+            o = self._own_offer(s, workspace_id, offer_id)
+            if "title" in body:
+                o.title = _text(body, "title", 3, 120)
+            if "region" in body:
+                o.region = _text(body, "region", 2, 80)
+            if "description" in body:
+                o.description = _text(body, "description", 0, 2000)
+            if "price_paise_per_gpu_hour" in body:
+                o.price_paise_per_gpu_hour = _int(body, "price_paise_per_gpu_hour", 0, MIN_PRICE_PAISE, MAX_PRICE_PAISE)
+            if "status" in body:
+                if body["status"] not in ("listed", "paused"):
+                    raise err("INVALID_FIELD", "status must be 'listed' or 'paused'")
+                o.status = body["status"]
+            o.updated_at = now
+            self._audit(s, workspace_id, actor, "offer_updated", f"{o.id} status={o.status}", o.node_id)
+            s.commit()
+            return self._offer_view(s, o, workspace_id, now)
+
+    def retire_offer(self, workspace_id: str, actor: str, offer_id: str) -> None:
+        with self._sf() as s:
+            o = self._own_offer(s, workspace_id, offer_id)
+            if self._active_rental_for_offer(s, o.id) is not None:
+                raise err("RENTED", "end the active rental before removing the listing", 409)
+            o.status, o.updated_at = "retired", self._now()
+            self._audit(s, workspace_id, actor, "offer_retired", o.id, o.node_id)
+            s.commit()
+
+    # ---------------------------------------------------------------- rentals
+    def _rental_view(self, s, r: Rental, viewer_ws: str, now: datetime) -> dict:
+        offer = s.get(MarketOffer, r.offer_id)
+        role = "consumer" if r.consumer_workspace_id == viewer_ws else "provider"
+        other = s.get(Workspace, r.provider_workspace_id if role == "consumer" else r.consumer_workspace_id)
+        node = s.get(Node, r.node_id)
+        amount, fee = self._due(r, now)
+        hourly = r.price_paise_per_gpu_hour * r.gpu_count
+        end = _aware(r.ended_at) if r.ended_at else now
+        return {
+            "id": r.id, "role": role, "status": r.status, "end_reason": r.end_reason,
+            "offer": {
+                "id": r.offer_id, "title": offer.title if offer else "", "region": offer.region if offer else "",
+                "gpu_model": offer.gpu_model if offer else "",
+                "vram_bytes_per_gpu": offer.vram_bytes_per_gpu if offer else 0,
+            },
+            "counterparty": other.name if other else "",
+            "gpu_count": r.gpu_count,
+            "price_paise_per_gpu_hour": r.price_paise_per_gpu_hour, "fee_bps": r.fee_bps,
+            "hourly_total_paise": hourly + (fee_for(hourly, r.fee_bps) if role == "consumer" else 0),
+            # Consumer: what it has cost, fee included. Provider: what it has earned.
+            "amount_paise": amount + fee if role == "consumer" else amount,
+            "fee_paise": fee if role == "consumer" else 0,
+            "seconds": int((end - _aware(r.started_at)).total_seconds()),
+            "node_online": bool(node and self._online(node, now)),
+            "release_after_job_id": r.release_after_job_id if role == "consumer" else None,
+            "started_at": _iso(r.started_at), "ended_at": _iso(r.ended_at),
+        }
+
+    def list_rentals(self, workspace_id: str, limit: int = 100) -> list[dict]:
+        now = self._now()
+        with self._sf() as s:
+            q = select(Rental).where(
+                (Rental.consumer_workspace_id == workspace_id) | (Rental.provider_workspace_id == workspace_id)
+            ).order_by(Rental.started_at.desc()).limit(max(1, min(limit, 500)))
+            return [self._rental_view(s, r, workspace_id, now) for r in s.scalars(q)]
+
+    def _rent(self, s, workspace_id: str, actor: str, offer_id: str, now: datetime,
+              release_after_job_id: Optional[str] = None) -> Rental:
+        # Row lock on Postgres so two renters cannot both win; SQLite has one writer.
+        offer = s.scalar(select(MarketOffer).where(MarketOffer.id == offer_id).with_for_update())
+        if offer is None or offer.status != "listed":
+            raise err("NOT_FOUND", "listing not found", 404)
+        if offer.workspace_id == workspace_id:
+            raise err("OWN_LISTING", "this is your own node; run jobs on it directly, at no charge", 409)
+        available, why = self._offer_availability(s, offer, now)
+        if not available:
+            raise err("UNAVAILABLE", f"this listing is not available: {why}", 409)
+        hourly = offer.price_paise_per_gpu_hour * offer.gpu_count
+        need = hourly + fee_for(hourly, self._c.market_fee_bps)
+        have = self._spendable(s, workspace_id, now)
+        if have < need:
+            raise ControlServiceError(
+                "INSUFFICIENT_FUNDS",
+                f"renting needs one hour of credit up front (₹{need / 100:.2f}); available ₹{max(have, 0) / 100:.2f}",
+                http_status=402,
+            )
+        r = Rental(
+            id=new_id("rnt"), offer_id=offer.id, node_id=offer.node_id,
+            provider_workspace_id=offer.workspace_id, consumer_workspace_id=workspace_id,
+            device_ids=list(offer.device_ids or []), gpu_count=offer.gpu_count,
+            price_paise_per_gpu_hour=offer.price_paise_per_gpu_hour, fee_bps=self._c.market_fee_bps,
+            status="active", started_at=now, billed_through=now, billed_paise=0, fee_paise=0,
+            release_after_job_id=release_after_job_id, created_by=actor, end_reason="",
+        )
+        s.add(r)
+        self._audit(s, workspace_id, actor, "rental_started", f"{r.id} offer={offer.id}")
+        self._audit(s, offer.workspace_id, "", "rental_started", f"{r.id} offer={offer.id}", offer.node_id)
+        s.flush()
+        return r
+
+    @_locked
+    def rent(self, workspace_id: str, actor: str, offer_id: str) -> dict:
+        now = self._now()
+        with self._sf() as s:
+            r = self._rent(s, workspace_id, actor, offer_id, now)
+            s.commit()
+            return self._rental_view(s, r, workspace_id, now)
+
+    def _end_rental(self, s, r: Rental, reason: str, now: datetime, actor: str = "",
+                    ended_at: Optional[datetime] = None) -> set[str]:
+        """Stop the meter, post the final amounts, and stop the tenant's jobs on
+        that node. Returns nodes whose desired snapshot must be republished.
+        `ended_at` bills up to an earlier moment (a node that went silent)."""
+        if r.status != "active":
+            return set()
+        end = ended_at or now
+        # Claim the transition first: only one session may end (and finally meter) a rental.
+        claimed = s.execute(
+            update(Rental).where(Rental.id == r.id, Rental.status == "active")
+            .values(status="ended", ended_at=end, end_reason=reason).execution_options(synchronize_session=False)
+        ).rowcount == 1
+        s.refresh(r)
+        if not claimed:
+            return set()
+        self._meter(s, r, end, final=True)
+        dirty: set[str] = set()
+        on_node = select(JobReplica.job_id).where(JobReplica.node_id == r.node_id, JobReplica.released.is_(False))
+        jobs = s.scalars(select(Job).where(
+            Job.workspace_id == r.consumer_workspace_id, Job.status.notin_(TERMINAL_JOB),
+            (Job.rental_id == r.id) | Job.id.in_(on_node),
+        ))
+        for job in list(jobs):
+            if job.id == r.release_after_job_id and reason == "job_finished":
+                continue
+            status = "cancelled" if reason == "released" else "failed"
+            why = f"the rental ended ({reason.replace('_', ' ')})"
+            dirty |= self._finish_job(s, job, status, why, now, cascade=False)
+        self._audit(s, r.consumer_workspace_id, actor, "rental_ended", f"{r.id} reason={reason}")
+        self._audit(s, r.provider_workspace_id, "", "rental_ended", f"{r.id} reason={reason}", r.node_id)
+        return dirty
+
+    @_locked
+    def release(self, workspace_id: str, actor: str, rental_id: str) -> dict:
+        """End a rental. The consumer releases it; the provider can also end it
+        (maintenance), which fails the tenant's running jobs."""
+        now = self._now()
+        with self._sf() as s:
+            r = s.get(Rental, rental_id)
+            if r is None or workspace_id not in (r.consumer_workspace_id, r.provider_workspace_id):
+                raise err("NOT_FOUND", "rental not found", 404)
+            if r.status != "active":
+                raise err("ENDED", "this rental has already ended", 409)
+            reason = "released" if r.consumer_workspace_id == workspace_id else "provider_ended"
+            dirty = self._end_rental(s, r, reason, now, actor)
+            self._publish(s, dirty)
+            s.commit()
+            return self._rental_view(s, r, workspace_id, now)
+
+    # ------------------------------------------------------------------- jobs
+    def service_token(self, job_id: str) -> str:
+        """Bearer token a service is told to require. Derived, never stored."""
+        mac = hmac.new(self._secret, f"service-token:{job_id}".encode(), hashlib.sha256).hexdigest()
+        return "mst_" + mac[:40]
+
+    def _validate_job(self, body: dict) -> dict:
+        kind = body.get("kind", "job")
+        if kind not in ("job", "service"):
+            raise err("INVALID_FIELD", "kind must be 'job' or 'service'")
+        image = body.get("image")
+        if not isinstance(image, str) or len(image) > 512 or not IMAGE_REF.match(image):
+            raise err(
+                "INVALID_IMAGE",
+                "image must be pinned by digest, like docker.io/pytorch/pytorch@sha256:<64 hex>. "
+                "A tag can change after you submit; a digest cannot.",
+            )
+        args = body.get("args", [])
+        if not isinstance(args, list) or len(args) > 256 or not all(
+            isinstance(a, str) and len(a) <= 8192 and "\x00" not in a for a in args
+        ):
+            raise err("INVALID_FIELD", "args must be a list of at most 256 strings")
+        env = body.get("env", {})
+        if not isinstance(env, dict) or len(env) > 64:
+            raise err("INVALID_FIELD", "env must be an object with at most 64 variables")
+        for k, v in env.items():
+            if not isinstance(k, str) or not ENV_NAME.match(k) or k.startswith("MERIDIAN_"):
+                raise err("INVALID_FIELD", f"invalid environment variable name: {k!r} (MERIDIAN_* is reserved)")
+            if not isinstance(v, str) or len(v) > 8192 or "\x00" in v:
+                raise err("INVALID_FIELD", f"environment variable {k} must be a string of at most 8192 characters")
+        replicas = _int(body, "replicas", 1, 1, 64)
+        if kind == "service" and replicas != 1:
+            raise err("INVALID_FIELD", "a service runs as one replica")
+        default_name = image.split("@")[0].rsplit("/", 1)[-1]
+        return {
+            "name": _text(body, "name", 1, 120, default=default_name), "kind": kind, "image": image,
+            "args": list(args), "env": dict(env), "replicas": replicas,
+            "gpus_per_replica": _int(body, "gpus_per_replica", 1, 0, 16),
+            "min_vram_bytes": _int(body, "min_vram_gb", 0, 0, 1024) * 1024**3,
+            "timeout_seconds": _int(body, "timeout_seconds", 0, 0, 30 * 86400),
+            # Peers must reach each other to rendezvous, and a service is its port.
+            "expose_port": bool(body.get("expose_port", kind == "service" or replicas > 1)),
+        }
+
+    @_locked
+    def submit_job(self, workspace_id: str, actor: str, body: dict, may_rent: bool = False) -> dict:
+        now = self._now()
+        spec = self._validate_job(body)
+        offer_id, rental_id = body.get("offer_id"), body.get("rental_id")
+        if offer_id and rental_id:
+            raise err("INVALID_FIELD", "give offer_id or rental_id, not both")
+        with self._sf() as s:
+            active = s.scalar(select(func.count()).select_from(Job).where(
+                Job.workspace_id == workspace_id, Job.status.notin_(TERMINAL_JOB)
+            ))
+            if (active or 0) >= MAX_ACTIVE_JOBS:
+                raise err("LIMIT", f"a workspace can have at most {MAX_ACTIVE_JOBS} unfinished jobs", 429)
+            job = Job(id=new_id("job"), workspace_id=workspace_id, status="queued", error="", created_by=actor,
+                      created_at=now, **spec)
+            need = spec["replicas"] * spec["gpus_per_replica"]
+            if offer_id:
+                # Rent for exactly this job: the rental ends when the job does.
+                if not may_rent:
+                    raise err("FORBIDDEN", "renting requires the admin role or higher", 403)
+                offer = s.get(MarketOffer, str(offer_id))
+                if offer is not None and need > offer.gpu_count:
+                    raise err("TOO_LARGE", f"the job needs {need} GPUs; this listing has {offer.gpu_count}", 409)
+                job.rental_id = self._rent(s, workspace_id, actor, str(offer_id), now, release_after_job_id=job.id).id
+            elif rental_id:
+                r = s.get(Rental, str(rental_id))
+                if r is None or r.consumer_workspace_id != workspace_id or r.status != "active":
+                    raise err("NOT_FOUND", "no active rental with that id", 404)
+                if need > r.gpu_count:
+                    raise err("TOO_LARGE", f"the job needs {need} GPUs; this rental has {r.gpu_count}", 409)
+                job.rental_id = r.id
+            s.add(job)
+            self._audit(s, workspace_id, actor, "job_submitted", f"{job.id} {job.kind} {job.name}")
+            s.flush()
+            dirty = self._place(s, job, now)
+            self._publish(s, dirty)
+            s.commit()
+            return self._job_view(s, job, full=True, reveal=True)
+
+    @_locked
+    def cancel_job(self, workspace_id: str, actor: str, job_id: str) -> dict:
+        now = self._now()
+        with self._sf() as s:
+            job = self._own_job(s, workspace_id, job_id)
+            if job.status in TERMINAL_JOB:
+                raise err("FINISHED", f"this job already {job.status}", 409)
+            dirty = self._finish_job(s, job, "cancelled", "cancelled by " + (actor or "an operator"), now)
+            self._audit(s, workspace_id, actor, "job_cancelled", job.id)
+            self._publish(s, dirty)
+            s.commit()
+            return self._job_view(s, job, full=True, reveal=True)
+
+    @staticmethod
+    def _own_job(s, workspace_id: str, job_id: str) -> Job:
+        job = s.get(Job, job_id)
+        if job is None or job.workspace_id != workspace_id:
+            raise err("NOT_FOUND", "job not found", 404)
+        found: Job = job
+        return found
+
+    @staticmethod
+    def _replicas(s, job_id: str) -> list[JobReplica]:
+        return list(s.scalars(select(JobReplica).where(JobReplica.job_id == job_id).order_by(JobReplica.rank)))
+
+    def _job_view(self, s, job: Job, full: bool = False, reveal: bool = False) -> dict:
+        now = self._now()
+        replicas = self._replicas(s, job.id)
+        end = _aware(job.finished_at) if job.finished_at else now
+        view: dict[str, Any] = {
+            "id": job.id, "name": job.name, "kind": job.kind, "image": job.image, "status": job.status,
+            "message": job.error, "replicas": job.replicas, "gpus_per_replica": job.gpus_per_replica,
+            "min_vram_bytes": job.min_vram_bytes, "timeout_seconds": job.timeout_seconds,
+            "rental_id": job.rental_id, "created_by": job.created_by, "created_at": _iso(job.created_at),
+            "started_at": _iso(job.started_at), "finished_at": _iso(job.finished_at),
+            "seconds": int((end - _aware(job.started_at)).total_seconds()) if job.started_at else 0,
+            "phases": [r.phase for r in replicas],
+        }
+        if full:
+            names = {
+                n.node_id: n.display_name for n in s.scalars(
+                    select(Node).where(Node.node_id.in_([r.node_id for r in replicas] or [""]))
+                )
+            }
+            view.update({
+                "args": list(job.args or []), "env": dict(job.env or {}), "expose_port": job.expose_port,
+                "placements": [
+                    {
+                        "rank": r.rank, "node_id": r.node_id, "node_name": names.get(r.node_id, ""),
+                        "gpus": len(r.device_ids or []), "phase": r.phase, "exit_code": r.exit_code,
+                        "reason": r.reason, "message": r.message, "endpoint": r.endpoint,
+                        "started_at": _iso(r.started_at), "finished_at": _iso(r.finished_at),
+                        "log_tail": r.log_tail,
+                    }
+                    for r in replicas
+                ],
+            })
+            if job.kind == "service":
+                endpoint = next((r.endpoint for r in replicas if r.endpoint), "")
+                view["service"] = {"endpoint": endpoint, "token": self.service_token(job.id) if reveal else None}
+        return view
+
+    def list_jobs(self, workspace_id: str, status: Optional[str] = None, limit: int = 100) -> list[dict]:
+        with self._sf() as s:
+            q = select(Job).where(Job.workspace_id == workspace_id).order_by(Job.created_at.desc())
+            if status == "active":
+                q = q.where(Job.status.notin_(TERMINAL_JOB))
+            elif status:
+                q = q.where(Job.status == status)
+            return [self._job_view(s, j) for j in s.scalars(q.limit(max(1, min(limit, 500))))]
+
+    def job_detail(self, workspace_id: str, job_id: str, reveal: bool = False) -> dict:
+        with self._sf() as s:
+            return self._job_view(s, self._own_job(s, workspace_id, job_id), full=True, reveal=reveal)
+
+    # -------------------------------------------------------------- scheduling
+    def _candidates(self, s, job: Job, now: datetime) -> list[dict]:
+        """Nodes this job may use, with the devices and ports free on each."""
+        ws = job.workspace_id
+        if job.rental_id:
+            pinned = s.get(Rental, job.rental_id)
+            rentals = [pinned] if pinned is not None and pinned.status == "active" else []
+            own: list[Node] = []
+        else:
+            rentals = list(s.scalars(select(Rental).where(
+                Rental.consumer_workspace_id == ws, Rental.status == "active"
+            ).order_by(Rental.started_at)))
+            own = list(s.scalars(select(Node).where(Node.workspace_id == ws, Node.revoked.is_(False))
+                                 .order_by(Node.created_at)))
+        out: list[dict] = []
+
+        def consider(node: Optional[Node], allowed: Optional[set[str]], blocked: set[str]) -> None:
+            if node is None or not self._online(node, now):
+                return
+            cap = self._capacity(s, node.node_id)
+            if not cap.get("jobs_enabled"):
+                return
+            held_devices, held_ports = self._held(s, node.node_id)
+            alloc = cap.get("allocatable_vram_bytes") or {}
+            free = cap.get("free_devices")
+            pool = list(free) if isinstance(free, list) else [d for d, v in alloc.items() if int(v) > 0]
+            inv = {g.get("device_id"): g for g in (node.inventory or []) if isinstance(g, dict)}
+            devices = []
+            for d in sorted(pool):
+                if d in held_devices or d in blocked or (allowed is not None and d not in allowed):
+                    continue
+                vram = int((inv.get(d) or {}).get("memory_total_bytes") or alloc.get(d, 0))
+                if vram >= job.min_vram_bytes:
+                    devices.append(d)
+            rng = cap.get("job_port_range") or [0, 0]
+            ports = [p for p in range(int(rng[0]), int(rng[1])) if p not in held_ports]
+            out.append({"node": node, "devices": devices, "ports": ports, "host": str(cap.get("advertise_host") or "")})
+
+        for node in own:
+            # GPUs on the marketplace are for sale: the owner's own new jobs stay off
+            # them, so a renter never finds a listed GPU busy.
+            blocked: set[str] = set()
+            for o in s.scalars(select(MarketOffer).where(MarketOffer.node_id == node.node_id)):
+                if o.status == "listed" or self._active_rental_for_offer(s, o.id) is not None:
+                    blocked.update(o.device_ids or [])
+            consider(node, None, blocked)
+        for r in rentals:
+            consider(s.get(Node, r.node_id), set(r.device_ids or []), set())
+        return out
+
+    def _place(self, s, job: Job, now: datetime) -> set[str]:
+        """Place every replica or none. Returns the nodes that changed."""
+        if job.rental_id:
+            r = s.get(Rental, job.rental_id)
+            if r is None or r.status != "active":
+                return self._finish_job(s, job, "failed", "the rental this job was pinned to has ended", now)
+        candidates = self._candidates(s, job, now)
+        plan: list[tuple[dict, list[str], int]] = []
+        for _rank in range(job.replicas):
+            for c in candidates:
+                if len(c["devices"]) < job.gpus_per_replica or (job.expose_port and not c["ports"]):
+                    continue
+                devices = [c["devices"].pop(0) for _ in range(job.gpus_per_replica)]
+                plan.append((c, devices, c["ports"].pop(0) if job.expose_port else 0))
+                break
+            else:
+                gpus = job.replicas * job.gpus_per_replica
+                where = "the rented GPUs" if job.rental_id else "this workspace's nodes and rentals"
+                job.error = (
+                    f"waiting for capacity: needs {gpus} free GPU{'s' if gpus != 1 else ''} on {where}"
+                    if gpus else f"waiting for a node that runs jobs in {where}"
+                )
+                return set()
+        for rank, (c, devices, port) in enumerate(plan):
+            s.add(JobReplica(
+                job_id=job.id, rank=rank, node_id=c["node"].node_id, device_ids=devices, port=port,
+                host=c["host"], phase="Pending", reason="", message="", endpoint="", log_tail="", released=False,
+            ))
+        job.status, job.error = "scheduled", ""
+        s.flush()
+        return {c["node"].node_id for c, _, _ in plan}
+
+    def _finish_job(self, s, job: Job, status: str, message: str, now: datetime, cascade: bool = True) -> set[str]:
+        """Move a job to a terminal status. Its replicas stay in their nodes'
+        snapshots, marked Stopped, until each node confirms it stopped."""
+        if job.status in TERMINAL_JOB:
+            return set()
+        job.status, job.error, job.finished_at = status, message[:1024], now
+        dirty = {r.node_id for r in self._replicas(s, job.id) if not r.released}
+        if cascade:
+            for r in s.scalars(select(Rental).where(Rental.release_after_job_id == job.id, Rental.status == "active")):
+                dirty |= self._end_rental(s, r, "job_finished", now)
+        return dirty
+
+    def _advance(self, s, now: datetime) -> set[str]:
+        """One pass over unfinished work: detect lost nodes, settle job status,
+        enforce timeouts, release finished replicas, place what is queued."""
+        dirty: set[str] = set()
+        placed = select(Job).where(Job.status.in_(("scheduled", "running"))).order_by(Job.created_at)
+        for job in list(s.scalars(placed)):
+            replicas = self._replicas(s, job.id)
+            if not replicas:
+                continue
+            for r in replicas:
+                if r.phase in TERMINAL_REPLICA:
+                    continue
+                node = s.get(Node, r.node_id)
+                if self._lost(node, now):
+                    r.phase, r.reason, r.finished_at = "Failed", "NodeLost", now
+                    r.message = "the node stopped reporting while this replica was running"
+            phases = [r.phase for r in replicas]
+            failed = next((r for r in replicas if r.phase in ("Failed", "Cancelled")), None)
+            if failed is not None:
+                detail = failed.message or failed.reason or "stopped"
+                dirty |= self._finish_job(s, job, "failed", f"replica {failed.rank}: {detail}", now)
+            elif all(p == "Succeeded" for p in phases):
+                if job.kind == "service":
+                    dirty |= self._finish_job(s, job, "failed", "the service exited", now)
+                else:
+                    dirty |= self._finish_job(s, job, "succeeded", "", now)
+            else:
+                if job.status == "scheduled" and all(p in ("Running", "Succeeded") for p in phases):
+                    job.status = "running"
+                if job.started_at is None and any(p != "Pending" for p in phases):
+                    job.started_at = min((_aware(r.started_at) for r in replicas if r.started_at), default=now)
+                if job.timeout_seconds and job.started_at and (
+                    (now - _aware(job.started_at)).total_seconds() > job.timeout_seconds
+                ):
+                    dirty |= self._finish_job(s, job, "failed", f"timed out after {job.timeout_seconds}s", now)
+
+        # A finished job's replica leaves the snapshot once its node has stopped it
+        # (or the node is gone and cannot be holding the GPU for us any more).
+        pending_release = select(JobReplica).join(Job, Job.id == JobReplica.job_id).where(
+            JobReplica.released.is_(False), Job.status.in_(TERMINAL_JOB)
+        )
+        for r in list(s.scalars(pending_release)):
+            node = s.get(Node, r.node_id)
+            if r.phase in TERMINAL_REPLICA or self._lost(node, now):
+                if r.phase not in TERMINAL_REPLICA:
+                    r.phase, r.reason, r.finished_at = "Cancelled", "NodeLost", now
+                r.released = True
+                dirty.add(r.node_id)
+        s.flush()
+
+        for job in list(s.scalars(select(Job).where(Job.status == "queued").order_by(Job.created_at))):
+            dirty |= self._place(s, job, now)
+        return dirty
+
+    # -------------------------------------------------------- desired snapshot
+    def _render(self, value: str, ctx: dict[str, str]) -> str:
+        for key, sub in ctx.items():
+            value = value.replace("{{" + key + "}}", sub)
+        return value
+
+    def jobs_for_node(self, s, node_id: str) -> list[dict]:
+        """The `jobs` list of a node's desired snapshot (contracts/v1)."""
+        out: list[dict] = []
+        q = select(JobReplica).where(JobReplica.node_id == node_id, JobReplica.released.is_(False)) \
+            .order_by(JobReplica.job_id, JobReplica.rank)
+        for r in s.scalars(q):
+            job = s.get(Job, r.job_id)
+            if job is None:
+                continue
+            peers = [f"{p.host or '127.0.0.1'}:{p.port}" for p in self._replicas(s, job.id) if p.port]
+            ctx = {
+                "rank": str(r.rank), "replicas": str(job.replicas), "port": str(r.port or ""),
+                "peers": ",".join(peers), "master": peers[0] if peers else "", "job_id": job.id,
+                "service_token": self.service_token(job.id) if job.kind == "service" else "",
+            }
+            env = {k: self._render(v, ctx) for k, v in (job.env or {}).items()}
+            env.update({
+                "MERIDIAN_JOB_ID": job.id, "MERIDIAN_JOB_NAME": job.name,
+                "MERIDIAN_JOB_RANK": ctx["rank"], "MERIDIAN_JOB_REPLICAS": ctx["replicas"],
+            })
+            if r.port:
+                env.update({"MERIDIAN_JOB_PORT": ctx["port"], "MERIDIAN_JOB_PEERS": ctx["peers"],
+                            "MERIDIAN_JOB_MASTER": ctx["master"]})
+            if job.kind == "service":
+                env["MERIDIAN_SERVICE_TOKEN"] = ctx["service_token"]
+            out.append({
+                "job_id": job.id, "replica": r.rank, "kind": job.kind, "image": job.image,
+                "args": [self._render(a, ctx) for a in (job.args or [])], "env": env,
+                "device_ids": list(r.device_ids or []), "memory_limit_bytes": 0, "port": r.port,
+                "timeout_seconds": job.timeout_seconds,
+                "desired_phase": "Stopped" if job.status in TERMINAL_JOB else "Running",
+            })
+        return out
+
+    def merge_owner_snapshot(self, s, node_id: str, snapshot: dict) -> dict:
+        """The node owner publishes engine assignments; jobs are ours. Whatever
+        the owner sent under `jobs` is replaced, so an owner can neither inject
+        a job nor drop a tenant's."""
+        taken: set[str] = set()
+        for o in s.scalars(select(MarketOffer).where(MarketOffer.node_id == node_id, MarketOffer.status == "listed")):
+            taken.update(o.device_ids or [])
+        for r in s.scalars(select(Rental).where(Rental.node_id == node_id, Rental.status == "active")):
+            taken.update(r.device_ids or [])
+        for a in snapshot.get("assignments") or []:
+            if isinstance(a, dict) and a.get("desired_phase") == "Running":
+                ids = (a.get("resources") or {}).get("device_ids") or []
+                if taken & set(ids):
+                    raise err("DEVICES_LISTED", "these GPUs are listed or rented; pause the listing first", 409)
+        merged = {k: v for k, v in snapshot.items() if k != "jobs"}
+        jobs = self.jobs_for_node(s, node_id)
+        if jobs:
+            merged["jobs"] = jobs
+        return merged
+
+    def _publish(self, s, node_ids: Iterable[str]) -> None:
+        """Publish a new desired generation for each node whose jobs changed."""
+        for node_id in sorted(set(node_ids)):
+            node = s.get(Node, node_id)
+            if node is None:
+                continue
+            latest = s.scalar(
+                select(DesiredSnapshotRow).where(DesiredSnapshotRow.node_id == node_id)
+                .order_by(DesiredSnapshotRow.generation.desc())
+            )
+            previous = dict(latest.snapshot) if latest is not None else {}
+            jobs = self.jobs_for_node(s, node_id)
+            if jobs == (previous.get("jobs") or []):
+                continue
+            generation = node.desired_generation + 1
+            snapshot: dict[str, Any] = {
+                "node_id": node_id, "generation": generation,
+                "assignments": previous.get("assignments") or [],
+            }
+            if jobs:
+                snapshot["jobs"] = jobs
+            canonical = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
+            snapshot["snapshot_hash"] = "sha256:" + hashlib.sha256(canonical).hexdigest()
+            s.add(DesiredSnapshotRow(node_id=node_id, generation=generation, snapshot=snapshot, created_at=self._now()))
+            node.desired_generation = generation
+
+    # ------------------------------------------------------------ observation
+    @_locked
+    def on_observation(self, node_id: str) -> None:
+        """A node reported. Fold its replica states in, then settle and schedule."""
+        now = self._now()
+        with self._sf() as s:
+            obs = s.get(ObservationRow, node_id)
+            reported = (obs.observation or {}).get("jobs") if obs is not None else None
+            if isinstance(reported, list):
+                for item in reported:
+                    if isinstance(item, dict):
+                        self._ingest(s, node_id, item)
+            has_work = s.scalar(select(func.count()).select_from(Job).where(Job.status.notin_(TERMINAL_JOB)))
+            has_unreleased = s.scalar(
+                select(func.count()).select_from(JobReplica).where(JobReplica.released.is_(False))
+            )
+            if has_work or has_unreleased:
+                self._publish(s, self._advance(s, now))
+            s.commit()
+
+    def _ingest(self, s, node_id: str, item: dict) -> None:
+        r = s.get(JobReplica, (str(item.get("job_id", "")), item.get("replica", -1)))
+        if r is None or r.node_id != node_id or r.released:
+            return
+        phase = item.get("phase")
+        if phase not in REPLICA_PHASES or r.phase in TERMINAL_REPLICA:
+            return  # a finished replica never moves again
+        r.phase = phase
+        code = item.get("exit_code")
+        r.exit_code = code if isinstance(code, int) and not isinstance(code, bool) else None
+        r.reason = str(item.get("reason") or "")[:256]
+        r.message = str(item.get("message") or "")[:1024]
+        r.endpoint = str(item.get("endpoint") or "")[:512]
+        r.log_tail = str(item.get("log_tail") or "")[-8192:]
+        r.started_at = _parse(item.get("started_at")) or r.started_at
+        r.finished_at = _parse(item.get("finished_at")) or r.finished_at
+
+    @_locked
+    def tick(self) -> None:
+        """Periodic pass: meter rentals, end those out of credit, settle jobs."""
+        now = self._now()
+        with self._sf() as s:
+            dirty: set[str] = set()
+            broke: set[str] = set()
+            for r in list(s.scalars(select(Rental).where(Rental.status == "active").with_for_update())):
+                node = s.get(Node, r.node_id)
+                if self._lost(node, now):
+                    # Bill only to the node's last lease, never before what is already billed.
+                    lease = node.lease_expires_at if node is not None else None
+                    end = min(_aware(lease), now) if lease else _aware(r.billed_through)
+                    end = max(end, _aware(r.started_at), _aware(r.billed_through))
+                    dirty |= self._end_rental(s, r, "node_lost", now, ended_at=end)
+                    continue
+                self._meter(s, r, now)
+                if r.consumer_workspace_id not in broke and self._spendable(s, r.consumer_workspace_id, now) <= 0:
+                    broke.add(r.consumer_workspace_id)
+            for ws in broke:
+                for r in list(s.scalars(select(Rental).where(
+                    Rental.consumer_workspace_id == ws, Rental.status == "active"
+                ))):
+                    dirty |= self._end_rental(s, r, "insufficient_funds", now)
+            dirty |= self._advance(s, now)
+            self._publish(s, dirty)
+            s.commit()
+
+    # --------------------------------------------------------------- redaction
+    def redact_node_detail(self, workspace_id: str, detail: dict) -> dict:
+        """A node's owner sees that a tenant's job occupies a GPU, never what it
+        runs: image, arguments, environment and logs are the tenant's."""
+        with self._sf() as s:
+            own = {j for (j,) in s.execute(select(Job.id).where(Job.workspace_id == workspace_id))}
+
+        def scrub(job: Any, keep: tuple[str, ...]) -> Any:
+            if not isinstance(job, dict) or job.get("job_id") in own:
+                return job
+            return {**{k: job[k] for k in keep if k in job}, "tenant": True}
+
+        observation = detail.get("observation")
+        if isinstance(observation, dict) and isinstance(observation.get("jobs"), list):
+            detail["observation"] = {
+                **observation,
+                "jobs": [scrub(j, _OBSERVED_KEEP) for j in observation["jobs"]],
+            }
+        desired = detail.get("desired")
+        if isinstance(desired, dict) and isinstance((desired.get("snapshot") or {}).get("jobs"), list):
+            snap = desired["snapshot"]
+            detail["desired"] = {
+                **desired,
+                "snapshot": {
+                    **snap,
+                    "jobs": [scrub(j, _DESIRED_KEEP) for j in snap["jobs"]],
+                },
+            }
+        return detail
+
+    # ---------------------------------------------------------------- API keys
+    def create_api_key(self, workspace_id: str, actor: str, body: dict) -> tuple[str, dict]:
+        name = _text(body, "name", 1, 120)
+        role = body.get("role", "operator")
+        if role not in API_KEY_ROLES:
+            raise err("INVALID_FIELD", f"role must be one of {', '.join(API_KEY_ROLES)}")
+        token = "mck_" + secrets.token_urlsafe(32)
+        with self._sf() as s:
+            count = s.scalar(select(func.count()).select_from(ApiKey).where(
+                ApiKey.workspace_id == workspace_id, ApiKey.revoked.is_(False)
+            ))
+            if (count or 0) >= 50:
+                raise err("LIMIT", "a workspace can have at most 50 active API keys", 400)
+            key = ApiKey(
+                id=new_id("key"), workspace_id=workspace_id, name=name, role=role, token_hash=sha256_hex(token),
+                prefix=token[:10], created_by=actor, created_at=self._now(),
+            )
+            s.add(key)
+            self._audit(s, workspace_id, actor, "api_key_created", f"{key.id} role={role}")
+            s.commit()
+            return token, self._key_view(key)
+
+    @staticmethod
+    def _key_view(k: ApiKey) -> dict:
+        return {
+            "id": k.id, "name": k.name, "role": k.role, "prefix": k.prefix, "created_by": k.created_by,
+            "created_at": _iso(k.created_at), "last_used_at": _iso(k.last_used_at), "revoked": k.revoked,
+        }
+
+    def list_api_keys(self, workspace_id: str) -> list[dict]:
+        with self._sf() as s:
+            q = select(ApiKey).where(ApiKey.workspace_id == workspace_id).order_by(ApiKey.created_at.desc())
+            return [self._key_view(k) for k in s.scalars(q)]
+
+    def revoke_api_key(self, workspace_id: str, actor: str, key_id: str) -> None:
+        with self._sf() as s:
+            k = s.get(ApiKey, key_id)
+            if k is None or k.workspace_id != workspace_id:
+                raise err("NOT_FOUND", "API key not found", 404)
+            k.revoked = True
+            self._audit(s, workspace_id, actor, "api_key_revoked", k.id)
+            s.commit()
+
+    def authenticate_api_key(self, token: str) -> Optional[tuple[str, str, str]]:
+        """(workspace_id, role, label) for a live key, else None."""
+        if not token.startswith("mck_"):
+            return None
+        now = self._now()
+        with self._sf() as s:
+            k = s.scalar(select(ApiKey).where(ApiKey.token_hash == sha256_hex(token)))
+            if k is None or k.revoked:
+                return None
+            # Coarse last-used stamp: at most one write a minute per key.
+            if k.last_used_at is None or (now - _aware(k.last_used_at)).total_seconds() > 60:
+                k.last_used_at = now
+                s.commit()
+            return k.workspace_id, k.role, f"key:{k.name}"
+
+    # ---------------------------------------------------------------- overview
+    def overview(self, workspace_id: str) -> dict:
+        now = self._now()
+        with self._sf() as s:
+            by_status = {
+                st: int(n) for st, n in s.execute(
+                    select(Job.status, func.count()).where(Job.workspace_id == workspace_id).group_by(Job.status)
+                )
+            }
+            renting = list(s.scalars(select(Rental).where(
+                Rental.consumer_workspace_id == workspace_id, Rental.status == "active"
+            )))
+            providing = list(s.scalars(select(Rental).where(
+                Rental.provider_workspace_id == workspace_id, Rental.status == "active"
+            )))
+            members = s.scalar(
+                select(func.count()).select_from(Membership).where(Membership.workspace_id == workspace_id)
+            )
+            return {
+                "jobs": by_status,
+                "rented_gpus": sum(r.gpu_count for r in renting),
+                "gpus_rented_out": sum(r.gpu_count for r in providing),
+                "listings": s.scalar(select(func.count()).select_from(MarketOffer).where(
+                    MarketOffer.workspace_id == workspace_id, MarketOffer.status == "listed"
+                )),
+                "balance_paise": self._balance(s, workspace_id),
+                "available_paise": self._spendable(s, workspace_id, now),
+                "members": members,
+                "currency": CURRENCY,
+            }
+
+
+def _parse(value: Any) -> Optional[datetime]:
+    if not isinstance(value, str) or not value:
+        return None
+    try:
+        return _aware(datetime.fromisoformat(value.replace("Z", "+00:00")))
+    except ValueError:
+        return None

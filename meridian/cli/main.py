@@ -13,9 +13,16 @@ def cli() -> None:
 
         sys.exit(init_main(sys.argv[2:]))
 
+    if len(sys.argv) > 1 and sys.argv[1] == "compute":
+        from meridian.cli.compute import main as compute_main
+
+        sys.exit(compute_main(sys.argv[2:]))
+
     parser = argparse.ArgumentParser(prog="meridian", description="Meridian inference gateway")
     sub = parser.add_subparsers(dest="command")
     sub.add_parser("init", help="Set up a gateway on this machine (config, keys, service)", add_help=False)
+
+    sub.add_parser("compute", help="Rent GPUs and run jobs on Meridian Cloud", add_help=False)
 
     serve = sub.add_parser("serve", help="Start the gateway server")
     serve.add_argument("-c", "--config", default="config.yaml", help="Path to config YAML")

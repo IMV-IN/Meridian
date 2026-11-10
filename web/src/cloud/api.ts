@@ -36,6 +36,8 @@ export interface WorkspaceRef {
 export interface Me {
   user: CloudUser
   workspaces: WorkspaceRef[]
+  /** Operates this Meridian Cloud: may record credits and payouts. */
+  platform_admin?: boolean
 }
 
 export interface WorkspaceInfo extends WorkspaceRef {
@@ -121,6 +123,161 @@ export interface GatewayDetail extends GatewaySummary {
   report: GatewayReport
 }
 
+// ── Meridian Compute: marketplace, jobs, billing. Money is integer paise. ──
+
+export interface Offer {
+  id: string
+  title: string
+  description: string
+  region: string
+  gpu_model: string
+  gpu_count: number
+  vram_bytes_per_gpu: number
+  price_paise_per_gpu_hour: number
+  fee_bps: number
+  hourly_paise: number
+  hourly_fee_paise: number
+  hourly_total_paise: number
+  status: "listed" | "paused" | "retired"
+  available: boolean
+  unavailable_reason: string
+  provider: { name: string; slug: string }
+  mine: boolean
+  node_id?: string
+  created_at: string | null
+}
+
+export interface ListableNode {
+  node_id: string
+  display_name: string
+  gpu_model: string
+  gpu_count: number
+  vram_bytes_per_gpu: number
+  listable: boolean
+  reason: string
+}
+
+export interface Rental {
+  id: string
+  role: "consumer" | "provider"
+  status: "active" | "ended"
+  end_reason: string
+  offer: { id: string; title: string; region: string; gpu_model: string; vram_bytes_per_gpu: number }
+  counterparty: string
+  gpu_count: number
+  price_paise_per_gpu_hour: number
+  fee_bps: number
+  hourly_total_paise: number
+  amount_paise: number
+  fee_paise: number
+  seconds: number
+  node_online: boolean
+  release_after_job_id: string | null
+  started_at: string | null
+  ended_at: string | null
+}
+
+export type JobStatus = "queued" | "scheduled" | "running" | "succeeded" | "failed" | "cancelled"
+
+export interface JobSummary {
+  id: string
+  name: string
+  kind: "job" | "service"
+  image: string
+  status: JobStatus
+  message: string
+  replicas: number
+  gpus_per_replica: number
+  min_vram_bytes: number
+  timeout_seconds: number
+  rental_id: string | null
+  created_by: string
+  created_at: string | null
+  started_at: string | null
+  finished_at: string | null
+  seconds: number
+  phases: string[]
+}
+
+export interface Placement {
+  rank: number
+  node_id: string
+  node_name: string
+  gpus: number
+  phase: string
+  exit_code: number | null
+  reason: string
+  message: string
+  endpoint: string
+  started_at: string | null
+  finished_at: string | null
+  log_tail: string
+}
+
+export interface JobDetail extends JobSummary {
+  args: string[]
+  env: Record<string, string>
+  expose_port: boolean
+  placements: Placement[]
+  service?: { endpoint: string; token: string | null }
+}
+
+export interface JobSpec {
+  name?: string
+  kind: "job" | "service"
+  image: string
+  args: string[]
+  env: Record<string, string>
+  replicas: number
+  gpus_per_replica: number
+  min_vram_gb: number
+  timeout_seconds: number
+  offer_id?: string
+  rental_id?: string
+}
+
+export interface LedgerEntry {
+  id: number
+  kind: string
+  amount_paise: number
+  rental_id: string | null
+  reference: string
+  memo: string
+  created_at: string | null
+}
+
+export interface Billing {
+  currency: string
+  fee_bps: number
+  balance_paise: number
+  accrued_spend_paise: number
+  accrued_earnings_paise: number
+  available_paise: number
+  burn_paise_per_hour: number
+  totals_paise: Record<string, number>
+  entries: LedgerEntry[]
+}
+
+export interface ApiKeyView {
+  id: string
+  name: string
+  role: "viewer" | "operator" | "admin"
+  prefix: string
+  created_by: string
+  created_at: string | null
+  last_used_at: string | null
+  revoked: boolean
+}
+
+export interface PlatformSummary {
+  fee_bps: number
+  fee_revenue_paise: number
+  gross_rental_paise: number
+  active_rentals: number
+  listed_offers: number
+  workspaces: { id: string; slug: string; name: string; balance_paise: number }[]
+}
+
 const H = { "X-Meridian-CSRF": "1" }
 const o = { auth: false as const, headers: H }
 const w = (ws: string) => `/api/w/${encodeURIComponent(ws)}`
@@ -170,6 +327,52 @@ export const cloud = {
     request<GatewayDetail>(`${w(ws)}/gateways/${encodeURIComponent(id)}`, { ...o, signal }),
   forgetGateway: (ws: string, id: string) =>
     request<{ ok: boolean }>(`${w(ws)}/gateways/${encodeURIComponent(id)}`, { ...o, method: "DELETE" }),
+
+  offers: (ws: string, mine: boolean, signal?: AbortSignal) =>
+    request<{ offers: Offer[] }>(`${w(ws)}/market/offers${mine ? "?mine=true" : ""}`, { ...o, signal }).then((r) => r.offers),
+  listableNodes: (ws: string, signal?: AbortSignal) =>
+    request<{ nodes: ListableNode[] }>(`${w(ws)}/market/listable-nodes`, { ...o, signal }).then((r) => r.nodes),
+  createOffer: (ws: string, body: { node_id: string; title: string; region: string; description: string; price_paise_per_gpu_hour: number }) =>
+    request<Offer>(`${w(ws)}/market/offers`, { ...o, method: "POST", body }),
+  updateOffer: (ws: string, id: string, body: Partial<{ status: "listed" | "paused"; price_paise_per_gpu_hour: number }>) =>
+    request<Offer>(`${w(ws)}/market/offers/${encodeURIComponent(id)}`, { ...o, method: "PATCH", body }),
+  retireOffer: (ws: string, id: string) =>
+    request<void>(`${w(ws)}/market/offers/${encodeURIComponent(id)}`, { ...o, method: "DELETE" }),
+  rentals: (ws: string, signal?: AbortSignal) =>
+    request<{ rentals: Rental[] }>(`${w(ws)}/market/rentals`, { ...o, signal }).then((r) => r.rentals),
+  rent: (ws: string, offerId: string) =>
+    request<Rental>(`${w(ws)}/market/rentals`, { ...o, method: "POST", body: { offer_id: offerId } }),
+  release: (ws: string, id: string) =>
+    request<Rental>(`${w(ws)}/market/rentals/${encodeURIComponent(id)}/release`, { ...o, method: "POST" }),
+
+  jobs: (ws: string, signal?: AbortSignal) =>
+    request<{ jobs: JobSummary[] }>(`${w(ws)}/jobs`, { ...o, signal }).then((r) => r.jobs),
+  job: (ws: string, id: string, signal?: AbortSignal) =>
+    request<JobDetail>(`${w(ws)}/jobs/${encodeURIComponent(id)}`, { ...o, signal }),
+  submitJob: (ws: string, body: JobSpec) => request<JobDetail>(`${w(ws)}/jobs`, { ...o, method: "POST", body }),
+  cancelJob: (ws: string, id: string) =>
+    request<JobDetail>(`${w(ws)}/jobs/${encodeURIComponent(id)}/cancel`, { ...o, method: "POST" }),
+
+  billing: (ws: string, signal?: AbortSignal) => request<Billing>(`${w(ws)}/billing`, { ...o, signal }),
+  apiKeys: (ws: string, signal?: AbortSignal) =>
+    request<{ keys: ApiKeyView[] }>(`${w(ws)}/api-keys`, { ...o, signal }).then((r) => r.keys),
+  createApiKey: (ws: string, name: string, role: ApiKeyView["role"]) =>
+    request<ApiKeyView & { token: string }>(`${w(ws)}/api-keys`, { ...o, method: "POST", body: { name, role } }),
+  revokeApiKey: (ws: string, id: string) =>
+    request<void>(`${w(ws)}/api-keys/${encodeURIComponent(id)}`, { ...o, method: "DELETE" }),
+
+  platformSummary: (signal?: AbortSignal) => request<PlatformSummary>("/api/platform/summary", { ...o, signal }),
+  platformCredit: (body: { workspace: string; amount_paise: number; reference: string; memo: string }) =>
+    request<{ workspace_id: string; balance_paise: number }>("/api/platform/credits", { ...o, method: "POST", body }),
+  platformPayout: (body: { workspace: string; amount_paise: number; reference: string; memo: string }) =>
+    request<{ workspace_id: string; balance_paise: number }>("/api/platform/payouts", { ...o, method: "POST", body }),
+}
+
+/** "₹ per hour" typed by a person → integer paise, or null if it is not money. */
+export function rupeesToPaise(text: string): number | null {
+  const m = /^\s*(\d{1,9})(?:\.(\d{1,2}))?\s*$/.exec(text)
+  if (!m) return null
+  return Number(m[1]) * 100 + Number((m[2] ?? "").padEnd(2, "0"))
 }
 
 const RANK: Record<WorkspaceRole, number> = { viewer: 0, operator: 1, admin: 2, owner: 3 }

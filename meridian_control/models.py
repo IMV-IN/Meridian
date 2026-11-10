@@ -10,7 +10,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Optional
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
+from sqlalchemy import JSON, BigInteger, DateTime, ForeignKey, Integer, LargeBinary, String, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from .db import Base
@@ -65,6 +65,9 @@ class Node(Base):
     desired_generation: Mapped[int] = mapped_column(Integer, default=0)
     revoked: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # GPU inventory from the node's last heartbeat (model, memory). Read by the
+    # marketplace to describe what an offer actually is.
+    inventory: Mapped[list] = mapped_column(JSON, default=list)
 
 
 class DesiredSnapshotRow(Base):
@@ -205,3 +208,136 @@ class GatewayInstance(Base):
     first_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     last_seen_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     report: Mapped[dict] = mapped_column(JSON, default=dict)
+
+
+# --- Meridian Compute: marketplace, billing, jobs -----------------------------
+# Money is integer paise (INR). Never a float: a ledger must add up exactly.
+
+PLATFORM_ACCOUNT = "platform"  # ledger account that collects the marketplace fee
+
+
+class MarketOffer(Base):
+    """A provider workspace lists one node's GPUs for rent, as a unit."""
+
+    __tablename__ = "market_offers"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(40), ForeignKey("workspaces.id"), index=True)
+    node_id: Mapped[str] = mapped_column(String(128), ForeignKey("nodes.node_id"), index=True)
+    title: Mapped[str] = mapped_column(String(120))
+    description: Mapped[str] = mapped_column(String(2000), default="")
+    region: Mapped[str] = mapped_column(String(80), default="")
+    gpu_model: Mapped[str] = mapped_column(String(120), default="")
+    gpu_count: Mapped[int] = mapped_column(Integer)
+    vram_bytes_per_gpu: Mapped[int] = mapped_column(BigInteger, default=0)
+    device_ids: Mapped[list] = mapped_column(JSON, default=list)
+    price_paise_per_gpu_hour: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="listed", index=True)  # listed | paused | retired
+    created_by: Mapped[str] = mapped_column(String(320), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Rental(Base):
+    """A consumer workspace holds an offer's GPUs. Billed per second from
+    started_at to ended_at at the price and fee captured when it began."""
+
+    __tablename__ = "market_rentals"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    offer_id: Mapped[str] = mapped_column(String(40), ForeignKey("market_offers.id"), index=True)
+    node_id: Mapped[str] = mapped_column(String(128), index=True)
+    provider_workspace_id: Mapped[str] = mapped_column(String(40), index=True)
+    consumer_workspace_id: Mapped[str] = mapped_column(String(40), index=True)
+    device_ids: Mapped[list] = mapped_column(JSON, default=list)
+    gpu_count: Mapped[int] = mapped_column(Integer)
+    price_paise_per_gpu_hour: Mapped[int] = mapped_column(Integer)
+    fee_bps: Mapped[int] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), default="active", index=True)  # active | ended
+    end_reason: Mapped[str] = mapped_column(String(40), default="")
+    release_after_job_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True)
+    started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    ended_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Cumulative amounts already posted to the ledger. Each metering pass posts
+    # (total due so far) minus these, so rounding never drifts.
+    billed_paise: Mapped[int] = mapped_column(BigInteger, default=0)
+    fee_paise: Mapped[int] = mapped_column(BigInteger, default=0)
+    billed_through: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[str] = mapped_column(String(320), default="")
+
+
+class LedgerEntry(Base):
+    """Append-only. A workspace's balance is the sum of its entries."""
+
+    __tablename__ = "ledger_entries"
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    workspace_id: Mapped[str] = mapped_column(String(40), index=True)  # or PLATFORM_ACCOUNT
+    # topup | rental_charge | platform_fee | rental_earning | fee_revenue | payout | adjustment
+    kind: Mapped[str] = mapped_column(String(24))
+    amount_paise: Mapped[int] = mapped_column(BigInteger)  # signed: credit > 0, debit < 0
+    rental_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    reference: Mapped[str] = mapped_column(String(200), default="")  # payment / payout reference
+    memo: Mapped[str] = mapped_column(String(400), default="")
+    actor: Mapped[str] = mapped_column(String(320), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+
+
+class Job(Base):
+    """A batch job (runs to completion) or a service (long-running, has a port)."""
+
+    __tablename__ = "compute_jobs"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(40), ForeignKey("workspaces.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    kind: Mapped[str] = mapped_column(String(16), default="job")  # job | service
+    image: Mapped[str] = mapped_column(String(512))
+    args: Mapped[list] = mapped_column(JSON, default=list)
+    env: Mapped[dict] = mapped_column(JSON, default=dict)
+    replicas: Mapped[int] = mapped_column(Integer, default=1)
+    gpus_per_replica: Mapped[int] = mapped_column(Integer, default=1)
+    min_vram_bytes: Mapped[int] = mapped_column(BigInteger, default=0)
+    expose_port: Mapped[bool] = mapped_column(default=False)
+    timeout_seconds: Mapped[int] = mapped_column(Integer, default=0)
+    rental_id: Mapped[Optional[str]] = mapped_column(String(40), nullable=True, index=True)
+    # queued | running | succeeded | failed | cancelled
+    status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
+    error: Mapped[str] = mapped_column(String(1024), default="")
+    created_by: Mapped[str] = mapped_column(String(320), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class JobReplica(Base):
+    __tablename__ = "compute_job_replicas"
+    job_id: Mapped[str] = mapped_column(String(40), ForeignKey("compute_jobs.id"), primary_key=True)
+    rank: Mapped[int] = mapped_column(Integer, primary_key=True)
+    node_id: Mapped[str] = mapped_column(String(128), index=True)
+    device_ids: Mapped[list] = mapped_column(JSON, default=list)
+    port: Mapped[int] = mapped_column(Integer, default=0)
+    host: Mapped[str] = mapped_column(String(253), default="")
+    phase: Mapped[str] = mapped_column(String(16), default="Pending")
+    exit_code: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    reason: Mapped[str] = mapped_column(String(256), default="")
+    message: Mapped[str] = mapped_column(String(1024), default="")
+    endpoint: Mapped[str] = mapped_column(String(512), default="")
+    log_tail: Mapped[str] = mapped_column(String(8192), default="")
+    started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # True once the node no longer needs this replica in its desired snapshot:
+    # it holds no GPU and its container may be removed.
+    released: Mapped[bool] = mapped_column(default=False, index=True)
+
+
+class ApiKey(Base):
+    """Workspace API key for the CLI and automation (`mck_...`). Hash stored."""
+
+    __tablename__ = "api_keys"
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(String(40), ForeignKey("workspaces.id"), index=True)
+    name: Mapped[str] = mapped_column(String(120))
+    role: Mapped[str] = mapped_column(String(16))  # viewer | operator | admin
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    prefix: Mapped[str] = mapped_column(String(16))
+    created_by: Mapped[str] = mapped_column(String(320), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    last_used_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    revoked: Mapped[bool] = mapped_column(default=False)

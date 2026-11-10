@@ -82,6 +82,16 @@ class ControlConfig:
     # Gateway package (wheel + .sha256) the one-line installer downloads from
     # this server (/download/*). The control image builds it at /opt/meridian/downloads.
     downloads_dir: str = "/opt/meridian/downloads"
+    # --- Meridian Compute (marketplace, billing, jobs) -----------------------
+    # Meridian's fee on top of the provider's price, in basis points (200 = 2%).
+    market_fee_bps: int = 200
+    # A rental posts ledger entries at most this often (and once when it ends).
+    meter_interval_seconds: int = 600
+    # Background pass that meters rentals, enforces funds and timeouts, and
+    # places queued jobs. 0 disables it (tests drive `tick()` directly).
+    compute_tick_seconds: int = 30
+    # A running replica whose node has been silent this long is declared lost.
+    node_lost_seconds: int = 300
     # Gateway status reports kept per gateway (bytes of JSON).
     max_report_bytes: int = 256 * 1024
     extra: dict = field(default_factory=dict)
@@ -132,4 +142,8 @@ class ControlConfig:
             dev_mail_outbox=os.environ.get("MERIDIAN_CONTROL_DEV_MAIL_OUTBOX", ""),
             trust_proxy_headers=_flag("MERIDIAN_CONTROL_TRUST_PROXY_HEADERS"),
             console_dir=os.environ.get("MERIDIAN_CONTROL_CONSOLE_DIR", ""),
+            market_fee_bps=int(os.environ.get("MERIDIAN_CONTROL_MARKET_FEE_BPS", "200")),
+            meter_interval_seconds=int(os.environ.get("MERIDIAN_CONTROL_METER_INTERVAL", "600")),
+            compute_tick_seconds=int(os.environ.get("MERIDIAN_CONTROL_COMPUTE_TICK", "30")),
+            node_lost_seconds=int(os.environ.get("MERIDIAN_CONTROL_NODE_LOST_SECONDS", "300")),
         )

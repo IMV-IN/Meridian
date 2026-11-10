@@ -182,6 +182,27 @@ export function LandingPage() {
           </div>
         </section>
 
+        <section id="compute" aria-labelledby="compute-heading" className="mx-auto grid max-w-6xl gap-10 px-4 pb-20 sm:px-8 md:grid-cols-2">
+          <div>
+            <h2 id="compute-heading" className="site-display text-4xl sm:text-5xl">
+              Meridian Compute
+            </h2>
+            <p className="mt-5 max-w-[48ch] leading-relaxed text-deep">
+              Rent GPUs from data centres across India, or list your own. Run training jobs and model services as containers on your own
+              nodes or on rented GPUs.
+            </p>
+            <Button size="lg" className="mt-6" asChild>
+              <a href="/ui/marketplace">Browse GPUs in the console</a>
+            </Button>
+          </div>
+          <ul className="space-y-3 leading-relaxed text-deep">
+            <li>Renters pay the provider's price plus a 2% Meridian fee, billed per second, in rupees.</li>
+            <li>Providers keep the full price they set.</li>
+            <li>One job can span several nodes. Each replica gets its rank and the addresses of its peers.</li>
+            <li>A provider cannot see what a renter runs.</li>
+          </ul>
+        </section>
+
         <section className="mx-auto max-w-6xl px-4 pb-24 sm:px-8">
           <div className="site-rule" />
           <div className="flex flex-wrap items-end justify-between gap-6 pt-10">
