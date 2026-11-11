@@ -5,7 +5,7 @@ Meridian has two planes that work together:
 - **The gateway** (this repo, the `meridian` package) — the request/traffic plane.
   It decides *whether* a backend may receive traffic and routes to it.
 - **The control plane** (`meridian-control`, in this repo) + **node agents**
-  ([`meridian-node`](https://github.com/IMV-IN/meridian-node)) — the fleet plane.
+  (`meridian-node`) — the fleet plane.
   Central `meridian-control` decides *what* should run on each GPU host; the
   `meridian-node` agent decides *how* to run it safely on that host.
 
@@ -29,7 +29,7 @@ generations, observations, certificate rotation and revocation/CRL, and a
 capacity-aware placement selector. State is durable via SQLAlchemy — **SQLite by
 default, Postgres via a URL** — so control replicas are stateless.
 
-See [`meridian_control/README.md`](https://github.com/IMV-IN/Meridian/blob/main/meridian_control/README.md)
+See `meridian_control/README.md`
 for the full endpoint list and the meridian-node `DESIGN.md` for the protocol.
 
 ## Deploy
@@ -58,7 +58,7 @@ docker exec meridian-control meridian-control mint-token --auto-approve
 
 The gateway consumes `GET /admin/projection` read-only (set `control_plane.url`
 in the gateway config; see the projection-sync notes). Node agents are installed
-from the [meridian-node](https://github.com/IMV-IN/meridian-node) repo
+from the `meridian-node` repo
 (systemd units + Dockerfile + example configs in its `deploy/`).
 
 ## Production readiness checklist

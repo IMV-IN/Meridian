@@ -11,7 +11,7 @@ import { ThemeProvider } from "@/providers/theme-provider"
 
 import { rupeesToPaise, type Billing, type CloudInfo, type JobDetail, type JobTemplate, type Member, type Offer, type Rental, type Usage, type WorkspaceRole } from "./api"
 import { cloudRoutes } from "./app"
-import { endReason, joinArgs, parseEnv, parseSlugs, priceLabel, serviceEndpoint, serviceHint, shellQuote, splitArgs, yamlQuote } from "./compute"
+import { cliInstallLine, endReason, joinArgs, parseEnv, parseSlugs, priceLabel, serviceEndpoint, serviceHint, shellQuote, shellWord, splitArgs, yamlQuote } from "./compute"
 import { CloudSessionProvider } from "./session"
 
 const INFO: CloudInfo = {
@@ -464,6 +464,26 @@ describe("Jobs", () => {
     expect(await screen.findByText("No jobs yet")).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: /Run a job/ })).not.toBeInTheDocument()
     expect(screen.queryByText("Run from your terminal")).not.toBeInTheDocument()
+  })
+})
+
+describe("cliInstallLine", () => {
+  it("installs from this server's own wheel, or falls back to its installer", () => {
+    const wheel = "meridian-0.12.0-py3-none-any.whl"
+    expect(cliInstallLine({ public_url: "https://cloud.example", wheel })).toBe(`pip install https://cloud.example/download/${wheel}`)
+    expect(cliInstallLine({ public_url: "https://cloud.example", wheel: null })).toBe("curl -fsSL https://cloud.example/install.sh | bash")
+    expect(cliInstallLine({ public_url: "https://cloud.example" })).not.toMatch(/github/)
+    // A server value never runs in the reader's shell.
+    expect(cliInstallLine({ public_url: "https://x$(id)", wheel: null })).toBe("curl -fsSL 'https://x$(id)/install.sh' | bash")
+    expect(shellWord("https://cloud.example")).toBe("https://cloud.example")
+    expect(shellWord("a b;c")).toBe("'a b;c'")
+  })
+
+  it("shows it in the jobs page's terminal snippet", async () => {
+    serve("admin", {})
+    renderAt("/jobs")
+    expect(await screen.findByText(/curl -fsSL https:\/\/cloud\.example\/install\.sh \| bash/)).toBeInTheDocument()
+    expect(document.body.textContent).not.toMatch(/git\+https/)
   })
 })
 

@@ -461,6 +461,22 @@ def test_m6_signed_in_and_node_routes_are_limited(client, tmp_path, clock):
     assert r.status_code == 413
 
 
+def test_m6_docs_and_downloads_sit_behind_the_tight_limit(tmp_path, clock):
+    docs, dl = tmp_path / "docs_site", tmp_path / "downloads"
+    docs.mkdir()
+    dl.mkdir()
+    (docs / "index.html").write_text("<h1>docs</h1>")
+    (dl / "meridian-0.12.0-py3-none-any.whl").write_bytes(b"PK")
+    c = make(tmp_path, clock, docs_dir=str(docs), downloads_dir=str(dl))
+    assert c.get("/docs/").text == "<h1>docs</h1>"
+    assert c.get("/download/meridian-0.12.0-py3-none-any.whl").content == b"PK"
+    assert c.get("/install.sh").status_code == 200
+    assert c.get("/api/cloud/info").json()["wheel"] == "meridian-0.12.0-py3-none-any.whl"
+    for path in ("/docs/", "/download/meridian-0.12.0-py3-none-any.whl", "/install.sh"):
+        r = c.request("GET", path, content=b" " * (128 * 1024))
+        assert r.status_code == 413 and r.json()["error"]["code"] == "TOO_LARGE", path
+
+
 # ── M7: self-reported hardware is bounded, and fixed for a rental's life ──
 
 

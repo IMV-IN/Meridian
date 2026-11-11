@@ -496,7 +496,7 @@ def write_files(plan: Plan) -> Path:
     validate(cfg)
     header = (
         "# Meridian gateway — written by `meridian init`. Edit, then restart the gateway.\n"
-        "# Reference: https://github.com/IMV-IN/Meridian/blob/main/docs/CONFIGURATION.md\n"
+        "# Reference: docs/CONFIGURATION.md in the Meridian repo, or <your Meridian Cloud>/docs/CONFIGURATION/\n"
     )
     write_private(home / "config.yaml", header + yaml.safe_dump(cfg, sort_keys=False))
     if plan.auth:

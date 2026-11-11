@@ -59,3 +59,6 @@ deploy/cloud/.env
 deploy/cloud/data/
 deploy/cloud/backups/
 deploy/cloud/backup.log
+
+# Built documentation site (mkdocs build -d meridian_control/docs_site); shipped in the wheel
+meridian_control/docs_site/

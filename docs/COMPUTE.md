@@ -139,7 +139,7 @@ The 8 hour limit on services stops a forgotten notebook from holding a GPU for e
 
 ### Digests are pinned; bumping them
 
-Every template image is pinned by digest, the same rule as any other job. The templates live in [`meridian_control/templates.py`](https://github.com/IMV-IN/Meridian/blob/main/meridian_control/templates.py), and the comment above each digest records the tag it was resolved from:
+Every template image is pinned by digest, the same rule as any other job. The templates live in `meridian_control/templates.py`, and the comment above each digest records the tag it was resolved from:
 
 | Constant | Resolved from | Digest covers |
 | --- | --- | --- |
@@ -283,7 +283,7 @@ A payment reference can be credited only once, and a payout reference can be use
 | `MERIDIAN_CONTROL_NODE_LOST_SECONDS` | `300` | Silence after which a node's running replicas are declared lost |
 | `MERIDIAN_CONTROL_JOB_START_DEADLINE` | `1800` | Seconds a placed replica may stay Pending or Starting (image pulls included) before the job fails |
 | `MERIDIAN_CONTROL_MAX_BODY_BYTES` | `1048576` | Largest request body on signed-in routes |
-| `MERIDIAN_CONTROL_MAX_UNAUTHENTICATED_BODY_BYTES` | `65536` | Largest request body on `/auth`, `/oauth`, `/api/public` and node enrollment |
+| `MERIDIAN_CONTROL_MAX_UNAUTHENTICATED_BODY_BYTES` | `65536` | Largest request body on `/auth`, `/oauth`, `/api/public`, `/docs`, `/download`, `/install` and node enrollment |
 | `MERIDIAN_CONTROL_MAX_OBSERVATION_BYTES` | `4194304` | Largest node observation |
 
 Upgrading an existing cloud: run `meridian-control migrate`. The migrations only add tables and columns; existing listings stay public.

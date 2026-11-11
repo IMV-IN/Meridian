@@ -205,7 +205,7 @@ class BodyLimit:
     Checks Content-Length up front and counts the bytes as they stream in, so a
     chunked body without a length is cut off too, before anything parses it."""
 
-    UNAUTHENTICATED = ("/auth/", "/oauth/", "/api/public/", "/control/v1/enroll")
+    UNAUTHENTICATED = ("/auth/", "/oauth/", "/api/public/", "/control/v1/enroll", "/docs", "/download/", "/install")
 
     def __init__(self, app, config) -> None:
         self.app = app

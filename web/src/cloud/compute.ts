@@ -58,6 +58,11 @@ export function shellQuote(value: string): string {
   return `'${value.replace(/'/g, `'\\''`)}'`
 }
 
+/** A value as one shell word: as is when it has nothing the shell would read, else single-quoted. */
+export function shellWord(value: string): string {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : shellQuote(value)
+}
+
 /** A value as a YAML double-quoted scalar (a JSON string is one). */
 export function yamlQuote(value: string): string {
   return JSON.stringify(value)
@@ -114,4 +119,11 @@ export function endReason(reason: string): string {
       sharing_ended: "Listing no longer shared with you",
     }[reason] ?? "Ended"
   )
+}
+
+/** How to install the meridian CLI from this control plane (its own wheel, else the installer), never from GitHub. */
+export function cliInstallLine(info: { public_url: string; wheel?: string | null }): string {
+  return info.wheel
+    ? `pip install ${shellWord(`${info.public_url}/download/${info.wheel}`)}`
+    : `curl -fsSL ${shellWord(`${info.public_url}/install.sh`)} | bash`
 }

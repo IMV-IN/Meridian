@@ -22,7 +22,7 @@ import { formatINR, formatSeconds, pluralize } from "@/lib/format"
 
 import { atLeast, cloud, type ApiKeyView, type JobSpec, type JobSummary, type JobTemplate } from "../api"
 import { JobStatusBadge } from "../components"
-import { formatEnv, joinArgs, parseEnv, secondsToHours, splitArgs } from "../compute"
+import { cliInstallLine, formatEnv, joinArgs, parseEnv, secondsToHours, shellWord, splitArgs } from "../compute"
 import { useApiKeys, useJobs, useJobTemplates, useOffers, useRentals } from "../hooks"
 import { useCloud, useWorkspace } from "../session"
 
@@ -315,9 +315,9 @@ function CliPanel() {
     setName("")
     create.reset()
   }
-  const snippet = `pip install "meridian @ git+https://github.com/IMV-IN/Meridian"
-export MERIDIAN_CLOUD_URL=${info.public_url}
-export MERIDIAN_WORKSPACE=${ws.id}
+  const snippet = `${cliInstallLine(info)}
+export MERIDIAN_CLOUD_URL=${shellWord(info.public_url)}
+export MERIDIAN_WORKSPACE=${shellWord(ws.id)}
 export MERIDIAN_API_KEY=mck_…          # your API key
 
 meridian compute offers

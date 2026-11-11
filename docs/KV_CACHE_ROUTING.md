@@ -13,7 +13,7 @@ experimental and opt-in; it is not a released v0.12.0 capability.
 
 ## Configure
 
-Start from [`configs/cache_affinity.yaml`](https://github.com/IMV-IN/Meridian/blob/main/configs/cache_affinity.yaml):
+Start from `configs/cache_affinity.yaml`:
 
 ```yaml
 gateway:
