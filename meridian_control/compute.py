@@ -54,6 +54,7 @@ from .models import (
     Node,
     ObservationRow,
     Rental,
+    User,
     Workspace,
 )
 from .security import new_id, sha256_hex
@@ -70,6 +71,7 @@ _F = TypeVar("_F", bound=Callable[..., Any])
 MAX_ACTIVE_JOBS = 200
 MAX_PRICE_PAISE = 100_000_00  # ₹1,00,000 per GPU-hour: a typo guard, not a market opinion
 MIN_PRICE_PAISE = 100  # ₹1
+MAX_GPU_HOUR_QUOTA = 1_000_000
 # What a node's owner may see of a tenant's job: that it exists and what it holds.
 _OBSERVED_KEEP = ("job_id", "replica", "phase", "started_at", "finished_at")
 _DESIRED_KEEP = ("job_id", "replica", "kind", "device_ids", "port", "desired_phase")
@@ -85,6 +87,20 @@ def _aware(d: datetime) -> datetime:
 
 def _iso(d: Optional[datetime]) -> Optional[str]:
     return _aware(d).astimezone(timezone.utc).isoformat().replace("+00:00", "Z") if d else None
+
+
+def month_bounds(now: datetime, month: Optional[str] = None) -> tuple[str, datetime, datetime]:
+    """(YYYY-MM, first instant, first instant of the next month) in UTC."""
+    if month is None:
+        year, mon = now.year, now.month
+    else:
+        m = re.fullmatch(r"(\d{4})-(0[1-9]|1[0-2])", month)
+        if m is None or not 2000 <= int(m.group(1)) <= 2100:
+            raise err("INVALID_FIELD", "month must look like 2026-11")
+        year, mon = int(m.group(1)), int(m.group(2))
+    start = datetime(year, mon, 1, tzinfo=timezone.utc)
+    end = datetime(year + (mon == 12), mon % 12 + 1, 1, tzinfo=timezone.utc)
+    return f"{year:04d}-{mon:02d}", start, end
 
 
 def err(code: str, message: str, status: int = 400) -> ControlServiceError:
@@ -115,6 +131,18 @@ def _text(body: dict, key: str, lo: int, hi: int, default: Optional[str] = None)
     if not isinstance(v, str) or not lo <= len(v.strip()) <= hi:
         raise err("INVALID_FIELD", f"{key} must be {lo}–{hi} characters")
     return v.strip()
+
+
+def _hours(seconds: int) -> float:
+    return round(seconds / 3600, 2)
+
+
+def _quota(value: Any, name: str) -> Optional[int]:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or not 0 <= value <= MAX_GPU_HOUR_QUOTA:
+        raise err("INVALID_FIELD", f"{name} must be a whole number of GPU-hours, 0 to {MAX_GPU_HOUR_QUOTA}, or null")
+    return value
 
 
 def _locked(fn: _F) -> _F:
@@ -718,6 +746,10 @@ class ComputeService:
             ))
             if (active or 0) >= MAX_ACTIVE_JOBS:
                 raise err("LIMIT", f"a workspace can have at most {MAX_ACTIVE_JOBS} unfinished jobs", 429)
+            if not offer_id and not rental_id:
+                hit = self._quota_hit(s, workspace_id, actor, now)
+                if hit:
+                    raise err("QUOTA_EXCEEDED", hit, 409)
             job = Job(id=new_id("job"), workspace_id=workspace_id, status="queued", error="", created_by=actor,
                       created_at=now, **spec)
             need = spec["replicas"] * spec["gpus_per_replica"]
@@ -819,8 +851,143 @@ class ComputeService:
         with self._sf() as s:
             return self._job_view(s, self._own_job(s, workspace_id, job_id), full=True, reveal=reveal)
 
+    # ------------------------------------------------------- usage and quotas
+    @staticmethod
+    def _key_owners(s, workspace_id: str) -> dict[str, str]:
+        """API key name -> the email that created it, for names with exactly one creator."""
+        seen: dict[str, set[str]] = {}
+        for name, by in s.execute(select(ApiKey.name, ApiKey.created_by).where(ApiKey.workspace_id == workspace_id)):
+            seen.setdefault(name, set()).add(by)
+        return {n: next(iter(e)) for n, e in seen.items() if len(e) == 1 and next(iter(e))}
+
+    @staticmethod
+    def _person(owners: dict[str, str], created_by: str) -> str:
+        """Who a job counts against: the member, or the creator of the API key that submitted it."""
+        return owners.get(created_by[4:], created_by) if created_by.startswith("key:") else created_by
+
+    def _gpu_seconds(self, s, workspace_id: str, start: datetime, end: datetime, now: datetime,
+                     created_by: Optional[list[str]] = None) -> Iterable[tuple[str, str, int, int]]:
+        """(created_by, job id, own GPU-seconds, rented GPU-seconds) for each replica that started,
+        clipped to [start, end). A replica still running counts up to `now`."""
+        q = select(JobReplica, Job).join(Job, Job.id == JobReplica.job_id).where(
+            Job.workspace_id == workspace_id, JobReplica.started_at.is_not(None), JobReplica.started_at < end,
+            (Job.finished_at.is_(None)) | (Job.finished_at >= start),
+        )
+        if created_by is not None:
+            q = q.where(Job.created_by.in_(created_by))
+        owned = {n for (n,) in s.execute(select(Node.node_id).where(Node.workspace_id == workspace_id))}
+        for r, job in s.execute(q):
+            first = max(_aware(r.started_at), start)
+            last = min(_aware(r.finished_at or job.finished_at or now), end)
+            seconds = max(0, int((last - first).total_seconds())) * job.gpus_per_replica
+            rented = bool(job.rental_id) or r.node_id not in owned
+            yield job.created_by, job.id, 0 if rented else seconds, seconds if rented else 0
+
+    def _quota_hit(self, s, workspace_id: str, created_by: str, now: datetime) -> str:
+        """Why `created_by` may not start another job on the workspace's own nodes, or ''."""
+        owners = self._key_owners(s, workspace_id)
+        person = self._person(owners, created_by)
+        quota = s.scalar(select(Membership.gpu_hour_quota).join(User, User.id == Membership.user_id).where(
+            Membership.workspace_id == workspace_id, User.email == person
+        ))
+        if quota is None:
+            ws = s.get(Workspace, workspace_id)
+            quota = ws.default_gpu_hour_quota if ws is not None else None
+        if quota is None:
+            return ""
+        label, start, end = month_bounds(now)
+        labels = [person] + [f"key:{n}" for n, e in owners.items() if e == person]
+        used = sum(own for _by, _job, own, _rented in self._gpu_seconds(s, workspace_id, start, end, now, labels))
+        if used < quota * 3600:
+            return ""
+        return (
+            f"monthly GPU-hour quota reached: {used / 3600:.2f} of {quota} GPU-hours used in {label}; "
+            f"it resets on {end.date().isoformat()} (UTC)"
+        )
+
+    def usage(self, workspace_id: str, month: Optional[str] = None) -> dict:
+        """GPU-hours per person, group and workspace for a UTC month."""
+        now = self._now()
+        label, start, end = month_bounds(now, month)
+        with self._sf() as s:
+            ws = s.get(Workspace, workspace_id)
+            default = ws.default_gpu_hour_quota if ws is not None else None
+            owners = self._key_owners(s, workspace_id)
+            people: dict[str, dict] = {
+                u.email: {"email": u.email, "name": u.name, "group": m.group or "", "quota": m.gpu_hour_quota,
+                          "own": 0, "rented": 0, "jobs": set()}
+                for u, m in s.execute(
+                    select(User, Membership).join(Membership, Membership.user_id == User.id)
+                    .where(Membership.workspace_id == workspace_id).order_by(User.email)
+                )
+            }
+            for by, job_id, own, rented in self._gpu_seconds(s, workspace_id, start, end, now):
+                person = self._person(owners, by)
+                row = people.setdefault(person, {"email": person, "name": "", "group": "", "quota": None,
+                                                 "own": 0, "rented": 0, "jobs": set()})
+                row["own"] += own
+                row["rented"] += rented
+                row["jobs"].add(job_id)
+        rows: list[dict] = []
+        groups: dict[str, dict] = {}
+        for p in sorted(people.values(), key=lambda p: (-p["own"] - p["rented"], p["email"])):
+            quota = p["quota"] if p["quota"] is not None else default
+            rows.append({
+                "email": p["email"], "name": p["name"], "group": p["group"],
+                "gpu_hours_own": _hours(p["own"]), "gpu_hours_rented": _hours(p["rented"]), "jobs": len(p["jobs"]),
+                "quota_gpu_hours": quota,
+                "remaining_gpu_hours": None if quota is None else max(0.0, round(quota - p["own"] / 3600, 2)),
+            })
+            g = groups.setdefault(p["group"], {"group": p["group"], "own": 0, "rented": 0, "jobs": 0, "members": 0})
+            g["own"] += p["own"]
+            g["rented"] += p["rented"]
+            g["jobs"] += len(p["jobs"])
+            g["members"] += 1
+        totals = {"own": sum(g["own"] for g in groups.values()), "rented": sum(g["rented"] for g in groups.values()),
+                  "jobs": sum(g["jobs"] for g in groups.values())}
+
+        def shape(g: dict) -> dict:
+            return {**{k: v for k, v in g.items() if k not in ("own", "rented")},
+                    "gpu_hours_own": _hours(g["own"]), "gpu_hours_rented": _hours(g["rented"])}
+
+        return {
+            "month": label, "period_start": _iso(start), "period_end": _iso(end),
+            "default_gpu_hour_quota": default, "people": rows,
+            "groups": [shape(g) for g in sorted(groups.values(), key=lambda g: (-g["own"] - g["rented"], g["group"]))],
+            "totals": shape(totals),
+        }
+
+    def set_member_compute(self, workspace_id: str, actor: str, user_id: str, body: dict) -> dict:
+        """Set a member's group and monthly GPU-hour quota. Only the keys present change."""
+        with self._sf() as s:
+            m = s.get(Membership, (workspace_id, user_id))
+            if m is None:
+                raise err("NOT_FOUND", "member not found", 404)
+            if "group" in body:
+                group = body["group"]
+                if group is not None and (not isinstance(group, str) or len(group.strip()) > 64):
+                    raise err("INVALID_FIELD", "group must be at most 64 characters")
+                m.group = (group.strip() or None) if isinstance(group, str) else None
+            if "gpu_hour_quota" in body:
+                m.gpu_hour_quota = _quota(body["gpu_hour_quota"], "gpu_hour_quota")
+            self._audit(s, workspace_id, actor, "member_compute_changed",
+                        f"{user_id} group={m.group or ''} quota={m.gpu_hour_quota}")
+            s.commit()
+            return {"user_id": user_id, "group": m.group or "", "gpu_hour_quota": m.gpu_hour_quota}
+
+    def set_compute_settings(self, workspace_id: str, actor: str, body: dict) -> dict:
+        if "default_gpu_hour_quota" not in body:
+            raise err("INVALID_FIELD", "default_gpu_hour_quota is required (a number of GPU-hours, or null)")
+        with self._sf() as s:
+            ws = s.get(Workspace, workspace_id)
+            assert ws is not None
+            ws.default_gpu_hour_quota = _quota(body["default_gpu_hour_quota"], "default_gpu_hour_quota")
+            self._audit(s, workspace_id, actor, "compute_settings_changed", f"default={ws.default_gpu_hour_quota}")
+            s.commit()
+            return {"default_gpu_hour_quota": ws.default_gpu_hour_quota}
+
     # -------------------------------------------------------------- scheduling
-    def _candidates(self, s, job: Job, now: datetime) -> list[dict]:
+    def _candidates(self, s, job: Job, now: datetime, own_nodes: bool = True) -> list[dict]:
         """Nodes this job may use, with the devices and ports free on each."""
         ws = job.workspace_id
         if job.rental_id:
@@ -832,7 +999,7 @@ class ComputeService:
                 Rental.consumer_workspace_id == ws, Rental.status == "active"
             ).order_by(Rental.started_at)))
             own = list(s.scalars(select(Node).where(Node.workspace_id == ws, Node.revoked.is_(False))
-                                 .order_by(Node.created_at)))
+                                 .order_by(Node.created_at))) if own_nodes else []
         out: list[dict] = []
 
         def consider(node: Optional[Node], allowed: Optional[set[str]], blocked: set[str]) -> None:
@@ -875,7 +1042,9 @@ class ComputeService:
             r = s.get(Rental, job.rental_id)
             if r is None or r.status != "active":
                 return self._finish_job(s, job, "failed", "the rental this job was pinned to has ended", now)
-        candidates = self._candidates(s, job, now)
+        # A member over their monthly quota keeps their queued job off the workspace's own nodes.
+        over = "" if job.rental_id else self._quota_hit(s, job.workspace_id, job.created_by, now)
+        candidates = self._candidates(s, job, now, own_nodes=not over)
         plan: list[tuple[dict, list[str], int]] = []
         for _rank in range(job.replicas):
             for c in candidates:
@@ -887,6 +1056,9 @@ class ComputeService:
             else:
                 gpus = job.replicas * job.gpus_per_replica
                 where = "the rented GPUs" if job.rental_id else "this workspace's nodes and rentals"
+                if over:
+                    job.error = "waiting: monthly GPU-hour quota used"
+                    return set()
                 job.error = (
                     f"waiting for capacity: needs {gpus} free GPU{'s' if gpus != 1 else ''} on {where}"
                     if gpus else f"waiting for a node that runs jobs in {where}"

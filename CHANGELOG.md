@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Meridian Compute for institutes: GPU-hour usage and per-member monthly quotas** ([`docs/COMPUTE.md`](docs/COMPUTE.md)).
+  - `GET /api/w/{ws}/usage?month=YYYY-MM` (and `?format=csv`, `meridian compute usage`) reports GPU-hours per
+    person and group, split into own-node and rented usage; API-key jobs count for the key's creator.
+    Console: Billing → GPU-hour usage.
+  - Admins set a group and a monthly GPU-hour quota per member, plus a workspace default (Settings → Members).
+    A new own-node job over quota is refused with `409 QUOTA_EXCEEDED`; queued jobs wait; running jobs are never stopped.
+  - Migration `d5f1a7c93e08` (additive: nullable columns on `memberships` and `workspaces`).
+
 - **Meridian Compute: GPU marketplace, per-second billing and jobs** ([`docs/COMPUTE.md`](docs/COMPUTE.md)).
   - A workspace lists a node's GPUs at a price per GPU-hour; another rents them exclusively.
     The renter pays the provider's price plus a 2% fee (`MERIDIAN_CONTROL_MARKET_FEE_BPS`),

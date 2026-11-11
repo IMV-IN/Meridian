@@ -1,5 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { KeyRound, LogOut, Mail, MonitorSmartphone, Plus, Trash2, UserPlus } from "lucide-react"
+import { Gauge, KeyRound, LogOut, Mail, MonitorSmartphone, Plus, Trash2, UserPlus } from "lucide-react"
 import { useState } from "react"
 import { Link, useSearchParams } from "react-router"
 import { toast } from "sonner"
@@ -166,6 +166,118 @@ function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o:
   )
 }
 
+/** "" → null (no limit); otherwise a whole number of GPU-hours, or undefined if it is not one. */
+function parseQuota(text: string): number | null | undefined {
+  if (!text.trim()) return null
+  return /^\d{1,7}$/.test(text.trim()) ? Number(text.trim()) : undefined
+}
+
+function MemberComputeDialog({ member, onClose }: { member: Member | null; onClose: () => void }) {
+  const ws = useWorkspace()
+  const qc = useQueryClient()
+  const [group, setGroup] = useState("")
+  const [quota, setQuota] = useState("")
+  const [seen, setSeen] = useState<string | null>(null)
+  if (member && seen !== member.id) {
+    setSeen(member.id)
+    setGroup(member.group)
+    setQuota(member.gpu_hour_quota === null ? "" : String(member.gpu_hour_quota))
+  }
+  const parsed = parseQuota(quota)
+  const save = useMutation({
+    mutationFn: () => cloud.setMemberCompute(ws.id, member?.id ?? "", { group: group.trim(), gpu_hour_quota: parsed ?? null }),
+    onSuccess: () => {
+      toast.success("Compute limits saved")
+      void qc.invalidateQueries({ queryKey: ["cloud", "members", ws.id] })
+      void qc.invalidateQueries({ queryKey: ["cloud", "usage", ws.id] })
+      onClose()
+    },
+  })
+  return (
+    <Dialog open={!!member} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Compute limits for {member?.name || member?.email}</DialogTitle>
+          <DialogDescription>The group appears in usage reports. The quota caps GPU-hours per UTC month on your own nodes; rented GPUs are limited by credit.</DialogDescription>
+        </DialogHeader>
+        <form
+          className="space-y-4"
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (parsed !== undefined) save.mutate()
+          }}
+        >
+          <Field>
+            <FieldLabel htmlFor="mc-group">Group</FieldLabel>
+            <Input id="mc-group" value={group} onChange={(e) => setGroup(e.target.value)} maxLength={64} placeholder="e.g. vision-lab" />
+          </Field>
+          <Field data-invalid={parsed === undefined || save.isError}>
+            <FieldLabel htmlFor="mc-quota">Monthly GPU-hour quota</FieldLabel>
+            <Input id="mc-quota" inputMode="numeric" value={quota} onChange={(e) => setQuota(e.target.value)} placeholder="Workspace default" />
+            <FieldDescription>Leave empty to use the workspace default. Running jobs are never stopped; new ones wait or are refused once the quota is used.</FieldDescription>
+            {parsed === undefined && <FieldError>Enter a whole number of GPU-hours, or leave it empty.</FieldError>}
+            {save.isError && <FieldError>{errMsg(save.error)}</FieldError>}
+          </Field>
+        </form>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={() => save.mutate()} disabled={save.isPending || parsed === undefined}>
+            {save.isPending && <Spinner data-icon="inline-start" />}
+            Save limits
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function DefaultQuotaPanel({ canAdmin }: { canAdmin: boolean }) {
+  const ws = useWorkspace()
+  const qc = useQueryClient()
+  const info = useQuery({ queryKey: ["cloud", "workspace-info", ws.id], queryFn: ({ signal }) => cloud.workspace(ws.id, signal) })
+  const current = info.data?.default_gpu_hour_quota
+  const [text, setText] = useState<string | null>(null)
+  const shown = text ?? (current === null || current === undefined ? "" : String(current))
+  const parsed = parseQuota(shown)
+  const save = useMutation({
+    mutationFn: () => cloud.setComputeSettings(ws.id, parsed ?? null),
+    onSuccess: () => {
+      toast.success("Default quota saved")
+      setText(null)
+      void qc.invalidateQueries({ queryKey: ["cloud", "workspace-info", ws.id] })
+      void qc.invalidateQueries({ queryKey: ["cloud", "usage", ws.id] })
+    },
+  })
+  return (
+    <Panel title="GPU-hour quota" description="Monthly GPU-hours each member may use on this workspace's own nodes, unless they have a quota of their own. Resets on the first of each UTC month.">
+      <Field data-invalid={parsed === undefined || save.isError}>
+        <FieldLabel htmlFor="default-quota">Default quota (GPU-hours per month)</FieldLabel>
+        <div className="flex gap-2">
+          <Input
+            id="default-quota"
+            inputMode="numeric"
+            className="max-w-48"
+            value={shown}
+            onChange={(e) => setText(e.target.value)}
+            disabled={!canAdmin || info.isLoading}
+            placeholder="Unlimited"
+          />
+          {canAdmin && (
+            <Button onClick={() => save.mutate()} disabled={save.isPending || parsed === undefined || text === null}>
+              {save.isPending && <Spinner data-icon="inline-start" />}
+              Save
+            </Button>
+          )}
+        </div>
+        {parsed === undefined && <FieldError>Enter a whole number of GPU-hours, or leave it empty for no limit.</FieldError>}
+        {save.isError && <FieldError>{errMsg(save.error)}</FieldError>}
+      </Field>
+    </Panel>
+  )
+}
+
 function MembersTab() {
   const ws = useWorkspace()
   const { me, refresh } = useCloud()
@@ -173,6 +285,7 @@ function MembersTab() {
   const members = useMembers()
   const [inviting, setInviting] = useState(false)
   const [removing, setRemoving] = useState<Member | null>(null)
+  const [limits, setLimits] = useState<Member | null>(null)
   const canAdmin = atLeast(ws.role, "admin")
   const invalidate = () => qc.invalidateQueries({ queryKey: ["cloud", "members", ws.id] })
   const setRole = useMutation({
@@ -209,6 +322,7 @@ function MembersTab() {
   if (members.isError) return <ErrorState error={members.error} onRetry={() => members.refetch()} />
   return (
     <div className="flex flex-col gap-4">
+      <DefaultQuotaPanel canAdmin={canAdmin} />
       <Panel
         title="Members"
         description="Roles: viewer → operator → admin → owner. Each includes everything to its left."
@@ -229,6 +343,8 @@ function MembersTab() {
               <TableRow className="hover:bg-transparent">
                 <TableHead className="pl-4 text-xs">Member</TableHead>
                 <TableHead className="text-xs">Role</TableHead>
+                <TableHead className="text-xs">Group</TableHead>
+                <TableHead className="text-xs">GPU-hour quota</TableHead>
                 <TableHead className="text-xs">Joined</TableHead>
                 <TableHead className="text-xs">Last sign-in</TableHead>
                 <TableHead className="pr-4 text-right text-xs">
@@ -279,6 +395,8 @@ function MembersTab() {
                         <span className="text-sm capitalize">{m.role}</span>
                       )}
                     </TableCell>
+                    <TableCell className="text-sm">{m.group || "—"}</TableCell>
+                    <TableCell className="text-sm">{m.gpu_hour_quota ?? "Default"}</TableCell>
                     <TableCell className="text-xs">
                       <Timestamp value={m.joined_at} seconds={false} />
                     </TableCell>
@@ -286,6 +404,11 @@ function MembersTab() {
                       <TimeAgo value={m.last_login_at} />
                     </TableCell>
                     <TableCell className="pr-4 text-right">
+                      {canAdmin && (
+                        <Button variant="ghost" size="sm" onClick={() => setLimits(m)} aria-label={`Compute limits for ${m.name || m.email}`}>
+                          <Gauge data-icon="inline-start" /> Limits
+                        </Button>
+                      )}
                       {(editable || self) && (
                         <Button variant="ghost" size="sm" onClick={() => setRemoving(m)}>
                           {self ? "Leave" : "Remove"}
@@ -324,6 +447,7 @@ function MembersTab() {
         </Panel>
       )}
       <InviteDialog open={inviting} onOpenChange={setInviting} />
+      <MemberComputeDialog member={limits} onClose={() => setLimits(null)} />
       <ConfirmDialog
         open={!!removing}
         onOpenChange={(o) => !o && setRemoving(null)}

@@ -43,12 +43,18 @@ export interface Me {
 export interface WorkspaceInfo extends WorkspaceRef {
   created_at: string | null
   members: number
+  /** Monthly GPU-hours for members with no quota of their own; null = unlimited. */
+  default_gpu_hour_quota: number | null
 }
 
 export interface Member extends CloudUser {
   role: WorkspaceRole
   joined_at: string | null
   last_login_at: string | null
+  /** Department or lab, for usage reporting ("" = none). */
+  group: string
+  /** Monthly GPU-hours on the workspace's own nodes; null = the workspace default. */
+  gpu_hour_quota: number | null
 }
 
 export interface Invitation {
@@ -258,6 +264,33 @@ export interface Billing {
   entries: LedgerEntry[]
 }
 
+export interface UsageRow {
+  email: string
+  name: string
+  group: string
+  gpu_hours_own: number
+  gpu_hours_rented: number
+  jobs: number
+  quota_gpu_hours: number | null
+  remaining_gpu_hours: number | null
+}
+
+export interface UsageTotals {
+  gpu_hours_own: number
+  gpu_hours_rented: number
+  jobs: number
+}
+
+export interface Usage {
+  month: string
+  period_start: string
+  period_end: string
+  default_gpu_hour_quota: number | null
+  people: UsageRow[]
+  groups: (UsageTotals & { group: string; members: number })[]
+  totals: UsageTotals
+}
+
 export interface ApiKeyView {
   id: string
   name: string
@@ -354,6 +387,20 @@ export const cloud = {
     request<JobDetail>(`${w(ws)}/jobs/${encodeURIComponent(id)}/cancel`, { ...o, method: "POST" }),
 
   billing: (ws: string, signal?: AbortSignal) => request<Billing>(`${w(ws)}/billing`, { ...o, signal }),
+  usage: (ws: string, month: string, signal?: AbortSignal) =>
+    request<Usage>(`${w(ws)}/usage?month=${encodeURIComponent(month)}`, { ...o, signal }),
+  usageCsvUrl: (ws: string, month: string) => `${w(ws)}/usage?format=csv&month=${encodeURIComponent(month)}`,
+  setMemberCompute: (ws: string, userId: string, body: { group?: string; gpu_hour_quota?: number | null }) =>
+    request<{ user_id: string; group: string; gpu_hour_quota: number | null }>(
+      `${w(ws)}/members/${encodeURIComponent(userId)}/compute`,
+      { ...o, method: "PATCH", body },
+    ),
+  setComputeSettings: (ws: string, default_gpu_hour_quota: number | null) =>
+    request<{ default_gpu_hour_quota: number | null }>(`${w(ws)}/compute-settings`, {
+      ...o,
+      method: "PATCH",
+      body: { default_gpu_hour_quota },
+    }),
   apiKeys: (ws: string, signal?: AbortSignal) =>
     request<{ keys: ApiKeyView[] }>(`${w(ws)}/api-keys`, { ...o, signal }).then((r) => r.keys),
   createApiKey: (ws: string, name: string, role: ApiKeyView["role"]) =>

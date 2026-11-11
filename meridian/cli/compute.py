@@ -67,6 +67,8 @@ def _parser() -> argparse.ArgumentParser:
     rel.add_argument("rental_id")
     sub.add_parser("balance", help="credit balance and burn rate")
     sub.add_parser("jobs", help="recent jobs")
+    usage = sub.add_parser("usage", help="GPU-hours per person for a month")
+    usage.add_argument("--month", help="YYYY-MM in UTC (default: this month)")
 
     run = sub.add_parser("run", help="run a container on your own or rented GPUs")
     run.add_argument("--image", required=True, help="digest-pinned image: <registry>/<repo>@sha256:<digest>")
@@ -201,6 +203,18 @@ def _dispatch(args: argparse.Namespace, api: Api, out: Callable[[str], None], sl
         for j in jobs:
             rows.append([j["id"], j["name"], j["kind"], j["status"], str(j["replicas"]),
                          str(j["replicas"] * j["gpus_per_replica"]), j["created_at"]])
+        _table(rows, out)
+        return 0
+    if args.command == "usage":
+        u = api.call("GET", "/usage" + (f"?month={args.month}" if args.month else ""))
+        rows = [["PERSON", "GROUP", "OWN GPU-H", "RENTED GPU-H", "JOBS", "QUOTA", "LEFT"]]
+        for p in u["people"]:
+            quota, left = p["quota_gpu_hours"], p["remaining_gpu_hours"]
+            rows.append([p["email"], p["group"] or "-", f"{p['gpu_hours_own']:.2f}", f"{p['gpu_hours_rented']:.2f}",
+                         str(p["jobs"]), "-" if quota is None else str(quota), "-" if left is None else f"{left:.2f}"])
+        t = u["totals"]
+        rows.append(["TOTAL", "", f"{t['gpu_hours_own']:.2f}", f"{t['gpu_hours_rented']:.2f}", str(t["jobs"]), "", ""])
+        out(f"usage for {u['month']} (UTC)")
         _table(rows, out)
         return 0
     if args.command == "run":

@@ -1,5 +1,5 @@
 import { useMutation, useQueryClient } from "@tanstack/react-query"
-import { IndianRupee, Wallet } from "lucide-react"
+import { Download, IndianRupee, Users, Wallet } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 
@@ -16,8 +16,8 @@ import { Spinner } from "@/components/ui/spinner"
 import { ApiError } from "@/lib/api/client"
 import { formatINR } from "@/lib/format"
 
-import { cloud, rupeesToPaise, type LedgerEntry } from "../api"
-import { useBilling, usePlatformSummary } from "../hooks"
+import { cloud, rupeesToPaise, type LedgerEntry, type Usage, type UsageRow } from "../api"
+import { useBilling, usePlatformSummary, useUsage } from "../hooks"
 import { useCloud, useWorkspace } from "../session"
 
 const KIND: Record<string, string> = {
@@ -47,6 +47,114 @@ const columns: ColumnDef<LedgerEntry, unknown>[] = [
     cell: ({ getValue }) => <span className="tabular-nums">{formatINR(getValue() as number, { signed: true })}</span>,
   },
 ]
+
+const hours = (n: number) => n.toFixed(2)
+
+const usageColumns: ColumnDef<UsageRow, unknown>[] = [
+  {
+    accessorKey: "email",
+    header: "Person",
+    cell: ({ row: { original: p } }) => (
+      <div className="min-w-0">
+        <div className="truncate text-sm font-medium">{p.name || p.email}</div>
+        {p.name && <div className="truncate text-xs text-muted-foreground">{p.email}</div>}
+      </div>
+    ),
+  },
+  { accessorKey: "group", header: "Group", cell: ({ getValue }) => (getValue() as string) || "—" },
+  { accessorKey: "gpu_hours_own", header: "Own GPU-hours", meta: { align: "right" }, cell: ({ getValue }) => <span className="tabular-nums">{hours(getValue() as number)}</span> },
+  { accessorKey: "gpu_hours_rented", header: "Rented GPU-hours", meta: { align: "right" }, cell: ({ getValue }) => <span className="tabular-nums">{hours(getValue() as number)}</span> },
+  { accessorKey: "jobs", header: "Jobs", meta: { align: "right" } },
+  {
+    accessorKey: "quota_gpu_hours",
+    header: "Quota",
+    meta: { align: "right" },
+    cell: ({ getValue }) => <span className="tabular-nums">{(getValue() as number | null) ?? "Unlimited"}</span>,
+  },
+  {
+    accessorKey: "remaining_gpu_hours",
+    header: "Left",
+    meta: { align: "right" },
+    cell: ({ getValue }) => <span className="tabular-nums">{getValue() === null ? "—" : hours(getValue() as number)}</span>,
+  },
+]
+
+const groupColumns: ColumnDef<Usage["groups"][number], unknown>[] = [
+  { accessorKey: "group", header: "Group", cell: ({ getValue }) => (getValue() as string) || "No group" },
+  { accessorKey: "members", header: "People", meta: { align: "right" } },
+  { accessorKey: "jobs", header: "Jobs", meta: { align: "right" } },
+  { accessorKey: "gpu_hours_own", header: "Own GPU-hours", meta: { align: "right" }, cell: ({ getValue }) => <span className="tabular-nums">{hours(getValue() as number)}</span> },
+  { accessorKey: "gpu_hours_rented", header: "Rented GPU-hours", meta: { align: "right" }, cell: ({ getValue }) => <span className="tabular-nums">{hours(getValue() as number)}</span> },
+]
+
+/** The last twelve UTC months, newest first, as YYYY-MM. */
+function recentMonths(now = new Date()): string[] {
+  return Array.from({ length: 12 }, (_, i) => {
+    const d = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() - i, 1))
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}`
+  })
+}
+
+/** Who used how many GPU-hours: readable by everyone in the workspace, set up in Settings → Members. */
+function UsagePanel() {
+  const ws = useWorkspace()
+  const months = recentMonths()
+  const [month, setMonth] = useState(months[0])
+  const usage = useUsage(month)
+  const u = usage.data
+  return (
+    <Panel
+      title="GPU-hour usage"
+      description="Per person, in UTC months. Own-node jobs are free but count against quotas; rented GPUs are paid for with credit. Quotas and groups are set in Settings → Members."
+      actions={
+        <div className="flex items-center gap-2">
+          <Select value={month} onValueChange={setMonth}>
+            <SelectTrigger size="sm" className="w-32" aria-label="Month">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {months.map((m) => (
+                <SelectItem key={m} value={m}>
+                  {m}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button size="sm" variant="outline" asChild>
+            <a href={cloud.usageCsvUrl(ws.id, month)} download>
+              <Download data-icon="inline-start" /> CSV
+            </a>
+          </Button>
+        </div>
+      }
+      contentClassName="px-0"
+    >
+      {usage.isError && !u ? (
+        <ErrorState error={usage.error} onRetry={() => usage.refetch()} />
+      ) : (
+        <div className="flex flex-col gap-4">
+          <DataTable
+            columns={usageColumns}
+            data={u?.people}
+            loading={usage.isLoading}
+            getRowId={(p) => p.email}
+            pageSize={25}
+            empty={<EmptyState bordered={false} icon={Users} title="No usage this month" description="GPU-hours appear here once jobs have run." />}
+          />
+          {!!u?.people.length && (
+            <>
+              <DataTable columns={groupColumns} data={u.groups} getRowId={(g) => g.group || "(none)"} pageSize={25} />
+              <p className="px-4 text-sm text-muted-foreground">
+                Workspace total in {u.month}: {hours(u.totals.gpu_hours_own)} own and {hours(u.totals.gpu_hours_rented)} rented GPU-hours across {u.totals.jobs}{" "}
+                {u.totals.jobs === 1 ? "job" : "jobs"}.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </Panel>
+  )
+}
 
 /** Shown only to the people who operate this Meridian Cloud. */
 function PlatformPanel() {
@@ -199,6 +307,7 @@ export default function BillingPage() {
         </p>
       </Panel>
       {me?.platform_admin && <PlatformPanel />}
+      <UsagePanel />
       <Panel title="Ledger" description="Every credit and debit, newest first. Running rentals post about every ten minutes and when they end." contentClassName="px-0">
         <DataTable
           columns={columns}

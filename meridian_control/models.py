@@ -128,6 +128,9 @@ class Workspace(Base):
     slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # Monthly GPU-hours each member may use on the workspace's own nodes when the
+    # member has no quota of their own. NULL = unlimited.
+    default_gpu_hour_quota: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class Membership(Base):
@@ -136,6 +139,9 @@ class Membership(Base):
     user_id: Mapped[str] = mapped_column(String(40), ForeignKey("users.id"), primary_key=True, index=True)
     role: Mapped[str] = mapped_column(String(16))  # owner | admin | operator | viewer
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # Compute usage reporting: a department or lab, and a monthly GPU-hour cap on own-node jobs.
+    group: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    gpu_hour_quota: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class AuthSession(Base):

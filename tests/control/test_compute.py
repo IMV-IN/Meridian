@@ -5,6 +5,7 @@ API keys, and the desired-snapshot composition nodes consume."""
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
 
 import pytest
 from conftest import MutableClock, NodeKey
@@ -37,6 +38,7 @@ class FakeNode:
     def __init__(self, app, owner: TestClient, ws: str, gpus: int = 2, jobs_enabled: bool = True,
                  host: str = "10.0.0.5", model: str = "NVIDIA H100", vram_gb: int = 80, name: str = "gpu-host"):
         self.c = TestClient(app)
+        self.now = app.state.compute._now  # the test clock: replicas report when they started and finished
         token = owner.post(f"/api/w/{ws}/tokens", json={"auto_approve": True}, headers=CSRF).json()["token"]
         enrolled = self.c.post(
             "/control/v1/enroll", headers={"Authorization": f"Bearer {token}"},
@@ -70,9 +72,11 @@ class FakeNode:
         for key in [k for k in self.phases if k not in wanted]:
             del self.phases[key]  # dropped from the snapshot: the agent forgets it
         for key, j in wanted.items():
-            st = self.phases.setdefault(key, {"phase": "Running", "exit_code": None, "log_tail": ""})
+            st = self.phases.setdefault(
+                key, {"phase": "Running", "exit_code": None, "log_tail": "", "started_at": self.now().isoformat()}
+            )
             if j["desired_phase"] != "Running" and st["phase"] == "Running":
-                st["phase"] = "Cancelled"
+                st.update(phase="Cancelled", finished_at=self.now().isoformat())
         held = set(self.busy) | {
             d for k, st in self.phases.items() if st["phase"] == "Running" for d in wanted[k]["device_ids"]
         }
@@ -99,7 +103,7 @@ class FakeNode:
     def finish(self, job_id: str, exit_code: int = 0, rank: int = 0, logs: str = "") -> None:
         self.phases[(job_id, rank)].update(
             phase="Succeeded" if exit_code == 0 else "Failed", exit_code=exit_code, log_tail=logs,
-            message="" if exit_code == 0 else f"exit code {exit_code}",
+            message="" if exit_code == 0 else f"exit code {exit_code}", finished_at=self.now().isoformat(),
         )
         self.sync()
 
@@ -679,7 +683,8 @@ def test_tenant_work_is_invisible_to_the_host_and_listed_gpus_are_reserved_for_r
         assert leak not in detail
     view = world.provider.get(f"/api/w/{world.pws}/nodes/{world.node.node_id}").json()
     assert view["desired"]["snapshot"]["jobs"][0]["tenant"] is True
-    assert view["observation"]["jobs"][0] == {
+    seen = view["observation"]["jobs"][0]
+    assert seen.pop("started_at") and seen == {
         "job_id": secret_job["id"], "replica": 0, "phase": "Running", "tenant": True,
     }
 
@@ -784,6 +789,291 @@ def test_compute_overview(world):
     assert o["rented_gpus"] == 2 and o["jobs"] == {"scheduled": 1} and o["balance_paise"] == 10_000_00
     p = world.provider.get(f"/api/w/{world.pws}/compute/overview").json()
     assert p["gpus_rented_out"] == 2 and p["listings"] == 1
+
+
+# ── usage and quotas ──────────────────────────────────────────────────────
+
+
+class Lab:
+    """An institute: a head (owner), a student (operator), a dean (admin) and a viewer, one GPU node."""
+
+    def __init__(self, client, tmp_path, clock, gpus=2):
+        self.app, self.clock, self.client, self.tmp_path = client.app, clock, client, tmp_path
+        self.head = login(client, tmp_path, "head@iit.ac.in", clock)
+        self.ws = workspace(self.head, "IIT Lab")
+        self.node = FakeNode(client.app, self.head, self.ws, gpus=gpus)
+        for email, role in (("stu@iit.ac.in", "operator"), ("dean@iit.ac.in", "admin"), ("view@iit.ac.in", "viewer")):
+            self.head.post(f"/api/w/{self.ws}/invitations", headers=CSRF, json={"email": email, "role": role})
+        self.stu = login(client, tmp_path, "stu@iit.ac.in", clock)
+        self.dean = login(client, tmp_path, "dean@iit.ac.in", clock)
+        self.view = login(client, tmp_path, "view@iit.ac.in", clock)
+        members = self.head.get(f"/api/w/{self.ws}/members").json()["members"]
+        self.ids = {m["email"]: m["id"] for m in members}
+        self.node.sync()  # the sign-ins above moved the clock; renew the node's lease
+
+    def submit(self, c, **body):
+        return c.post(f"/api/w/{self.ws}/jobs", headers=CSRF, json={"image": IMAGE, **body})
+
+    def run(self, c, seconds, **body) -> dict:
+        """Submit a job, let it run for `seconds`, and let it succeed."""
+        r = self.submit(c, **body)
+        assert r.status_code == 201, r.text
+        job = r.json()
+        self.node.sync()
+        self.clock.advance(seconds)
+        self.node.finish(job["id"])
+        return job
+
+    def usage(self, c=None, month=None) -> dict:
+        r = (c or self.head).get(f"/api/w/{self.ws}/usage" + (f"?month={month}" if month else ""))
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def person(self, email, **kw) -> dict:
+        return next(p for p in self.usage(**kw)["people"] if p["email"] == email)
+
+    def set_compute(self, email, **body):
+        return self.head.patch(f"/api/w/{self.ws}/members/{self.ids[email]}/compute", headers=CSRF, json=body)
+
+
+@pytest.fixture
+def lab(client, tmp_path, clock):
+    return Lab(client, tmp_path, clock)
+
+
+def test_usage_is_gpu_hours_per_person_with_api_keys_attributed_to_their_creator(lab):
+    lab.run(lab.stu, 3600, gpus_per_replica=2)  # 2 GPU-hours
+    lab.run(lab.head, 1800)  # 0.5
+    key = lab.head.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ci", "role": "operator"}).json()
+    ci = TestClient(lab.app)
+    r = ci.post(f"/api/w/{lab.ws}/jobs", headers={"Authorization": f"Bearer {key['token']}"}, json={"image": IMAGE})
+    assert r.json()["created_by"] == "key:ci"
+    lab.node.sync()
+    lab.clock.advance(3600)
+    lab.node.finish(r.json()["id"])
+
+    u = lab.usage()
+    assert u["month"] == "2026-08"
+    by = {p["email"]: p for p in u["people"]}
+    assert (by["stu@iit.ac.in"]["gpu_hours_own"], by["stu@iit.ac.in"]["jobs"]) == (2.0, 1)
+    assert (by["head@iit.ac.in"]["gpu_hours_own"], by["head@iit.ac.in"]["jobs"]) == (1.5, 2)  # 0.5 + the key's 1.0
+    assert "key:ci" not in by and by["dean@iit.ac.in"]["gpu_hours_own"] == 0.0  # members with no usage are listed
+    assert u["totals"] == {"jobs": 3, "gpu_hours_own": 3.5, "gpu_hours_rented": 0.0}
+
+    # Two admins each made a key called "ci": the name no longer says whose it is, so it stays a label.
+    lab.dean.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ci", "role": "operator"})
+    assert lab.person("key:ci")["gpu_hours_own"] == 1.0 and lab.person("head@iit.ac.in")["gpu_hours_own"] == 0.5
+
+
+def test_usage_splits_rented_from_own_and_groups_roll_up(world):
+    world.rent()
+    rental = world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]
+    pinned = world.submit(gpus_per_replica=2, rental_id=rental["id"]).json()
+    world.node.sync()
+    world.clock.advance(1800)
+    world.node.finish(pinned["id"])
+    unpinned = world.submit(gpus_per_replica=1).json()  # lands on the rented GPUs: a node this workspace does not own
+    world.node.sync()
+    world.clock.advance(3600)
+    world.node.finish(unpinned["id"])
+
+    me = world.consumer.get(f"/api/w/{world.cws}/usage").json()["people"][0]
+    assert me["email"] == "ml@startup.in" and me["gpu_hours_own"] == 0.0
+    assert me["gpu_hours_rented"] == 2.0 and me["jobs"] == 2  # 2 GPUs × 0.5 h + 1 GPU × 1 h
+
+    uid = world.consumer.get("/api/me").json()["user"]["id"]
+    world.consumer.patch(f"/api/w/{world.cws}/members/{uid}/compute", headers=CSRF, json={"group": "vision-lab"})
+    u = world.consumer.get(f"/api/w/{world.cws}/usage").json()
+    assert u["groups"] == [
+        {"group": "vision-lab", "members": 1, "jobs": 2, "gpu_hours_own": 0.0, "gpu_hours_rented": 2.0}
+    ]
+    assert u["totals"] == {"jobs": 2, "gpu_hours_own": 0.0, "gpu_hours_rented": 2.0}
+
+
+def test_usage_is_clipped_to_the_month_and_validates_it(tmp_path):
+    clock = MutableClock(datetime(2026, 8, 31, 22, 50, tzinfo=timezone.utc))
+    lab = Lab(make(tmp_path, clock, admin_emails=(ADMIN,)), tmp_path, clock)
+    clock._now = datetime(2026, 8, 31, 23, 0, tzinfo=timezone.utc)
+    lab.node.sync()
+    job = lab.submit(lab.stu).json()
+    lab.node.sync()
+    clock.advance(3 * 3600)  # until 02:00 on 1 September
+    lab.node.finish(job["id"])
+    assert lab.person("stu@iit.ac.in", month="2026-08")["gpu_hours_own"] == 1.0
+    assert lab.person("stu@iit.ac.in", month="2026-09")["gpu_hours_own"] == 2.0
+    assert lab.person("stu@iit.ac.in")["gpu_hours_own"] == 2.0  # defaults to the current UTC month
+    assert lab.person("stu@iit.ac.in", month="2026-07")["gpu_hours_own"] == 0.0
+    for bad in ("2026-13", "2026-8", "last", "1999-01"):
+        assert lab.head.get(f"/api/w/{lab.ws}/usage?month={bad}").status_code == 400, bad
+    assert lab.head.get(f"/api/w/{lab.ws}/usage?format=xml").status_code == 400
+
+
+def test_a_job_that_never_started_uses_no_gpu_hours_and_a_running_one_counts_up_to_now(lab):
+    lab.submit(lab.stu, min_vram_gb=500)  # no such GPU: stays queued
+    lab.clock.advance(7200)
+    assert lab.person("stu@iit.ac.in")["gpu_hours_own"] == 0.0 and lab.person("stu@iit.ac.in")["jobs"] == 0
+    lab.node.sync()
+    lab.submit(lab.stu)
+    lab.node.sync()
+    lab.clock.advance(5400)
+    assert lab.person("stu@iit.ac.in")["gpu_hours_own"] == 1.5
+
+
+def test_usage_csv_is_for_finance_and_defuses_spreadsheet_formulas(lab):
+    lab.run(lab.stu, 3600)
+    lab.set_compute("stu@iit.ac.in", group="=cmd|' /c calc'!A1", gpu_hour_quota=10)
+    r = lab.view.get(f"/api/w/{lab.ws}/usage?format=csv")  # a viewer can export
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
+    assert r.headers["content-disposition"] == 'attachment; filename="meridian-usage-2026-08.csv"'
+    lines = r.text.splitlines()
+    assert lines[0] == "email,name,group,gpu_hours_own,gpu_hours_rented,jobs,quota_gpu_hours,remaining_gpu_hours"
+    stu = next(line for line in lines if line.startswith("stu@iit.ac.in"))
+    assert stu.endswith(",1.0,0.0,1,10,9.0") and ",'=cmd" in stu
+    head = next(line for line in lines if line.startswith("head@iit.ac.in"))
+    assert head.endswith(",0.0,0.0,0,,")  # no quota: empty cells, not "None"
+
+
+def test_quota_rejects_new_jobs_but_never_kills_a_running_one(lab):
+    assert lab.set_compute("stu@iit.ac.in", group="vision-lab", gpu_hour_quota=2).json() == {
+        "user_id": lab.ids["stu@iit.ac.in"], "group": "vision-lab", "gpu_hour_quota": 2,
+    }
+    job = lab.submit(lab.stu).json()
+    lab.node.sync()
+    lab.clock.advance(3 * 3600)  # three hours on a two-hour quota
+    lab.node.sync()
+    lab.app.state.compute.tick()
+    assert lab.head.get(f"/api/w/{lab.ws}/jobs/{job['id']}").json()["status"] == "running"  # not killed
+
+    r = lab.submit(lab.stu)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+    msg = r.json()["error"]["message"]
+    assert "3.00 of 2 GPU-hours" in msg and "2026-09-01" in msg and "2026-08" in msg
+    assert lab.person("stu@iit.ac.in")["remaining_gpu_hours"] == 0.0
+    assert lab.submit(lab.head).status_code == 201  # no quota, no limit
+
+
+def test_quota_binds_admins_and_their_keys_and_a_workspace_default_covers_members_without_one(lab):
+    lab.run(lab.head, 3600)
+    lab.run(lab.dean, 3600)
+    key = lab.dean.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "nightly", "role": "operator"}).json()
+    cli = TestClient(lab.app)
+    auth = {"Authorization": f"Bearer {key['token']}"}
+    key_job = cli.post(f"/api/w/{lab.ws}/jobs", headers=auth, json={"image": IMAGE})
+    assert key_job.status_code == 201  # no quota yet
+    lab.node.sync()
+    lab.clock.advance(3600)
+    lab.node.finish(key_job.json()["id"])  # the dean has used 2 GPU-hours, one of them through the key
+
+    default = lab.head.patch(f"/api/w/{lab.ws}/compute-settings", headers=CSRF, json={"default_gpu_hour_quota": 2})
+    assert default.json() == {"default_gpu_hour_quota": 2}
+    assert lab.usage()["default_gpu_hour_quota"] == 2 and lab.person("stu@iit.ac.in")["quota_gpu_hours"] == 2
+    # The dean (an admin) is at the default, and so is the dean's key; the head has used 1 of 2.
+    assert lab.submit(lab.dean).json()["error"]["code"] == "QUOTA_EXCEEDED"
+    assert cli.post(f"/api/w/{lab.ws}/jobs", headers=auth, json={"image": IMAGE}).json()["error"]["code"] == (
+        "QUOTA_EXCEEDED"
+    )
+    assert lab.submit(lab.head).status_code == 201
+    lab.set_compute("dean@iit.ac.in", gpu_hour_quota=100)  # a member's own quota replaces the default
+    assert lab.submit(lab.dean).status_code == 201
+    # Clearing the default lifts the limit for members without a quota of their own.
+    lab.head.patch(f"/api/w/{lab.ws}/compute-settings", headers=CSRF, json={"default_gpu_hour_quota": None})
+    assert lab.usage()["default_gpu_hour_quota"] is None and lab.person("stu@iit.ac.in")["quota_gpu_hours"] is None
+
+
+def test_queued_jobs_wait_for_the_quota_and_start_when_it_is_raised(client, tmp_path, clock):
+    lab = Lab(client, tmp_path, clock, gpus=1)
+    lab.set_compute("stu@iit.ac.in", gpu_hour_quota=2)
+    first = lab.submit(lab.stu).json()
+    second = lab.submit(lab.stu).json()
+    assert second["status"] == "queued" and "waiting for capacity" in second["message"]
+    lab.node.sync()
+    clock.advance(3 * 3600)
+    lab.node.finish(first["id"])  # the GPU frees, but the student has used 3 of 2 GPU-hours
+    lab.node.sync()
+    queued = lab.head.get(f"/api/w/{lab.ws}/jobs/{second['id']}").json()
+    assert queued["status"] == "queued" and queued["message"] == "waiting: monthly GPU-hour quota used"
+    lab.set_compute("stu@iit.ac.in", gpu_hour_quota=10)
+    lab.node.sync()
+    assert lab.head.get(f"/api/w/{lab.ws}/jobs/{second['id']}").json()["status"] in ("scheduled", "running")
+
+
+def test_rented_usage_and_pinned_jobs_are_outside_the_own_node_quota(world):
+    world.rent()
+    uid = world.consumer.get("/api/me").json()["user"]["id"]
+    world.consumer.patch(f"/api/w/{world.cws}/members/{uid}/compute", headers=CSRF, json={"gpu_hour_quota": 0})
+    # Quota 0 closes the workspace's own nodes. A job pinned to a rental is paid for with credit, so it runs.
+    rental = world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]
+    assert world.submit(rental_id=rental["id"]).status_code == 201
+    r = world.submit()
+    assert r.status_code == 409 and r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+    world.consumer.post(f"/api/w/{world.cws}/market/rentals/{rental['id']}/release", headers=CSRF)
+    world.node.sync()  # the host confirms the stopped jobs, freeing its GPUs
+    assert world.submit(offer_id=world.offer["id"]).status_code == 201  # rents for the job: not a quota matter
+
+
+def test_setting_groups_and_quotas_is_admin_only_and_validated(lab):
+    path = f"/api/w/{lab.ws}/members/{lab.ids['stu@iit.ac.in']}/compute"
+    assert lab.stu.patch(path, headers=CSRF, json={"gpu_hour_quota": 1}).status_code == 403  # no capping yourself
+    assert lab.view.patch(path, headers=CSRF, json={"gpu_hour_quota": 1}).status_code == 403
+    assert lab.dean.patch(path, headers=CSRF, json={"group": " nlp ", "gpu_hour_quota": 7}).json()["group"] == "nlp"
+    for bad in (-1, 1.5, "7", True, 10**7):
+        assert lab.dean.patch(path, headers=CSRF, json={"gpu_hour_quota": bad}).status_code == 400, bad
+    assert lab.dean.patch(path, headers=CSRF, json={"group": "x" * 65}).status_code == 400
+    assert lab.dean.patch(path, headers=CSRF, json={"group": 5}).status_code == 400
+    # Only the keys sent change; null clears; an empty group means none.
+    assert lab.dean.patch(path, headers=CSRF, json={"group": ""}).json() == {
+        "user_id": lab.ids["stu@iit.ac.in"], "group": "", "gpu_hour_quota": 7,
+    }
+    assert lab.dean.patch(path, headers=CSRF, json={"gpu_hour_quota": None}).json()["gpu_hour_quota"] is None
+    assert lab.dean.patch(f"/api/w/{lab.ws}/members/usr_nobody/compute", headers=CSRF, json={}).status_code == 404
+    members = {m["email"]: m for m in lab.view.get(f"/api/w/{lab.ws}/members").json()["members"]}
+    assert members["stu@iit.ac.in"]["group"] == "" and members["stu@iit.ac.in"]["gpu_hour_quota"] is None
+
+    settings = f"/api/w/{lab.ws}/compute-settings"
+    assert lab.stu.patch(settings, headers=CSRF, json={"default_gpu_hour_quota": 5}).status_code == 403
+    assert lab.dean.patch(settings, headers=CSRF, json={}).status_code == 400
+    assert lab.dean.patch(settings, headers=CSRF, json={"default_gpu_hour_quota": -5}).status_code == 400
+    assert lab.dean.patch(settings, headers=CSRF, json={"default_gpu_hour_quota": 40}).status_code == 200
+    assert lab.view.get(f"/api/w/{lab.ws}").json()["default_gpu_hour_quota"] == 40
+    # A viewer reads usage; someone outside the workspace cannot tell it exists.
+    assert lab.view.get(f"/api/w/{lab.ws}/usage").status_code == 200
+    outsider = login(lab.client, lab.tmp_path, "x@other.in", lab.clock)
+    assert outsider.get(f"/api/w/{lab.ws}/usage").status_code == 404
+
+
+def test_migration_adds_the_usage_columns_and_matches_the_models(tmp_path):
+    pytest.importorskip("alembic")
+    from sqlalchemy import create_engine, inspect
+
+    from meridian_control.db import Base, run_migrations
+
+    url = f"sqlite:///{tmp_path}/m.db"
+    run_migrations(url)
+    insp = inspect(create_engine(url))
+    for table, columns in (("memberships", {"group", "gpu_hour_quota"}), ("workspaces", {"default_gpu_hour_quota"})):
+        assert columns <= {c["name"] for c in insp.get_columns(table)}
+    for name, table in Base.metadata.tables.items():  # every model column exists in the migrated schema
+        assert {c.name for c in table.columns} <= {c["name"] for c in insp.get_columns(name)}, name
+
+
+def test_cli_prints_usage_per_person(lab, monkeypatch):
+    from meridian.cli.compute import main
+
+    lab.run(lab.stu, 5400)
+    lab.set_compute("stu@iit.ac.in", group="vision-lab", gpu_hour_quota=4)
+    made = lab.head.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ro", "role": "viewer"})
+    token = made.json()["token"]  # a read-only key is enough to report usage
+    monkeypatch.setenv("MERIDIAN_WORKSPACE", lab.ws)
+    monkeypatch.setenv("MERIDIAN_API_KEY", token)
+    lines: list[str] = []
+    assert main(["usage", "--month", "2026-08"], client=TestClient(lab.app), out=lines.append) == 0
+    assert lines[0] == "usage for 2026-08 (UTC)" and lines[1].split() == [
+        "PERSON", "GROUP", "OWN", "GPU-H", "RENTED", "GPU-H", "JOBS", "QUOTA", "LEFT",
+    ]
+    stu = next(line for line in lines if line.startswith("stu@iit.ac.in"))
+    assert stu.split() == ["stu@iit.ac.in", "vision-lab", "1.50", "0.00", "1", "4", "2.50"]
+    assert lines[-1].split() == ["TOTAL", "1.50", "0.00", "1"]
+    assert main(["usage", "--month", "bad"], client=TestClient(lab.app), out=lines.append) == 1
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────

@@ -135,13 +135,43 @@ In the console, open **Marketplace → List a node**. The node must be online wi
 - You can end a rental (for maintenance). The renter's jobs fail and you are paid for the time used.
 - **You cannot see what a renter runs.** The node page shows that a GPU is taken and nothing else: not the image, arguments, environment or logs.
 
+## GPU-hour usage and monthly quotas
+
+A department head can see who used how much GPU time and cap it per person. This is for jobs on the workspace's own nodes; rented GPUs are already limited by prepaid credit.
+
+```bash
+meridian compute usage --month 2026-11          # per person, with group and quota
+curl -H "Authorization: Bearer $MERIDIAN_API_KEY" \
+  "$MERIDIAN_CLOUD_URL/api/w/$MERIDIAN_WORKSPACE/usage?month=2026-11&format=csv" > usage.csv
+```
+
+In the console, **Billing → GPU-hour usage** has a month picker, the per-person table, group totals and a CSV download. Everyone in the workspace (viewer and up) can read it.
+
+**How usage is counted**
+
+- GPU-seconds for a replica = GPUs × (finished − started). A replica that is still running counts up to now, and one that never started counts nothing. Hours are shown to two decimals.
+- A month is a **UTC calendar month**. A job that spans midnight on the 1st is split between the two months.
+- A job counts for the member who submitted it. A job submitted with an API key counts for the member who created the key, as long as exactly one person created keys with that name; otherwise it is listed under `key:<name>`.
+- **Own** usage is on nodes the workspace owns. **Rented** usage is a job pinned to a rental, or any replica placed on a node the workspace does not own.
+- The report lists every member (including those with no usage) and anyone who used GPUs but has since left. Each row has `gpu_hours_own`, `gpu_hours_rented`, `jobs` (jobs that started), `quota_gpu_hours` and `remaining_gpu_hours`; the response also has per-group and workspace totals. The CSV has the per-person rows. Names that start with `=`, `+`, `-` or `@` are prefixed with `'` so a spreadsheet does not run them.
+
+**Quotas**
+
+- An admin sets a person's **group** (up to 64 characters, for example `vision-lab`) and **monthly GPU-hour quota** under **Settings → Members → Limits**, or with `PATCH /api/w/{ws}/members/{user_id}/compute` `{"group": "...", "gpu_hour_quota": 40}`. A workspace default applies to members with no quota of their own: Settings → Members, or `PATCH /api/w/{ws}/compute-settings` `{"default_gpu_hour_quota": 20}`. Empty or `null` means unlimited. A quota of `0` closes the workspace's own nodes to that person.
+- Owners and admins are not exempt: they are limited by their own quota, or by the default if they have none. There is no way to exempt one member from a default; leave the default empty and set quotas individually.
+- When a member's own-node usage this month has reached the quota, a new job is refused with `409 QUOTA_EXCEEDED`, saying what was used and when the quota resets (the first of next month, UTC). A job pinned to a rental or a listing (`rental_id`, `offer_id`) is not checked.
+- A job that was already queued when its submitter went over quota stays queued with "waiting: monthly GPU-hour quota used" and does not take a GPU on the workspace's own nodes. It can still be placed on rented GPUs, and it starts when the quota is raised or the month rolls over.
+- **Running jobs are never stopped.** A long job can take a person past their quota; the quota stops the next job, not this one.
+- Quotas are checked when a job is submitted and when a queued job is considered (every background pass), so a quota can be exceeded by the jobs running at that moment.
+
 ## Roles
 
 | Action | Viewer | Operator | Admin |
 | --- | --- | --- | --- |
 | See jobs, listings, billing | ✓ | ✓ | ✓ |
 | Run and cancel jobs, read a service's token | | ✓ | ✓ |
-| Rent, list, create API keys | | | ✓ |
+| See GPU-hour usage | ✓ | ✓ | ✓ |
+| Set groups and quotas, rent, list, create API keys | | | ✓ |
 
 API keys (`mck_…`) act in one workspace with the role you choose. They cannot manage members.
 
@@ -166,7 +196,7 @@ A payment reference can be credited only once, and a payout reference can be use
 | `MERIDIAN_CONTROL_COMPUTE_TICK` | `30` | Seconds between background passes (metering, credit, timeouts, queue) |
 | `MERIDIAN_CONTROL_NODE_LOST_SECONDS` | `300` | Silence after which a node's running replicas are declared lost |
 
-Upgrading an existing cloud: run `meridian-control migrate`. The migration only adds tables and one column.
+Upgrading an existing cloud: run `meridian-control migrate`. The migrations only add tables and columns.
 
 ## What it does not do yet
 
@@ -178,7 +208,8 @@ Upgrading an existing cloud: run `meridian-control migrate`. The migration only 
 - **Isolation.** A job is a hardened Docker container, not a virtual machine. A provider accepting arbitrary images should run on hosts it is prepared to treat that way.
 - **Restarts.** A failed job or service is not restarted.
 - **Multiple control replicas.** Metering and scheduling are serialized by an in-process lock, so run compute on one control replica. A multi-replica Postgres deployment needs a database advisory lock first.
-- **Scale.** Scheduling is first-come-first-served with no priorities or quotas beyond 200 unfinished jobs per workspace.
+- **Scale.** Scheduling is first-come-first-served with no priorities, and no limit beyond the GPU-hour quotas above and 200 unfinished jobs per workspace.
+- **Usage history.** Usage is computed from job records each time it is asked for. There are no stored monthly statements, no per-group quotas, and no alerts when someone nears a quota.
 
 ## Validate it yourself
 

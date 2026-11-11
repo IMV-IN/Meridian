@@ -9,7 +9,7 @@ import { makeQueryClient } from "@/lib/query-client"
 import { SettingsProvider } from "@/providers/settings-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
 
-import { rupeesToPaise, type Billing, type CloudInfo, type JobDetail, type Offer, type Rental, type WorkspaceRole } from "./api"
+import { rupeesToPaise, type Billing, type CloudInfo, type JobDetail, type Member, type Offer, type Rental, type Usage, type WorkspaceRole } from "./api"
 import { cloudRoutes } from "./app"
 import { endReason, parseEnv, splitArgs } from "./compute"
 import { CloudSessionProvider } from "./session"
@@ -107,6 +107,24 @@ const JOB: JobDetail = {
   ],
 }
 
+const USAGE: Usage = {
+  month: "2026-11",
+  period_start: "2026-11-01T00:00:00Z",
+  period_end: "2026-12-01T00:00:00Z",
+  default_gpu_hour_quota: 20,
+  people: [
+    { email: "stu@iit.ac.in", name: "Stu Dent", group: "vision-lab", gpu_hours_own: 12.5, gpu_hours_rented: 3, jobs: 4, quota_gpu_hours: 20, remaining_gpu_hours: 7.5 },
+    { email: "head@iit.ac.in", name: "", group: "", gpu_hours_own: 1, gpu_hours_rented: 0, jobs: 1, quota_gpu_hours: null, remaining_gpu_hours: null },
+  ],
+  groups: [
+    { group: "vision-lab", members: 1, jobs: 4, gpu_hours_own: 12.5, gpu_hours_rented: 3 },
+    { group: "", members: 1, jobs: 1, gpu_hours_own: 1, gpu_hours_rented: 0 },
+  ],
+  totals: { gpu_hours_own: 13.5, gpu_hours_rented: 3, jobs: 5 },
+}
+
+const MEMBER: Member = { ...USER, role: "operator", joined_at: null, last_login_at: null, group: "vision-lab", gpu_hour_quota: null }
+
 function json(status: number, body: unknown) {
   return new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 }
@@ -123,6 +141,9 @@ function serve(role: WorkspaceRole, routes: Record<string, Handler>, platformAdm
     "/api/w/w1/billing": () => json(200, billing(1_000_000)),
     "/api/w/w1/jobs": () => json(200, { jobs: [] }),
     "/api/w/w1/api-keys": () => json(200, { keys: [] }),
+    "/api/w/w1/usage": () => json(200, USAGE),
+    "/api/w/w1/members": () => json(200, { members: [MEMBER], invitations: [] }),
+    "/api/w/w1": () => json(200, { id: "w1", slug: "acme", name: "Acme", role, created_at: null, members: 1, default_gpu_hour_quota: 20 }),
   }
   const all = { ...base, ...routes }
   vi.stubGlobal(
@@ -335,5 +356,73 @@ describe("Billing", () => {
     await user.click(record)
     await waitFor(() => expect(calls.some((c) => c.path === "/api/platform/credits")).toBe(true))
     expect(calls.find((c) => c.path === "/api/platform/credits")?.body).toEqual({ workspace: "w1", amount_paise: 2_500_000, reference: "UTR-778899", memo: "" })
+  })
+})
+
+describe("GPU-hour usage and quotas", () => {
+  it("lists GPU-hours per person and group, follows the month picker, and links the CSV", async () => {
+    const calls = serve("viewer", {})
+    const user = userEvent.setup()
+    renderAt("/billing")
+
+    expect(await screen.findByText("GPU-hour usage")).toBeInTheDocument()
+    expect(await screen.findByText("Stu Dent")).toBeInTheDocument()
+    expect(screen.getAllByText("12.50")).toHaveLength(2) // the person and the group
+    expect(screen.getByText("7.50")).toBeInTheDocument() // left of a 20 GPU-hour quota
+    expect(screen.getAllByText("vision-lab").length).toBeGreaterThan(0)
+    expect(screen.getByText("No group")).toBeInTheDocument()
+    expect(screen.getByText("Unlimited")).toBeInTheDocument()
+    expect(screen.getByText(/Workspace total in 2026-11: 13.50 own and 3.00 rented GPU-hours across 5 jobs/)).toBeInTheDocument()
+
+    const csv = screen.getByRole("link", { name: /CSV/ })
+    expect(csv.getAttribute("href")).toMatch(/^\/api\/w\/w1\/usage\?format=csv&month=\d{4}-\d{2}$/)
+    expect(csv).toHaveAttribute("download")
+
+    // jsdom lacks the pointer APIs Radix's Select uses.
+    Object.assign(Element.prototype, { hasPointerCapture: () => false, setPointerCapture: () => undefined, releasePointerCapture: () => undefined, scrollIntoView: () => undefined })
+    await user.click(screen.getByRole("combobox", { name: "Month" }))
+    const options = await screen.findAllByRole("option")
+    expect(options).toHaveLength(12)
+    await user.click(options[1])
+    await waitFor(() => expect(calls.filter((c) => c.path === "/api/w/w1/usage").length).toBeGreaterThan(1))
+  })
+
+  it("lets admins set a member's group and quota and the workspace default", async () => {
+    const calls = serve("admin", {
+      "PATCH /api/w/w1/members/u1/compute": (b) => json(200, { user_id: "u1", ...(b as object) }),
+      "PATCH /api/w/w1/compute-settings": (b) => json(200, b),
+    })
+    const user = userEvent.setup()
+    renderAt("/settings?tab=members")
+
+    const def = await screen.findByLabelText("Default quota (GPU-hours per month)")
+    await waitFor(() => expect(def).toHaveValue("20"))
+    await user.clear(def)
+    await user.type(def, "x")
+    expect(await screen.findByText(/Enter a whole number of GPU-hours/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    await user.clear(def)
+    await user.type(def, "40")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/w/w1/compute-settings")?.body).toEqual({ default_gpu_hour_quota: 40 }))
+
+    expect(await screen.findByText("vision-lab")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /Compute limits for Ada/ }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByLabelText("Group")).toHaveValue("vision-lab")
+    await user.clear(within(dialog).getByLabelText("Group"))
+    await user.type(within(dialog).getByLabelText("Group"), "nlp")
+    await user.type(within(dialog).getByLabelText("Monthly GPU-hour quota"), "50")
+    await user.click(within(dialog).getByRole("button", { name: "Save limits" }))
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/w/w1/members/u1/compute")?.body).toEqual({ group: "nlp", gpu_hour_quota: 50 }))
+  })
+
+  it("shows quotas read-only to operators", async () => {
+    serve("operator", {})
+    renderAt("/settings?tab=members")
+    expect(await screen.findByText("vision-lab")).toBeInTheDocument()
+    expect(screen.getByText("Default")).toBeInTheDocument() // the member has no quota of their own
+    expect(screen.queryByRole("button", { name: /Compute limits/ })).not.toBeInTheDocument()
+    expect(await screen.findByLabelText("Default quota (GPU-hours per month)")).toBeDisabled()
   })
 })

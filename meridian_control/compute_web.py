@@ -7,12 +7,14 @@ routes are for the operators of this Meridian Cloud (`admin_emails`).
 
 from __future__ import annotations
 
+import csv
+import io
 from typing import Optional
 
 from fastapi import Body, Depends, Query, Request, Response
 
 from .accounts import ROLE_RANK, Principal
-from .compute import ComputeService
+from .compute import ComputeService, err
 from .web import Ctx, admin, api_router, operator, principal, viewer, w
 
 
@@ -96,6 +98,44 @@ def billing(request: Request, limit: int = Query(200), ctx: Ctx = Depends(viewer
 @w.get("/compute/overview")
 def compute_overview(request: Request, ctx: Ctx = Depends(viewer)):
     return _compute(request).overview(ctx[1])
+
+
+# ── usage and quotas ──────────────────────────────────────────────────────
+_CSV_COLUMNS = ("email", "name", "group", "gpu_hours_own", "gpu_hours_rented", "jobs", "quota_gpu_hours",
+                "remaining_gpu_hours")
+
+
+def _csv_cell(value):
+    """A spreadsheet runs a cell that starts with = + - @ as a formula: defuse names a member chose."""
+    return "'" + value if isinstance(value, str) and value[:1] in ("=", "+", "-", "@") else value
+
+
+@w.get("/usage")
+def usage(request: Request, month: Optional[str] = Query(None), format: str = Query("json"),
+          ctx: Ctx = Depends(viewer)):
+    if format not in ("json", "csv"):
+        raise err("INVALID_FIELD", "format must be json or csv")
+    data = _compute(request).usage(ctx[1], month)
+    if format == "json":
+        return data
+    out = io.StringIO()
+    writer = csv.writer(out, lineterminator="\r\n")
+    writer.writerow(_CSV_COLUMNS)
+    for p in data["people"]:
+        writer.writerow([_csv_cell("" if p[c] is None else p[c]) for c in _CSV_COLUMNS])
+    return Response(out.getvalue(), media_type="text/csv; charset=utf-8", headers={
+        "Content-Disposition": f'attachment; filename="meridian-usage-{data["month"]}.csv"',
+    })
+
+
+@w.patch("/members/{user_id}/compute")
+def member_compute(request: Request, user_id: str, body: dict = Body(...), ctx: Ctx = Depends(admin)):
+    return _compute(request).set_member_compute(ctx[1], ctx[0].email, user_id, body)
+
+
+@w.patch("/compute-settings")
+def compute_settings(request: Request, body: dict = Body(...), ctx: Ctx = Depends(admin)):
+    return _compute(request).set_compute_settings(ctx[1], ctx[0].email, body)
 
 
 # ── API keys ──────────────────────────────────────────────────────────────
