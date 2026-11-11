@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
 import time
 from typing import Any, Callable, List, Optional
@@ -21,6 +22,14 @@ from typing import Any, Callable, List, Optional
 import httpx
 
 TERMINAL = ("succeeded", "failed", "cancelled")
+# C0 controls except TAB and LF, DEL, C1 controls (ESC sequences, OSC 52 clipboard
+# writes) and bidi overrides. Everything printed came from the server or a node.
+_UNSAFE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+
+
+def printable(text: str) -> str:
+    """`text` without terminal control sequences, so server or node data cannot drive the terminal."""
+    return _UNSAFE.sub("", text)
 
 
 class CliError(Exception):
@@ -142,9 +151,9 @@ def main(
     own = client is None
     http = client or httpx.Client(base_url=url.rstrip("/"), timeout=30.0)
     try:
-        return _dispatch(args, Api(http, workspace, key), out, sleep)
+        return _dispatch(args, Api(http, workspace, key), lambda line: out(printable(line)), sleep)
     except CliError as e:
-        print(f"error: {e}", file=sys.stderr)
+        print(printable(f"error: {e}"), file=sys.stderr)
         return 1
     finally:
         if own:
