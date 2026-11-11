@@ -109,7 +109,7 @@ TEMPLATES: list[dict[str, Any]] = [
         "kind": "service",
         "image": VLLM_IMAGE,
         "args": [
-            "--model", "Qwen/Qwen2.5-1.5B-Instruct",
+            "Qwen/Qwen2.5-1.5B-Instruct",
             "--host", "0.0.0.0",
             "--port", "{{port}}",
             "--api-key", "{{service_token}}",
@@ -122,7 +122,7 @@ TEMPLATES: list[dict[str, Any]] = [
             "The node downloads the model from Hugging Face on start, so the first start takes a few "
             "minutes. Then call <endpoint>/v1/chat/completions with the header "
             "`Authorization: Bearer <token>`, or add the endpoint to a Meridian gateway as a backend. "
-            "Change the `--model` value for another model that fits your GPU."
+            "Change the first argument (the model name) to serve another model that fits your GPU."
         ),
     },
     {

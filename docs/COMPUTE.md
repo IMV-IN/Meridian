@@ -109,7 +109,7 @@ The same values are available in the command and in environment values as `{{ran
 
 ```bash
 meridian compute run --service --name llama --image <vllm image> -- \
-  --model meta-llama/Llama-3.1-8B-Instruct --port {{port}} --api-key {{service_token}}
+  meta-llama/Llama-3.1-8B-Instruct --port {{port}} --api-key {{service_token}}
 ```
 
 The job page shows the endpoint and the bearer token the service was told to require, with a `backends:` snippet for a Meridian gateway's `config.yaml`.
@@ -132,7 +132,7 @@ Over the API, `GET /api/w/{ws}/job-templates` lists them (viewer and up), and `P
 | --- | --- | --- | --- |
 | `jupyterlab` | service, 1 GPU, 8 h limit | JupyterLab with PyTorch and CUDA from the Jupyter Docker Stacks (`quay.io/jupyter/pytorch-notebook`), listening on `{{port}}` and requiring `{{service_token}}` | Open the job page and use the notebook link, `<endpoint>/lab?token=<token>`. Files are lost when the job ends |
 | `pytorch-ddp` | job, 2 replicas × 1 GPU, 15 min limit | `torchrun` on the official `pytorch/pytorch` image: rendezvous on `{{master}}` (c10d), then a tiny script in which every replica all-reduces and prints its rank and the group size | Each replica's output shows `all_reduce sum=3 (expected 3)`. Replace the last two arguments (`-c` and the script) with your own command to train |
-| `vllm-server` | service, 1 GPU, 8 h limit | The official `vllm/vllm-openai` image serving `Qwen/Qwen2.5-1.5B-Instruct` (fits one 24 GB GPU) with `--port {{port}} --host 0.0.0.0 --api-key {{service_token}}` | The first start downloads the model. Then `curl <endpoint>/v1/models -H "Authorization: Bearer <token>"`, or use the `backends:` snippet on the job page to add it to a gateway. Change `--model` for another model |
+| `vllm-server` | service, 1 GPU, 8 h limit | The official `vllm/vllm-openai` image serving `Qwen/Qwen2.5-1.5B-Instruct` (fits one 24 GB GPU) with `--port {{port}} --host 0.0.0.0 --api-key {{service_token}}` | The first start downloads the model. Then `curl <endpoint>/v1/models -H "Authorization: Bearer <token>"`, or use the `backends:` snippet on the job page to add it to a gateway. Change the first argument (the model name) for another model |
 | `python-script` | job, 1 GPU, 15 min limit | `python -c "import torch; print(torch.cuda.get_device_name(0))"` on `pytorch/pytorch` | The replica's output is the GPU's name. Replace the arguments with your own command |
 
 The 8 hour limit on services stops a forgotten notebook from holding a GPU for ever; clear **Stop after** in the form (or send `timeout_seconds: 0`) for none. The `pytorch-ddp` template runs its script under `torchrun --no-python`, so it needs no code in the image; `torchrun` prints a harmless warning that `--node-rank` is ignored with the c10d backend, because the ranks are assigned at rendezvous. Hosts must set `policy.job_allow_any_image` or list the template digests in `allowed_job_image_digests`, and `engine_host` must be reachable between nodes for `pytorch-ddp`.
