@@ -46,12 +46,8 @@ jobs:
           OWNER_LC="$(echo "${{ github.repository_owner }}" | tr '[:upper:]' '[:lower:]')"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
           echo "owner_lc=${OWNER_LC}" >> "$GITHUB_OUTPUT"
-          {
-            echo "control_tags<<EOF"
-            echo "ghcr.io/${OWNER_LC}/meridian-control:${VERSION}"
-            echo "ghcr.io/${OWNER_LC}/meridian-control:latest"
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
+          CONTROL_TAGS="ghcr.io/${OWNER_LC}/meridian-control:${VERSION}
+          ghcr.io/${OWNER_LC}/meridian-control:latest"
 
           # GHCR always publishes (built-in GITHUB_TOKEN). Docker Hub only when
           # the secret is configured, so forks / unconfigured repos don't fail.
@@ -61,6 +57,9 @@ jobs:
             TAGS="${DOCKERHUB_USERNAME}/meridian:${VERSION}
           ${DOCKERHUB_USERNAME}/meridian:latest
           ${TAGS}"
+            CONTROL_TAGS="${DOCKERHUB_USERNAME}/meridian-control:${VERSION}
+          ${DOCKERHUB_USERNAME}/meridian-control:latest
+          ${CONTROL_TAGS}"
             echo "dockerhub=true" >> "$GITHUB_OUTPUT"
           else
             echo "dockerhub=false" >> "$GITHUB_OUTPUT"
@@ -68,6 +67,9 @@ jobs:
           {
             echo "tags<<EOF"
             echo "${TAGS}"
+            echo "EOF"
+            echo "control_tags<<EOF"
+            echo "${CONTROL_TAGS}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
           echo "Publishing version: ${VERSION} (ghcr owner: ${OWNER_LC})"
