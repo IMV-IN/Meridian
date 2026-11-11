@@ -128,6 +128,9 @@ class Workspace(Base):
     slug: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     name: Mapped[str] = mapped_column(String(120))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # Monthly GPU-hours each member may use on the workspace's own nodes when the
+    # member has no quota of their own. NULL = unlimited.
+    default_gpu_hour_quota: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class Membership(Base):
@@ -136,6 +139,9 @@ class Membership(Base):
     user_id: Mapped[str] = mapped_column(String(40), ForeignKey("users.id"), primary_key=True, index=True)
     role: Mapped[str] = mapped_column(String(16))  # owner | admin | operator | viewer
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
+    # Compute usage reporting: a department or lab, and a monthly GPU-hour cap on own-node jobs.
+    group: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    gpu_hour_quota: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
 class AuthSession(Base):
@@ -232,6 +238,10 @@ class MarketOffer(Base):
     device_ids: Mapped[list] = mapped_column(JSON, default=list)
     price_paise_per_gpu_hour: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="listed", index=True)  # listed | paused | retired
+    # public: any workspace may rent. private: only the owner and the workspaces in
+    # `shared_with` (workspace ids, never slugs) can see or rent it, and it may be free.
+    visibility: Mapped[str] = mapped_column(String(8), default="public")
+    shared_with: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str] = mapped_column(String(320), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
@@ -301,6 +311,10 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
     error: Mapped[str] = mapped_column(String(1024), default="")
     created_by: Mapped[str] = mapped_column(String(320), default="")
+    # The member whose usage and quota this job counts against, fixed at submit: the
+    # signed-in member, or the member who created the API key that submitted it.
+    # NULL on jobs from before it was recorded (usage then falls back to `created_by`).
+    attributed_to: Mapped[Optional[str]] = mapped_column(String(320), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

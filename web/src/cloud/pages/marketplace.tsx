@@ -22,7 +22,7 @@ import { ApiError } from "@/lib/api/client"
 import { formatINR, formatSeconds, formatVram, pluralize } from "@/lib/format"
 
 import { atLeast, cloud, rupeesToPaise, type Offer, type Rental } from "../api"
-import { endReason } from "../compute"
+import { endReason, parseSlugs, priceLabel } from "../compute"
 import { useBilling, useListableNodes, useOffers, useRentals } from "../hooks"
 import { useWorkspace } from "../session"
 
@@ -54,19 +54,26 @@ function OfferCard({ offer, onRent, canRent }: { offer: Offer; onRent: () => voi
               <MapPin className="size-3" aria-hidden /> {offer.region} · {offer.provider.name}
             </p>
           </div>
-          {offer.available ? (
-            <StatusBadge tone="good" size="sm">
-              Available
-            </StatusBadge>
-          ) : (
-            <StatusBadge tone="muted" size="sm">
-              {offer.unavailable_reason === "rented" ? "Rented" : "Unavailable"}
-            </StatusBadge>
-          )}
+          <div className="flex shrink-0 flex-col items-end gap-1">
+            {offer.available ? (
+              <StatusBadge tone="good" size="sm">
+                Available
+              </StatusBadge>
+            ) : (
+              <StatusBadge tone="muted" size="sm">
+                {offer.unavailable_reason === "rented" ? "Rented" : "Unavailable"}
+              </StatusBadge>
+            )}
+            {offer.visibility === "private" && !offer.mine && (
+              <StatusBadge tone="info" size="sm">
+                Shared with you
+              </StatusBadge>
+            )}
+          </div>
         </div>
         <div className="flex items-baseline gap-2">
-          <span className="text-2xl font-semibold tabular-nums">{formatINR(offer.price_paise_per_gpu_hour)}</span>
-          <span className="text-xs text-muted-foreground">per GPU-hour</span>
+          <span className="text-2xl font-semibold tabular-nums">{priceLabel(offer.price_paise_per_gpu_hour)}</span>
+          {offer.price_paise_per_gpu_hour > 0 && <span className="text-xs text-muted-foreground">per GPU-hour</span>}
         </div>
         <dl className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs">
           <dt className="text-muted-foreground">GPUs</dt>
@@ -74,7 +81,7 @@ function OfferCard({ offer, onRent, canRent }: { offer: Offer; onRent: () => voi
           <dt className="text-muted-foreground">Memory per GPU</dt>
           <dd className="text-right font-medium">{formatVram(offer.vram_bytes_per_gpu)}</dd>
           <dt className="text-muted-foreground">Whole listing, with {offer.fee_bps / 100}% fee</dt>
-          <dd className="text-right font-medium tabular-nums">{formatINR(offer.hourly_total_paise)}/hour</dd>
+          <dd className="text-right font-medium tabular-nums">{offer.hourly_total_paise === 0 ? "Free" : `${formatINR(offer.hourly_total_paise)}/hour`}</dd>
         </dl>
         {offer.description && <p className="line-clamp-2 text-xs text-muted-foreground">{offer.description}</p>}
       </div>
@@ -113,7 +120,8 @@ function RentDialog({ offer, onClose }: { offer: Offer | null; onClose: () => vo
     },
   })
   const available = billing.data?.available_paise ?? 0
-  const short = offer !== null && billing.data !== undefined && available < offer.hourly_total_paise
+  const free = offer?.hourly_total_paise === 0
+  const short = offer !== null && !free && billing.data !== undefined && available < offer.hourly_total_paise
   return (
     <Dialog
       open={offer !== null}
@@ -133,6 +141,11 @@ function RentDialog({ offer, onClose }: { offer: Offer | null; onClose: () => vo
                 These GPUs are yours alone until you release them. You are billed per second, whether or not a job is running.
               </DialogDescription>
             </DialogHeader>
+            {free ? (
+              <p className="text-sm">
+                {offer.provider.name} shares this listing with you at no charge. Nothing is billed and no credit is needed.
+              </p>
+            ) : (
             <dl className="grid grid-cols-[1fr_auto] gap-x-6 gap-y-1.5 text-sm">
               <dt className="text-muted-foreground">
                 {offer.provider.name}: {offer.gpu_count} × {formatINR(offer.price_paise_per_gpu_hour)}
@@ -145,6 +158,7 @@ function RentDialog({ offer, onClose }: { offer: Offer | null; onClose: () => vo
               <dt className="text-muted-foreground">Your available credit</dt>
               <dd className="text-right tabular-nums">{billing.data ? formatINR(available) : "…"}</dd>
             </dl>
+            )}
             {rent.isError ? (
               <p role="alert" className="text-sm text-destructive">
                 {message(rent.error)}
@@ -157,7 +171,7 @@ function RentDialog({ offer, onClose }: { offer: Offer | null; onClose: () => vo
                 </Link>
                 .
               </p>
-            ) : (
+            ) : free ? null : (
               <p className="text-sm text-muted-foreground">
                 The rental ends by itself if your credit runs out, and its jobs stop.
               </p>
@@ -168,7 +182,7 @@ function RentDialog({ offer, onClose }: { offer: Offer | null; onClose: () => vo
               </Button>
               <Button onClick={() => rent.mutate(offer)} disabled={rent.isPending || short}>
                 {rent.isPending && <Spinner data-icon="inline-start" />}
-                Rent for {formatINR(offer.hourly_total_paise)}/hour
+                {free ? "Rent for free" : `Rent for ${formatINR(offer.hourly_total_paise)}/hour`}
               </Button>
             </DialogFooter>
           </>
@@ -198,6 +212,11 @@ function ListNodeBody({ onClose }: { onClose: () => void }) {
   const [region, setRegion] = useState("")
   const [price, setPrice] = useState("")
   const [description, setDescription] = useState("")
+  const [visibility, setVisibility] = useState<"public" | "private">("public")
+  const [sharedWith, setSharedWith] = useState("")
+  const slugs = parseSlugs(sharedWith)
+  const priv = visibility === "private"
+  const minPaise = priv ? 0 : 100
   const listable = (nodes.data ?? []).filter((n) => n.listable)
   const node = listable.find((n) => n.node_id === nodeId)
   const paise = rupeesToPaise(price)
@@ -210,6 +229,8 @@ function ListNodeBody({ onClose }: { onClose: () => void }) {
         region: region.trim(),
         description: description.trim(),
         price_paise_per_gpu_hour: paise ?? 0,
+        visibility,
+        ...(priv ? { shared_with: slugs } : {}),
       }),
     onSuccess: async () => {
       await refresh()
@@ -218,7 +239,8 @@ function ListNodeBody({ onClose }: { onClose: () => void }) {
     },
   })
   const blocked = (nodes.data ?? []).filter((n) => !n.listable)
-  const ready = Boolean(node) && title.trim().length >= 3 && region.trim().length >= 2 && paise !== null && paise >= 100
+  const ready =
+    Boolean(node) && title.trim().length >= 3 && region.trim().length >= 2 && paise !== null && paise >= minPaise && (!priv || slugs.length > 0)
 
   return (
     <>
@@ -282,21 +304,45 @@ function ListNodeBody({ onClose }: { onClose: () => void }) {
             <FieldLabel htmlFor="list-title">Title</FieldLabel>
             <Input id="list-title" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={120} placeholder="e.g. 4× H100 80 GB, Tier III, Mumbai" />
           </Field>
+          <Field>
+            <FieldLabel htmlFor="list-visibility">Who can rent it</FieldLabel>
+            <Select value={visibility} onValueChange={(v) => setVisibility(v as "public" | "private")}>
+              <SelectTrigger id="list-visibility" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="public">Public: anyone on the marketplace</SelectItem>
+                <SelectItem value="private">Private: only workspaces you name</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          {priv && (
+            <Field>
+              <FieldLabel htmlFor="list-share">Share with workspaces</FieldLabel>
+              <Input id="list-share" value={sharedWith} onChange={(e) => setSharedWith(e.target.value)} placeholder="partner-university, other-lab" autoComplete="off" spellCheck={false} />
+              <FieldDescription>
+                Workspace slugs (shown on their Settings page), separated by commas. Only they can see or rent this listing, and you can price it at ₹0 to share it free.
+              </FieldDescription>
+            </Field>
+          )}
           <div className="grid gap-4 sm:grid-cols-2">
             <Field>
               <FieldLabel htmlFor="list-region">Location</FieldLabel>
               <Input id="list-region" value={region} onChange={(e) => setRegion(e.target.value)} maxLength={80} placeholder="e.g. Mumbai" />
             </Field>
-            <Field data-invalid={price !== "" && (paise === null || paise < 100)}>
+            <Field data-invalid={price !== "" && (paise === null || paise < minPaise)}>
               <FieldLabel htmlFor="list-price">Price per GPU-hour (₹)</FieldLabel>
-              <Input id="list-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder="e.g. 180" />
-              {price !== "" && (paise === null || paise < 100) && <FieldError>Enter an amount of ₹1 or more, like 180 or 180.50.</FieldError>}
+              <Input id="list-price" inputMode="decimal" value={price} onChange={(e) => setPrice(e.target.value)} placeholder={priv ? "e.g. 0 to share free" : "e.g. 180"} />
+              {price !== "" && (paise === null || paise < minPaise) && (
+                <FieldError>{priv ? "Enter an amount in rupees, like 0, 180 or 180.50." : "Enter an amount of ₹1 or more, like 180 or 180.50."}</FieldError>
+              )}
             </Field>
           </div>
           <Field>
             <FieldLabel htmlFor="list-desc">Description (optional)</FieldLabel>
             <Textarea id="list-desc" value={description} onChange={(e) => setDescription(e.target.value)} maxLength={2000} rows={3} placeholder="Network, storage, uptime, anything a renter should know" />
           </Field>
+          {node && paise === 0 && priv && <FieldDescription>Shared free: partners pay nothing and you earn nothing.</FieldDescription>}
           {node && paise !== null && paise >= 100 && (
             <FieldDescription>
               You earn {formatINR(paise * node.gpu_count)} per hour while it is rented. The renter pays that plus Meridian's {fee / 100}% fee.
@@ -373,7 +419,7 @@ function RentalsTable({ canAdmin }: { canAdmin: boolean }) {
           </StatusBadge>
         ),
     },
-    { id: "rate", header: "Per hour", meta: { align: "right" }, accessorFn: (r) => r.hourly_total_paise, cell: ({ getValue }) => formatINR(getValue() as number) },
+    { id: "rate", header: "Per hour", meta: { align: "right" }, accessorFn: (r) => r.hourly_total_paise, cell: ({ getValue }) => priceLabel(getValue() as number) },
     { id: "time", header: "Duration", meta: { align: "right" }, accessorFn: (r) => r.seconds, cell: ({ getValue }) => formatSeconds(getValue() as number) },
     {
       id: "amount",
@@ -456,6 +502,7 @@ function ListingsTable({ canAdmin, onList }: { canAdmin: boolean; onList: () => 
           <span className="font-medium">{o.title}</span>
           <span className="text-xs text-muted-foreground">
             {gpus(o)} · {formatVram(o.vram_bytes_per_gpu)} · {o.region}
+            {o.visibility === "private" && ` · Private, shared with ${(o.shared_with ?? []).join(", ") || "no one yet"}`}
           </span>
         </div>
       ),
@@ -483,8 +530,8 @@ function ListingsTable({ canAdmin, onList }: { canAdmin: boolean; onList: () => 
           </StatusBadge>
         ),
     },
-    { id: "price", header: "Per GPU-hour", meta: { align: "right" }, accessorFn: (o) => o.price_paise_per_gpu_hour, cell: ({ getValue }) => formatINR(getValue() as number) },
-    { id: "earn", header: "You earn per hour", meta: { align: "right" }, accessorFn: (o) => o.hourly_paise, cell: ({ getValue }) => formatINR(getValue() as number) },
+    { id: "price", header: "Per GPU-hour", meta: { align: "right" }, accessorFn: (o) => o.price_paise_per_gpu_hour, cell: ({ getValue }) => priceLabel(getValue() as number) },
+    { id: "earn", header: "You earn per hour", meta: { align: "right" }, accessorFn: (o) => o.hourly_paise, cell: ({ getValue }) => priceLabel(getValue() as number) },
     {
       id: "actions",
       header: () => <span className="sr-only">Actions</span>,

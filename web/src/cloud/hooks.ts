@@ -64,6 +64,7 @@ export function useJobTemplates() {
   })
 }
 export const useBilling = () => useLive("billing", cloud.billing)
+export const useUsage = (month: string) => useLive("usage", (ws, s) => cloud.usage(ws, month, s), true, [month])
 export const useListableNodes = (enabled: boolean) => useLive("listable-nodes", cloud.listableNodes, enabled)
 
 export function useApiKeys(enabled = true) {

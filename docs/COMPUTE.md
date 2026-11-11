@@ -176,15 +176,90 @@ In the console, open **Marketplace → List a node**. The node must be online wi
 - You can end a rental (for maintenance). The renter's jobs fail and you are paid for the time used.
 - **You cannot see what a renter runs.** The node page shows that a GPU is taken and nothing else: not the image, arguments, environment or logs.
 
+## Share with partner institutes
+
+A consortium or a pair of partner universities can share GPUs without a public market.
+
+In the console, **Marketplace → List a node**, choose **Private: only workspaces you name** and type the partners' workspace slugs, separated by commas (a slug is shown on each workspace's Settings page). Over the API, `POST /api/w/{ws}/market/offers` and `PATCH /api/w/{ws}/market/offers/{id}` take `visibility` (`"public"` or `"private"`, default public) and `shared_with` (a list of slugs; a workspace id also works).
+
+- A private listing is listed to, and rentable by, only the workspaces in `shared_with` and its owner. Everyone else gets `404 listing not found` when they try to rent it, the same answer as for an id that does not exist, and a job that asks to run on it (`offer_id`) gets the same 404.
+- A slug that matches no workspace is refused with `400 UNKNOWN_WORKSPACE` naming it. Slugs are lower-cased, de-duplicated, and your own is dropped. Each partner is **stored by its workspace id**, not its slug: if a partner's slug ever changes, the listing stays shared with that workspace (and is shown with its current slug), and a workspace that later takes the old slug gets nothing. An edit that does not send `shared_with` keeps the current partners. A partner sees `visibility: "private"` on the listing (the console shows "Shared with you") but not who else it is shared with; only the owner sees `shared_with`.
+- A private listing may be priced at **₹0** to share it free. A public listing keeps the ₹1 minimum, including when a free private listing is made public, which needs a price. A price is always required: a missing one is an error, never "free".
+- A free rental needs no credit, posts **no ledger rows** (no zero-amount rows), and is never ended for lack of credit. It still holds the GPUs exclusively until released, and the provider can still end it. If a workspace runs out of credit, its paid rentals end and its free ones keep running.
+- **Removing a partner ends its rental.** When an edit leaves a workspace that is renting the listing off `shared_with`, its rental ends at once with `end_reason: "sharing_ended"` (billed up to that second if it was paid), its jobs on the node stop and are marked failed, and it can no longer rent the listing or run jobs on the old rental (404). Adding partners ends nothing.
+- **A public listing never keeps a free rental.** Making a free private listing public needs a price of at least ₹1, and a ₹0 rental that is running on it ends the same way (`sharing_ended`). A paid rental by a partner continues at the price it started at, since the partner can still rent a public listing.
+- Pausing a listing does not end a rental; it only stops new ones.
+- The console shows a free price as "Free", and the CLI as `free`.
+
+## Public listings feed (for a website)
+
+`GET /api/public/offers` needs no sign-in and lists what is on the marketplace, for a website or a status page:
+
+```json
+{
+  "offers": [{
+    "title": "2× H100, Mumbai", "region": "Mumbai", "gpu_model": "NVIDIA H100", "gpu_count": 2,
+    "vram_bytes_per_gpu": 85899345920, "price_paise_per_gpu_hour": 10000, "hourly_total_paise": 20400,
+    "available": true, "provider_name": "Mumbai DC"
+  }],
+  "total_offers": 1,
+  "summary": {
+    "available_gpus": 2, "gpus_by_model": {"NVIDIA H100": 2}, "regions": ["Mumbai"],
+    "lowest_price_paise_per_gpu_hour": 10000
+  }
+}
+```
+
+- Only **public, listed** offers appear. Private, paused and removed listings never do. A rented or offline listing stays in `offers` with `available: false`.
+- `hourly_total_paise` is the whole listing per hour with the Meridian fee, as a renter would pay it. Money is integer paise.
+- `summary` counts **available** listings only: `available_gpus`, GPUs per model, the regions they are in, and the lowest price per GPU-hour (`null` when nothing is available). With nothing listed, `offers` is `[]` and the summary is zeros and empties.
+- `offers` holds at most **100** listings, cheapest available first; `total_offers` is how many public listings there are, and `summary` covers all of them. No node, device, listing or workspace ids, and no emails, are included. `title`, `region` and `provider_name` are text the provider typed, so a website must escape them.
+- The answer is built once and kept in memory for **30 seconds** (per control process), so a busy page cannot load the database, and a price change can take up to 30 seconds to show. The response carries `Cache-Control: public, max-age=30`; it is the only `/api` route that is not `no-store`.
+- It exists only on a cloud-mode control plane (`MERIDIAN_CONTROL_CLOUD=1`). A standalone control plane answers 404. It sends no CORS headers, so call it from your server or from a page served by the cloud itself.
+
+## GPU-hour usage and monthly quotas
+
+A department head can see who used how much GPU time and cap it per person. This is for jobs on the workspace's own nodes; rented GPUs are already limited by prepaid credit.
+
+```bash
+meridian compute usage --month 2026-11          # per person, with group and quota
+curl -H "Authorization: Bearer $MERIDIAN_API_KEY" \
+  "$MERIDIAN_CLOUD_URL/api/w/$MERIDIAN_WORKSPACE/usage?month=2026-11&format=csv" > usage.csv
+```
+
+In the console, **Billing → GPU-hour usage** has a month picker, the per-person table, group totals and a CSV download.
+
+**Who sees what.** Owners and admins (and admin API keys) see every person and group (`"scope": "workspace"`). Operators and viewers see only their own row and the workspace totals (`"scope": "self"`, `groups: []`, since a group can be one person); a non-admin API key sees the row of the member who created it. The CSV follows the same rule.
+
+**How usage is counted**
+
+- GPU-seconds for a replica = GPUs × (finished − started). A replica that is still running counts up to now, and one that never started counts nothing. Hours are shown to two decimals.
+- A month is a **UTC calendar month**. A job that spans midnight on the 1st is split between the two months.
+- A job counts for the member who submitted it. A job submitted with an API key counts for the member who created the key. This is **recorded on the job when it is submitted** (`attributed_to`), so creating, renaming or revoking keys later never moves hours between people or off anyone's quota. A key created by an admin API key belongs to the member behind that key. (Jobs from before this was recorded are attributed by key name: to the creator if exactly one person made keys with that name, otherwise to `key:<name>`.)
+- **Own** usage is on nodes the workspace owns. **Rented** usage is a job pinned to a rental, or any replica placed on a node the workspace does not own.
+- The report lists every member (including those with no usage) and anyone who used GPUs but has since left. Each row has `gpu_hours_own`, `gpu_hours_rented`, `jobs` (jobs that started), `quota_gpu_hours` and `remaining_gpu_hours`; the response also has per-group and workspace totals. The CSV has the per-person rows. Names that start with `=`, `+`, `-` or `@` are prefixed with `'` so a spreadsheet does not run them.
+
+**Quotas**
+
+- An admin sets a person's **group** (up to 64 characters, for example `vision-lab`) and **monthly GPU-hour quota** under **Settings → Members → Limits**, or with `PATCH /api/w/{ws}/members/{user_id}/compute` `{"group": "...", "gpu_hour_quota": 40}`. A workspace default applies to members with no quota of their own: Settings → Members, or `PATCH /api/w/{ws}/compute-settings` `{"default_gpu_hour_quota": 20}`. Empty or `null` means unlimited. A quota of `0` closes the workspace's own nodes to that person.
+- Owners and admins are not exempt: they are limited by their own quota, or by the default if they have none. There is no way to exempt one member from a default; leave the default empty and set quotas individually.
+- When a member's own-node usage this month has reached the quota, a new job is refused with `409 QUOTA_EXCEEDED`, saying what was used and when the quota resets (the first of next month, UTC). A job pinned to a rental or a listing (`rental_id`, `offer_id`) is not checked: it runs on another workspace's GPUs (paid with credit, or free from a partner) and cannot reach your own nodes. A template is applied, and the merged job validated, before the quota check, so a template cannot get round it.
+- A job with several replicas or several GPUs counts every GPU: 2 replicas × 4 GPUs for one hour is 8 GPU-hours.
+- A job that was already queued when its submitter went over quota stays queued with "waiting: monthly GPU-hour quota used" and does not take a GPU on the workspace's own nodes. It can still be placed on rented GPUs, and it starts when the quota is raised or the month rolls over.
+- **Running jobs are never stopped.** A long job can take a person past their quota; the quota stops the next job, not this one.
+- **At the boundary.** Quotas are checked, under the scheduler's lock, when a job is submitted and when a queued job is considered (every background pass). The check counts hours already used, not hours a job will use, so a member below quota can still start a job that takes them over it, and a job that is already running when the quota is reached, or when the month ends, runs on. Its hours count in the month they are used. A member can therefore exceed a quota by what their running jobs use; an admin who needs a hard stop cancels the job.
+
 ## Roles
 
 | Action | Viewer | Operator | Admin |
 | --- | --- | --- | --- |
 | See jobs, listings, billing | ✓ | ✓ | ✓ |
 | Run and cancel jobs, read a service's token | | ✓ | ✓ |
-| Rent, list, create API keys | | | ✓ |
+| See your own GPU-hour usage and the workspace total | ✓ | ✓ | ✓ |
+| See everyone's GPU-hour usage and group totals | | | ✓ |
+| Set groups and quotas, rent, list (public or private), create API keys | | | ✓ |
 
-API keys (`mck_…`) act in one workspace with the role you choose. They cannot manage members.
+API keys (`mck_…`) act in one workspace with the role you choose. They cannot manage members. A key's jobs count for the member who created it, against that member's quota.
 
 ## Adding credit and paying providers
 
@@ -207,7 +282,7 @@ A payment reference can be credited only once, and a payout reference can be use
 | `MERIDIAN_CONTROL_COMPUTE_TICK` | `30` | Seconds between background passes (metering, credit, timeouts, queue) |
 | `MERIDIAN_CONTROL_NODE_LOST_SECONDS` | `300` | Silence after which a node's running replicas are declared lost |
 
-Upgrading an existing cloud: run `meridian-control migrate`. The migration only adds tables and one column.
+Upgrading an existing cloud: run `meridian-control migrate`. The migrations only add tables and columns; existing listings stay public.
 
 ## What it does not do yet
 
@@ -216,13 +291,18 @@ Upgrading an existing cloud: run `meridian-control migrate`. The migration only 
 - **Secrets.** Job environment variables are stored as plain text. Do not put tokens in them.
 - **Storage.** No managed volumes or datasets. A job brings and saves its own data.
 - **Partial rentals.** A listing is rented whole, to one renter at a time.
+- **Partner groups.** A private listing names workspaces one by one; there are no consortium objects, invitations to accept, or per-partner prices.
 - **Isolation.** A job is a hardened Docker container, not a virtual machine. A provider accepting arbitrary images should run on hosts it is prepared to treat that way.
 - **Restarts.** A failed job or service is not restarted.
 - **Multiple control replicas.** Metering and scheduling are serialized by an in-process lock, so run compute on one control replica. A multi-replica Postgres deployment needs a database advisory lock first.
-- **Scale.** Scheduling is first-come-first-served with no priorities or quotas beyond 200 unfinished jobs per workspace.
+- **Scale.** Scheduling is first-come-first-served with no priorities, and no limit beyond the GPU-hour quotas above and 200 unfinished jobs per workspace.
+- **Usage history.** Usage is computed from job records each time it is asked for. There are no stored monthly statements, no per-group quotas, and no alerts when someone nears a quota.
 
 ## Validate it yourself
 
 1. `pytest -q tests/control/test_compute.py` in this repo and `pytest -q tests/test_jobs.py` in `meridian-node`.
 2. Start `meridian-control run` in cloud mode, enroll a node with `policy.jobs_enabled: true`, and run `meridian compute run --follow --image <digest-pinned image> -- echo hello`.
 3. List the node from one workspace, credit a second, rent from the second, and check that the two balances and the platform fee add up to the credit.
+4. Set a member's quota to 1 GPU-hour, run a job for longer than that, and check that the job keeps running, the next `meridian compute run` fails with `QUOTA_EXCEEDED`, and `meridian compute usage` shows the hours.
+5. List a node as private, shared with a second workspace at ₹0. Check that a third workspace gets a 404 on it, that the second rents it with no credit, and that the ledger has no new rows.
+6. `curl -i $MERIDIAN_CLOUD_URL/api/public/offers` with no cookie: public listings only, `Cache-Control: public, max-age=30`.

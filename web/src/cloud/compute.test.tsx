@@ -9,9 +9,9 @@ import { makeQueryClient } from "@/lib/query-client"
 import { SettingsProvider } from "@/providers/settings-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
 
-import { rupeesToPaise, type Billing, type CloudInfo, type JobDetail, type JobTemplate, type Offer, type Rental, type WorkspaceRole } from "./api"
+import { rupeesToPaise, type Billing, type CloudInfo, type JobDetail, type JobTemplate, type Member, type Offer, type Rental, type Usage, type WorkspaceRole } from "./api"
 import { cloudRoutes } from "./app"
-import { endReason, joinArgs, parseEnv, serviceHint, splitArgs } from "./compute"
+import { endReason, joinArgs, parseEnv, parseSlugs, priceLabel, serviceHint, splitArgs } from "./compute"
 import { CloudSessionProvider } from "./session"
 
 const INFO: CloudInfo = {
@@ -45,6 +45,7 @@ const OFFER: Offer = {
   unavailable_reason: "",
   provider: { name: "Mumbai DC", slug: "mumbai-dc" },
   mine: false,
+  visibility: "public",
   created_at: null,
 }
 
@@ -107,6 +108,25 @@ const JOB: JobDetail = {
   ],
 }
 
+const USAGE: Usage = {
+  month: "2026-11",
+  period_start: "2026-11-01T00:00:00Z",
+  period_end: "2026-12-01T00:00:00Z",
+  scope: "workspace",
+  default_gpu_hour_quota: 20,
+  people: [
+    { email: "stu@iit.ac.in", name: "Stu Dent", group: "vision-lab", gpu_hours_own: 12.5, gpu_hours_rented: 3, jobs: 4, quota_gpu_hours: 20, remaining_gpu_hours: 7.5 },
+    { email: "head@iit.ac.in", name: "", group: "", gpu_hours_own: 1, gpu_hours_rented: 0, jobs: 1, quota_gpu_hours: null, remaining_gpu_hours: null },
+  ],
+  groups: [
+    { group: "vision-lab", members: 1, jobs: 4, gpu_hours_own: 12.5, gpu_hours_rented: 3 },
+    { group: "", members: 1, jobs: 1, gpu_hours_own: 1, gpu_hours_rented: 0 },
+  ],
+  totals: { gpu_hours_own: 13.5, gpu_hours_rented: 3, jobs: 5 },
+}
+
+const MEMBER: Member = { ...USER, role: "operator", joined_at: null, last_login_at: null, group: "vision-lab", gpu_hour_quota: null }
+
 const TEMPLATES: JobTemplate[] = [
   {
     id: "jupyterlab",
@@ -152,6 +172,9 @@ function serve(role: WorkspaceRole, routes: Record<string, Handler>, platformAdm
     "/api/w/w1/billing": () => json(200, billing(1_000_000)),
     "/api/w/w1/jobs": () => json(200, { jobs: [] }),
     "/api/w/w1/api-keys": () => json(200, { keys: [] }),
+    "/api/w/w1/usage": () => json(200, USAGE),
+    "/api/w/w1/members": () => json(200, { members: [MEMBER], invitations: [] }),
+    "/api/w/w1": () => json(200, { id: "w1", slug: "acme", name: "Acme", role, created_at: null, members: 1, default_gpu_hour_quota: 20 }),
     "/api/w/w1/job-templates": () => json(200, { templates: TEMPLATES }),
   }
   const all = { ...base, ...routes }
@@ -167,6 +190,11 @@ function serve(role: WorkspaceRole, routes: Record<string, Handler>, platformAdm
     }),
   )
   return calls
+}
+
+/** jsdom lacks the pointer APIs Radix's Select uses. */
+function stubPointerApis() {
+  Object.assign(Element.prototype, { hasPointerCapture: () => false, setPointerCapture: () => undefined, releasePointerCapture: () => undefined, scrollIntoView: () => undefined })
 }
 
 function renderAt(path: string) {
@@ -241,7 +269,15 @@ describe("compute helpers", () => {
   it("explains why a rental ended", () => {
     expect(endReason("insufficient_funds")).toBe("Ran out of credit")
     expect(endReason("node_lost")).toBe("Node went offline")
+    expect(endReason("sharing_ended")).toBe("Listing no longer shared with you")
     expect(endReason("something_new")).toBe("Ended")
+  })
+
+  it("says Free for a free listing and parses typed workspace slugs", () => {
+    expect(priceLabel(0)).toBe("Free")
+    expect(priceLabel(18050)).toBe("₹180.50")
+    expect(parseSlugs(" Partner-Uni, other-lab ,partner-uni\nthird")).toEqual(["partner-uni", "other-lab", "third"])
+    expect(parseSlugs("  ,, ")).toEqual([])
   })
 })
 
@@ -459,5 +495,158 @@ describe("Billing", () => {
     await user.click(record)
     await waitFor(() => expect(calls.some((c) => c.path === "/api/platform/credits")).toBe(true))
     expect(calls.find((c) => c.path === "/api/platform/credits")?.body).toEqual({ workspace: "w1", amount_paise: 2_500_000, reference: "UTR-778899", memo: "" })
+  })
+})
+
+describe("GPU-hour usage and quotas", () => {
+  it("lists GPU-hours per person and group, follows the month picker, and links the CSV", async () => {
+    const calls = serve("admin", {})
+    const user = userEvent.setup()
+    renderAt("/billing")
+
+    expect(await screen.findByText("GPU-hour usage")).toBeInTheDocument()
+    expect(await screen.findByText("Stu Dent")).toBeInTheDocument()
+    expect(screen.getAllByText("12.50")).toHaveLength(2) // the person and the group
+    expect(screen.getByText("7.50")).toBeInTheDocument() // left of a 20 GPU-hour quota
+    expect(screen.getAllByText("vision-lab").length).toBeGreaterThan(0)
+    expect(screen.getByText("No group")).toBeInTheDocument()
+    expect(screen.getByText("Unlimited")).toBeInTheDocument()
+    expect(screen.getByText(/Workspace total in 2026-11: 13.50 own and 3.00 rented GPU-hours across 5 jobs/)).toBeInTheDocument()
+
+    const csv = screen.getByRole("link", { name: /CSV/ })
+    expect(csv.getAttribute("href")).toMatch(/^\/api\/w\/w1\/usage\?format=csv&month=\d{4}-\d{2}$/)
+    expect(csv).toHaveAttribute("download")
+
+    stubPointerApis()
+    await user.click(screen.getByRole("combobox", { name: "Month" }))
+    const options = await screen.findAllByRole("option")
+    expect(options).toHaveLength(12)
+    await user.click(options[1])
+    await waitFor(() => expect(calls.filter((c) => c.path === "/api/w/w1/usage").length).toBeGreaterThan(1))
+  })
+
+  it("shows a non-admin only their own row and says why", async () => {
+    serve("operator", {
+      "/api/w/w1/usage": () => json(200, { ...USAGE, scope: "self", people: [USAGE.people[0]], groups: [] }),
+    })
+    renderAt("/billing")
+    expect(await screen.findByText("Stu Dent")).toBeInTheDocument()
+    expect(screen.getByText("You see your own usage. Admins see everyone's.")).toBeInTheDocument()
+    expect(screen.queryByText("head@iit.ac.in")).not.toBeInTheDocument()
+    expect(screen.queryByText("No group")).not.toBeInTheDocument()
+  })
+
+  it("lets admins set a member's group and quota and the workspace default", async () => {
+    const calls = serve("admin", {
+      "PATCH /api/w/w1/members/u1/compute": (b) => json(200, { user_id: "u1", ...(b as object) }),
+      "PATCH /api/w/w1/compute-settings": (b) => json(200, b),
+    })
+    const user = userEvent.setup()
+    renderAt("/settings?tab=members")
+
+    const def = await screen.findByLabelText("Default quota (GPU-hours per month)")
+    await waitFor(() => expect(def).toHaveValue("20"))
+    await user.clear(def)
+    await user.type(def, "x")
+    expect(await screen.findByText(/Enter a whole number of GPU-hours/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save" })).toBeDisabled()
+    await user.clear(def)
+    await user.type(def, "40")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/w/w1/compute-settings")?.body).toEqual({ default_gpu_hour_quota: 40 }))
+
+    expect(await screen.findByText("vision-lab")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: /Compute limits for Ada/ }))
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByLabelText("Group")).toHaveValue("vision-lab")
+    await user.clear(within(dialog).getByLabelText("Group"))
+    await user.type(within(dialog).getByLabelText("Group"), "nlp")
+    await user.type(within(dialog).getByLabelText("Monthly GPU-hour quota"), "50")
+    await user.click(within(dialog).getByRole("button", { name: "Save limits" }))
+    await waitFor(() => expect(calls.find((c) => c.path === "/api/w/w1/members/u1/compute")?.body).toEqual({ group: "nlp", gpu_hour_quota: 50 }))
+  })
+
+  it("shows quotas read-only to operators", async () => {
+    serve("operator", {})
+    renderAt("/settings?tab=members")
+    expect(await screen.findByText("vision-lab")).toBeInTheDocument()
+    expect(screen.getByText("Default")).toBeInTheDocument() // the member has no quota of their own
+    expect(screen.queryByRole("button", { name: /Compute limits/ })).not.toBeInTheDocument()
+    expect(await screen.findByLabelText("Default quota (GPU-hours per month)")).toBeDisabled()
+  })
+})
+
+describe("Private sharing", () => {
+  const SHARED: Offer = {
+    ...OFFER,
+    id: "off_2",
+    title: "Consortium GPUs",
+    visibility: "private",
+    price_paise_per_gpu_hour: 0,
+    hourly_paise: 0,
+    hourly_fee_paise: 0,
+    hourly_total_paise: 0,
+    provider: { name: "IIT Madras", slug: "iit-madras" },
+  }
+
+  it("marks a private listing as shared with you, shows it as free, and rents it without credit", async () => {
+    const calls = serve("admin", {
+      "/api/w/w1/market/offers": () => json(200, { offers: [SHARED, OFFER] }),
+      "/api/w/w1/billing": () => json(200, billing(0)),
+      "POST /api/w/w1/market/rentals": () => json(201, { ...RENTAL, price_paise_per_gpu_hour: 0, hourly_total_paise: 0 }),
+    })
+    const user = userEvent.setup()
+    renderAt("/marketplace")
+
+    expect(await screen.findByText("Consortium GPUs")).toBeInTheDocument()
+    expect(screen.getAllByText("Shared with you")).toHaveLength(1) // the public listing is not marked
+    expect(screen.getAllByText("Free").length).toBeGreaterThan(0)
+    expect(screen.queryByText("₹0.00")).not.toBeInTheDocument()
+
+    await user.click(screen.getAllByRole("button", { name: "Rent" })[0])
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/shares this listing with you at no charge/)).toBeInTheDocument()
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument() // no credit warning at zero balance
+    await user.click(within(dialog).getByRole("button", { name: "Rent for free" }))
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ offer_id: "off_2" }))
+  })
+
+  it("lists a node privately for named workspaces at ₹0", async () => {
+    stubPointerApis()
+    const calls = serve("admin", {
+      "/api/w/w1/market/listable-nodes": () =>
+        json(200, { nodes: [{ node_id: "node_1", display_name: "gpu-a", gpu_model: "NVIDIA H100", gpu_count: 2, vram_bytes_per_gpu: 80 * GB, listable: true, reason: "" }] }),
+      "POST /api/w/w1/market/offers": (b) => json(201, { ...OFFER, ...(b as object) }),
+    })
+    const user = userEvent.setup()
+    renderAt("/marketplace?tab=listings&list=1")
+
+    const dialog = await screen.findByRole("dialog")
+    await user.click(await within(dialog).findByRole("combobox", { name: "Node" }))
+    await user.click(await screen.findByRole("option", { name: /gpu-a/ }))
+    await user.type(within(dialog).getByLabelText("Title"), "Free for the consortium")
+    await user.type(within(dialog).getByLabelText("Location"), "Chennai")
+    await user.type(within(dialog).getByLabelText(/Price per GPU-hour/), "0")
+    const list = within(dialog).getByRole("button", { name: "List on marketplace" })
+    expect(list).toBeDisabled() // a public listing needs at least ₹1
+    expect(within(dialog).getByText(/Enter an amount of ₹1 or more/)).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("combobox", { name: "Who can rent it" }))
+    await user.click(await screen.findByRole("option", { name: /Private/ }))
+    expect(list).toBeDisabled() // private, but nobody to share it with yet
+    await user.type(within(dialog).getByLabelText("Share with workspaces"), "iit-delhi, nit-trichy")
+    expect(within(dialog).getByText("Shared free: partners pay nothing and you earn nothing.")).toBeInTheDocument()
+    await user.click(list)
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "POST" && c.path === "/api/w/w1/market/offers")?.body).toEqual({
+        node_id: "node_1",
+        title: "Free for the consortium",
+        region: "Chennai",
+        description: "",
+        price_paise_per_gpu_hour: 0,
+        visibility: "private",
+        shared_with: ["iit-delhi", "nit-trichy"],
+      }),
+    )
   })
 })

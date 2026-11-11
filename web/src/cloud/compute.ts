@@ -1,5 +1,17 @@
 // Pure helpers for the Compute pages (marketplace, jobs, billing).
 
+import { formatINR } from "@/lib/format"
+
+/** A listing's price. Sharing between partners can be free, and "₹0.00" reads like a bug. */
+export function priceLabel(paise: number): string {
+  return paise === 0 ? "Free" : formatINR(paise)
+}
+
+/** "a, b ,c" → ["a", "b", "c"]: workspace slugs typed by a person, without repeats. */
+export function parseSlugs(text: string): string[] {
+  return [...new Set(text.split(/[\s,]+/).map((s) => s.trim().toLowerCase()).filter(Boolean))]
+}
+
 /** Split a command line into arguments, honouring single and double quotes. */
 export function splitArgs(text: string): string[] {
   const out: string[] = []
@@ -61,6 +73,7 @@ export function endReason(reason: string): string {
       insufficient_funds: "Ran out of credit",
       job_finished: "Job finished",
       node_lost: "Node went offline",
+      sharing_ended: "Listing no longer shared with you",
     }[reason] ?? "Ended"
   )
 }

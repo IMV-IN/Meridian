@@ -5,6 +5,8 @@ API keys, and the desired-snapshot composition nodes consume."""
 from __future__ import annotations
 
 import threading
+from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from conftest import MutableClock, NodeKey
@@ -37,6 +39,7 @@ class FakeNode:
     def __init__(self, app, owner: TestClient, ws: str, gpus: int = 2, jobs_enabled: bool = True,
                  host: str = "10.0.0.5", model: str = "NVIDIA H100", vram_gb: int = 80, name: str = "gpu-host"):
         self.c = TestClient(app)
+        self.now = app.state.compute._now  # the test clock: replicas report when they started and finished
         token = owner.post(f"/api/w/{ws}/tokens", json={"auto_approve": True}, headers=CSRF).json()["token"]
         enrolled = self.c.post(
             "/control/v1/enroll", headers={"Authorization": f"Bearer {token}"},
@@ -70,9 +73,11 @@ class FakeNode:
         for key in [k for k in self.phases if k not in wanted]:
             del self.phases[key]  # dropped from the snapshot: the agent forgets it
         for key, j in wanted.items():
-            st = self.phases.setdefault(key, {"phase": "Running", "exit_code": None, "log_tail": ""})
+            st = self.phases.setdefault(
+                key, {"phase": "Running", "exit_code": None, "log_tail": "", "started_at": self.now().isoformat()}
+            )
             if j["desired_phase"] != "Running" and st["phase"] == "Running":
-                st["phase"] = "Cancelled"
+                st.update(phase="Cancelled", finished_at=self.now().isoformat())
         held = set(self.busy) | {
             d for k, st in self.phases.items() if st["phase"] == "Running" for d in wanted[k]["device_ids"]
         }
@@ -99,7 +104,7 @@ class FakeNode:
     def finish(self, job_id: str, exit_code: int = 0, rank: int = 0, logs: str = "") -> None:
         self.phases[(job_id, rank)].update(
             phase="Succeeded" if exit_code == 0 else "Failed", exit_code=exit_code, log_tail=logs,
-            message="" if exit_code == 0 else f"exit code {exit_code}",
+            message="" if exit_code == 0 else f"exit code {exit_code}", finished_at=self.now().isoformat(),
         )
         self.sync()
 
@@ -679,7 +684,8 @@ def test_tenant_work_is_invisible_to_the_host_and_listed_gpus_are_reserved_for_r
         assert leak not in detail
     view = world.provider.get(f"/api/w/{world.pws}/nodes/{world.node.node_id}").json()
     assert view["desired"]["snapshot"]["jobs"][0]["tenant"] is True
-    assert view["observation"]["jobs"][0] == {
+    seen = view["observation"]["jobs"][0]
+    assert seen.pop("started_at") and seen == {
         "job_id": secret_job["id"], "replica": 0, "phase": "Running", "tenant": True,
     }
 
@@ -784,6 +790,780 @@ def test_compute_overview(world):
     assert o["rented_gpus"] == 2 and o["jobs"] == {"scheduled": 1} and o["balance_paise"] == 10_000_00
     p = world.provider.get(f"/api/w/{world.pws}/compute/overview").json()
     assert p["gpus_rented_out"] == 2 and p["listings"] == 1
+
+
+# ── usage and quotas ──────────────────────────────────────────────────────
+
+
+class Lab:
+    """An institute: a head (owner), a student (operator), a dean (admin) and a viewer, one GPU node."""
+
+    def __init__(self, client, tmp_path, clock, gpus=2):
+        self.app, self.clock, self.client, self.tmp_path = client.app, clock, client, tmp_path
+        self.head = login(client, tmp_path, "head@iit.ac.in", clock)
+        self.ws = workspace(self.head, "IIT Lab")
+        self.node = FakeNode(client.app, self.head, self.ws, gpus=gpus)
+        for email, role in (("stu@iit.ac.in", "operator"), ("dean@iit.ac.in", "admin"), ("view@iit.ac.in", "viewer")):
+            self.head.post(f"/api/w/{self.ws}/invitations", headers=CSRF, json={"email": email, "role": role})
+        self.stu = login(client, tmp_path, "stu@iit.ac.in", clock)
+        self.dean = login(client, tmp_path, "dean@iit.ac.in", clock)
+        self.view = login(client, tmp_path, "view@iit.ac.in", clock)
+        members = self.head.get(f"/api/w/{self.ws}/members").json()["members"]
+        self.ids = {m["email"]: m["id"] for m in members}
+        self.node.sync()  # the sign-ins above moved the clock; renew the node's lease
+
+    def submit(self, c, **body):
+        return c.post(f"/api/w/{self.ws}/jobs", headers=CSRF, json={"image": IMAGE, **body})
+
+    def run(self, c, seconds, **body) -> dict:
+        """Submit a job, let it run for `seconds`, and let it succeed."""
+        r = self.submit(c, **body)
+        assert r.status_code == 201, r.text
+        job = r.json()
+        self.node.sync()
+        self.clock.advance(seconds)
+        self.node.finish(job["id"])
+        return job
+
+    def usage(self, c=None, month=None) -> dict:
+        r = (c or self.head).get(f"/api/w/{self.ws}/usage" + (f"?month={month}" if month else ""))
+        assert r.status_code == 200, r.text
+        return r.json()
+
+    def person(self, email, **kw) -> dict:
+        return next(p for p in self.usage(**kw)["people"] if p["email"] == email)
+
+    def set_compute(self, email, **body):
+        return self.head.patch(f"/api/w/{self.ws}/members/{self.ids[email]}/compute", headers=CSRF, json=body)
+
+
+@pytest.fixture
+def lab(client, tmp_path, clock):
+    return Lab(client, tmp_path, clock)
+
+
+def test_usage_is_gpu_hours_per_person_with_api_keys_attributed_to_their_creator(lab):
+    lab.run(lab.stu, 3600, gpus_per_replica=2)  # 2 GPU-hours
+    lab.run(lab.head, 1800)  # 0.5
+    key = lab.head.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ci", "role": "operator"}).json()
+    ci = TestClient(lab.app)
+    r = ci.post(f"/api/w/{lab.ws}/jobs", headers={"Authorization": f"Bearer {key['token']}"}, json={"image": IMAGE})
+    assert r.json()["created_by"] == "key:ci"
+    lab.node.sync()
+    lab.clock.advance(3600)
+    lab.node.finish(r.json()["id"])
+
+    u = lab.usage()
+    assert u["month"] == "2026-08"
+    by = {p["email"]: p for p in u["people"]}
+    assert (by["stu@iit.ac.in"]["gpu_hours_own"], by["stu@iit.ac.in"]["jobs"]) == (2.0, 1)
+    assert (by["head@iit.ac.in"]["gpu_hours_own"], by["head@iit.ac.in"]["jobs"]) == (1.5, 2)  # 0.5 + the key's 1.0
+    assert "key:ci" not in by and by["dean@iit.ac.in"]["gpu_hours_own"] == 0.0  # members with no usage are listed
+    assert u["totals"] == {"jobs": 3, "gpu_hours_own": 3.5, "gpu_hours_rented": 0.0}
+
+    # Attribution is recorded on the job at submit: a second admin making a key with the same name later
+    # cannot move the head's hours off the head (and so off the head's quota).
+    lab.dean.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ci", "role": "operator"})
+    assert lab.person("head@iit.ac.in")["gpu_hours_own"] == 1.5 and lab.person("dean@iit.ac.in")["gpu_hours_own"] == 0.0
+    assert "key:ci" not in {p["email"] for p in lab.usage()["people"]}
+
+
+def test_a_key_name_shared_by_two_admins_cannot_dodge_the_quota(lab):
+    # The dean made a key called "ci"; the head, out of quota, makes another "ci" and submits with it.
+    # Matching keys by name made "key:ci" nobody's, with no quota: the job ran free of the head's cap.
+    lab.dean.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ci", "role": "operator"})
+    lab.set_compute("head@iit.ac.in", gpu_hour_quota=1)
+    lab.run(lab.head, 3600)
+    key = lab.head.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ci", "role": "operator"}).json()
+    r = TestClient(lab.app).post(f"/api/w/{lab.ws}/jobs", headers={"Authorization": f"Bearer {key['token']}"},
+                                 json={"image": IMAGE})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+    # A key made by an admin key belongs to the member behind that key, not to the key's label.
+    admin_key = lab.head.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "boot", "role": "admin"})
+    made = TestClient(lab.app).post(f"/api/w/{lab.ws}/api-keys", json={"name": "child", "role": "operator"},
+                                    headers={"Authorization": f"Bearer {admin_key.json()['token']}"})
+    assert made.status_code == 201 and made.json()["created_by"] == "head@iit.ac.in"
+    r = TestClient(lab.app).post(f"/api/w/{lab.ws}/jobs", headers={"Authorization": f"Bearer {made.json()['token']}"},
+                                 json={"image": IMAGE})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+
+
+def test_usage_splits_rented_from_own_and_groups_roll_up(world):
+    world.rent()
+    rental = world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]
+    pinned = world.submit(gpus_per_replica=2, rental_id=rental["id"]).json()
+    world.node.sync()
+    world.clock.advance(1800)
+    world.node.finish(pinned["id"])
+    unpinned = world.submit(gpus_per_replica=1).json()  # lands on the rented GPUs: a node this workspace does not own
+    world.node.sync()
+    world.clock.advance(3600)
+    world.node.finish(unpinned["id"])
+
+    me = world.consumer.get(f"/api/w/{world.cws}/usage").json()["people"][0]
+    assert me["email"] == "ml@startup.in" and me["gpu_hours_own"] == 0.0
+    assert me["gpu_hours_rented"] == 2.0 and me["jobs"] == 2  # 2 GPUs × 0.5 h + 1 GPU × 1 h
+
+    uid = world.consumer.get("/api/me").json()["user"]["id"]
+    world.consumer.patch(f"/api/w/{world.cws}/members/{uid}/compute", headers=CSRF, json={"group": "vision-lab"})
+    u = world.consumer.get(f"/api/w/{world.cws}/usage").json()
+    assert u["groups"] == [
+        {"group": "vision-lab", "members": 1, "jobs": 2, "gpu_hours_own": 0.0, "gpu_hours_rented": 2.0}
+    ]
+    assert u["totals"] == {"jobs": 2, "gpu_hours_own": 0.0, "gpu_hours_rented": 2.0}
+
+
+def test_usage_is_clipped_to_the_month_and_validates_it(tmp_path):
+    clock = MutableClock(datetime(2026, 8, 31, 22, 50, tzinfo=timezone.utc))
+    lab = Lab(make(tmp_path, clock, admin_emails=(ADMIN,)), tmp_path, clock)
+    clock._now = datetime(2026, 8, 31, 23, 0, tzinfo=timezone.utc)
+    lab.node.sync()
+    job = lab.submit(lab.stu).json()
+    lab.node.sync()
+    clock.advance(3 * 3600)  # until 02:00 on 1 September
+    lab.node.finish(job["id"])
+    assert lab.person("stu@iit.ac.in", month="2026-08")["gpu_hours_own"] == 1.0
+    assert lab.person("stu@iit.ac.in", month="2026-09")["gpu_hours_own"] == 2.0
+    assert lab.person("stu@iit.ac.in")["gpu_hours_own"] == 2.0  # defaults to the current UTC month
+    assert lab.person("stu@iit.ac.in", month="2026-07")["gpu_hours_own"] == 0.0
+    for bad in ("2026-13", "2026-8", "last", "1999-01"):
+        assert lab.head.get(f"/api/w/{lab.ws}/usage?month={bad}").status_code == 400, bad
+    assert lab.head.get(f"/api/w/{lab.ws}/usage?format=xml").status_code == 400
+
+
+def test_a_job_that_never_started_uses_no_gpu_hours_and_a_running_one_counts_up_to_now(lab):
+    lab.submit(lab.stu, min_vram_gb=500)  # no such GPU: stays queued
+    lab.clock.advance(7200)
+    assert lab.person("stu@iit.ac.in")["gpu_hours_own"] == 0.0 and lab.person("stu@iit.ac.in")["jobs"] == 0
+    lab.node.sync()
+    lab.submit(lab.stu)
+    lab.node.sync()
+    lab.clock.advance(5400)
+    assert lab.person("stu@iit.ac.in")["gpu_hours_own"] == 1.5
+
+
+def test_usage_csv_is_for_finance_and_defuses_spreadsheet_formulas(lab):
+    lab.run(lab.stu, 3600)
+    lab.set_compute("stu@iit.ac.in", group="=cmd|' /c calc'!A1", gpu_hour_quota=10)
+    r = lab.dean.get(f"/api/w/{lab.ws}/usage?format=csv")  # an admin exports everyone
+    assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
+    assert r.headers["content-disposition"] == 'attachment; filename="meridian-usage-2026-08.csv"'
+    lines = r.text.splitlines()
+    assert lines[0] == "email,name,group,gpu_hours_own,gpu_hours_rented,jobs,quota_gpu_hours,remaining_gpu_hours"
+    stu = next(line for line in lines if line.startswith("stu@iit.ac.in"))
+    assert stu.endswith(",1.0,0.0,1,10,9.0") and ",'=cmd" in stu
+    head = next(line for line in lines if line.startswith("head@iit.ac.in"))
+    assert head.endswith(",0.0,0.0,0,,")  # no quota: empty cells, not "None"
+
+
+def test_quota_rejects_new_jobs_but_never_kills_a_running_one(lab):
+    assert lab.set_compute("stu@iit.ac.in", group="vision-lab", gpu_hour_quota=2).json() == {
+        "user_id": lab.ids["stu@iit.ac.in"], "group": "vision-lab", "gpu_hour_quota": 2,
+    }
+    job = lab.submit(lab.stu).json()
+    lab.node.sync()
+    lab.clock.advance(3 * 3600)  # three hours on a two-hour quota
+    lab.node.sync()
+    lab.app.state.compute.tick()
+    assert lab.head.get(f"/api/w/{lab.ws}/jobs/{job['id']}").json()["status"] == "running"  # not killed
+
+    r = lab.submit(lab.stu)
+    assert r.status_code == 409 and r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+    msg = r.json()["error"]["message"]
+    assert "3.00 of 2 GPU-hours" in msg and "2026-09-01" in msg and "2026-08" in msg
+    assert lab.person("stu@iit.ac.in")["remaining_gpu_hours"] == 0.0
+    assert lab.submit(lab.head).status_code == 201  # no quota, no limit
+
+
+def test_quota_binds_admins_and_their_keys_and_a_workspace_default_covers_members_without_one(lab):
+    lab.run(lab.head, 3600)
+    lab.run(lab.dean, 3600)
+    key = lab.dean.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "nightly", "role": "operator"}).json()
+    cli = TestClient(lab.app)
+    auth = {"Authorization": f"Bearer {key['token']}"}
+    key_job = cli.post(f"/api/w/{lab.ws}/jobs", headers=auth, json={"image": IMAGE})
+    assert key_job.status_code == 201  # no quota yet
+    lab.node.sync()
+    lab.clock.advance(3600)
+    lab.node.finish(key_job.json()["id"])  # the dean has used 2 GPU-hours, one of them through the key
+
+    default = lab.head.patch(f"/api/w/{lab.ws}/compute-settings", headers=CSRF, json={"default_gpu_hour_quota": 2})
+    assert default.json() == {"default_gpu_hour_quota": 2}
+    assert lab.usage()["default_gpu_hour_quota"] == 2 and lab.person("stu@iit.ac.in")["quota_gpu_hours"] == 2
+    # The dean (an admin) is at the default, and so is the dean's key; the head has used 1 of 2.
+    assert lab.submit(lab.dean).json()["error"]["code"] == "QUOTA_EXCEEDED"
+    assert cli.post(f"/api/w/{lab.ws}/jobs", headers=auth, json={"image": IMAGE}).json()["error"]["code"] == (
+        "QUOTA_EXCEEDED"
+    )
+    assert lab.submit(lab.head).status_code == 201
+    lab.set_compute("dean@iit.ac.in", gpu_hour_quota=100)  # a member's own quota replaces the default
+    assert lab.submit(lab.dean).status_code == 201
+    # Clearing the default lifts the limit for members without a quota of their own.
+    lab.head.patch(f"/api/w/{lab.ws}/compute-settings", headers=CSRF, json={"default_gpu_hour_quota": None})
+    assert lab.usage()["default_gpu_hour_quota"] is None and lab.person("stu@iit.ac.in")["quota_gpu_hours"] is None
+
+
+def test_queued_jobs_wait_for_the_quota_and_start_when_it_is_raised(client, tmp_path, clock):
+    lab = Lab(client, tmp_path, clock, gpus=1)
+    lab.set_compute("stu@iit.ac.in", gpu_hour_quota=2)
+    first = lab.submit(lab.stu).json()
+    second = lab.submit(lab.stu).json()
+    assert second["status"] == "queued" and "waiting for capacity" in second["message"]
+    lab.node.sync()
+    clock.advance(3 * 3600)
+    lab.node.finish(first["id"])  # the GPU frees, but the student has used 3 of 2 GPU-hours
+    lab.node.sync()
+    queued = lab.head.get(f"/api/w/{lab.ws}/jobs/{second['id']}").json()
+    assert queued["status"] == "queued" and queued["message"] == "waiting: monthly GPU-hour quota used"
+    lab.set_compute("stu@iit.ac.in", gpu_hour_quota=10)
+    lab.node.sync()
+    assert lab.head.get(f"/api/w/{lab.ws}/jobs/{second['id']}").json()["status"] in ("scheduled", "running")
+
+
+def test_rented_usage_and_pinned_jobs_are_outside_the_own_node_quota(world):
+    world.rent()
+    uid = world.consumer.get("/api/me").json()["user"]["id"]
+    world.consumer.patch(f"/api/w/{world.cws}/members/{uid}/compute", headers=CSRF, json={"gpu_hour_quota": 0})
+    # Quota 0 closes the workspace's own nodes. A job pinned to a rental is paid for with credit, so it runs.
+    rental = world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]
+    assert world.submit(rental_id=rental["id"]).status_code == 201
+    r = world.submit()
+    assert r.status_code == 409 and r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+    world.consumer.post(f"/api/w/{world.cws}/market/rentals/{rental['id']}/release", headers=CSRF)
+    world.node.sync()  # the host confirms the stopped jobs, freeing its GPUs
+    assert world.submit(offer_id=world.offer["id"]).status_code == 201  # rents for the job: not a quota matter
+
+
+def test_setting_groups_and_quotas_is_admin_only_and_validated(lab):
+    path = f"/api/w/{lab.ws}/members/{lab.ids['stu@iit.ac.in']}/compute"
+    assert lab.stu.patch(path, headers=CSRF, json={"gpu_hour_quota": 1}).status_code == 403  # no capping yourself
+    assert lab.view.patch(path, headers=CSRF, json={"gpu_hour_quota": 1}).status_code == 403
+    assert lab.dean.patch(path, headers=CSRF, json={"group": " nlp ", "gpu_hour_quota": 7}).json()["group"] == "nlp"
+    for bad in (-1, 1.5, "7", True, 10**7):
+        assert lab.dean.patch(path, headers=CSRF, json={"gpu_hour_quota": bad}).status_code == 400, bad
+    assert lab.dean.patch(path, headers=CSRF, json={"group": "x" * 65}).status_code == 400
+    assert lab.dean.patch(path, headers=CSRF, json={"group": 5}).status_code == 400
+    # Only the keys sent change; null clears; an empty group means none.
+    assert lab.dean.patch(path, headers=CSRF, json={"group": ""}).json() == {
+        "user_id": lab.ids["stu@iit.ac.in"], "group": "", "gpu_hour_quota": 7,
+    }
+    assert lab.dean.patch(path, headers=CSRF, json={"gpu_hour_quota": None}).json()["gpu_hour_quota"] is None
+    assert lab.dean.patch(f"/api/w/{lab.ws}/members/usr_nobody/compute", headers=CSRF, json={}).status_code == 404
+    members = {m["email"]: m for m in lab.view.get(f"/api/w/{lab.ws}/members").json()["members"]}
+    assert members["stu@iit.ac.in"]["group"] == "" and members["stu@iit.ac.in"]["gpu_hour_quota"] is None
+
+    settings = f"/api/w/{lab.ws}/compute-settings"
+    assert lab.stu.patch(settings, headers=CSRF, json={"default_gpu_hour_quota": 5}).status_code == 403
+    assert lab.dean.patch(settings, headers=CSRF, json={}).status_code == 400
+    assert lab.dean.patch(settings, headers=CSRF, json={"default_gpu_hour_quota": -5}).status_code == 400
+    assert lab.dean.patch(settings, headers=CSRF, json={"default_gpu_hour_quota": 40}).status_code == 200
+    assert lab.view.get(f"/api/w/{lab.ws}").json()["default_gpu_hour_quota"] == 40
+    # A viewer reads usage; someone outside the workspace cannot tell it exists.
+    assert lab.view.get(f"/api/w/{lab.ws}/usage").status_code == 200
+    outsider = login(lab.client, lab.tmp_path, "x@other.in", lab.clock)
+    assert outsider.get(f"/api/w/{lab.ws}/usage").status_code == 404
+
+
+def test_a_non_admin_sees_only_their_own_usage_row(lab):
+    lab.run(lab.stu, 3600)
+    lab.run(lab.head, 1800)
+    lab.set_compute("stu@iit.ac.in", group="vision-lab")
+    for c, me in ((lab.stu, "stu@iit.ac.in"), (lab.view, "view@iit.ac.in")):
+        u = lab.usage(c)
+        assert u["scope"] == "self" and [p["email"] for p in u["people"]] == [me]
+        assert u["groups"] == []  # a group can be one person
+        assert u["totals"]["gpu_hours_own"] == 1.5  # the workspace total is not personal
+    rows = lab.view.get(f"/api/w/{lab.ws}/usage?format=csv").text.splitlines()
+    assert len(rows) == 2 and rows[1].startswith("view@iit.ac.in")
+    # A non-admin key reports as the member who made it; an admin sees everyone.
+    key = lab.dean.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ro", "role": "viewer"}).json()
+    u = TestClient(lab.app).get(f"/api/w/{lab.ws}/usage", headers={"Authorization": f"Bearer {key['token']}"}).json()
+    assert [p["email"] for p in u["people"]] == ["dean@iit.ac.in"]
+    full = lab.usage(lab.dean)
+    assert full["scope"] == "workspace" and len(full["people"]) == 4 and full["groups"]
+
+
+def test_multi_replica_multi_gpu_jobs_count_every_gpu_against_the_quota(client, tmp_path, clock):
+    lab = Lab(client, tmp_path, clock, gpus=4)
+    lab.set_compute("stu@iit.ac.in", gpu_hour_quota=8)
+    job = lab.submit(lab.stu, replicas=2, gpus_per_replica=2).json()
+    lab.node.sync()
+    clock.advance(1800)
+    assert lab.person("stu@iit.ac.in")["gpu_hours_own"] == 2.0  # 2 replicas × 2 GPUs × 0.5 h, while running
+    clock.advance(5400)
+    lab.node.finish(job["id"], rank=0)
+    assert lab.person("stu@iit.ac.in")["gpu_hours_own"] == 8.0
+    assert lab.submit(lab.stu).json()["error"]["code"] == "QUOTA_EXCEEDED"
+
+
+def test_a_template_job_is_validated_then_held_to_the_quota(lab):
+    lab.set_compute("stu@iit.ac.in", gpu_hour_quota=0)
+    jobs = f"/api/w/{lab.ws}/jobs"
+    bad = lab.stu.post(jobs, headers=CSRF, json={"template": "python-script", "replicas": 0})
+    assert bad.status_code == 400  # the merged job is validated first
+    r = lab.stu.post(jobs, headers=CSRF, json={"template": "pytorch-ddp"})  # 2 replicas from the template
+    assert r.status_code == 409 and r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+    lab.set_compute("stu@iit.ac.in", gpu_hour_quota=None)
+    made = lab.stu.post(jobs, headers=CSRF, json={"template": "pytorch-ddp"}).json()
+    assert made["replicas"] == 2 and made["created_by"] == "stu@iit.ac.in"
+
+
+def test_migration_adds_the_usage_columns_and_matches_the_models(tmp_path):
+    pytest.importorskip("alembic")
+    from sqlalchemy import create_engine, inspect
+
+    from meridian_control.db import Base, run_migrations
+
+    url = f"sqlite:///{tmp_path}/m.db"
+    run_migrations(url)
+    insp = inspect(create_engine(url))
+    for table, columns in (("memberships", {"group", "gpu_hour_quota"}), ("workspaces", {"default_gpu_hour_quota"})):
+        assert columns <= {c["name"] for c in insp.get_columns(table)}
+    for name, table in Base.metadata.tables.items():  # every model column exists in the migrated schema
+        assert {c.name for c in table.columns} <= {c["name"] for c in insp.get_columns(name)}, name
+
+
+def test_migrations_downgrade_and_upgrade_again(tmp_path):
+    pytest.importorskip("alembic")
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    import meridian_control.db as db
+
+    url = f"sqlite:///{tmp_path}/m.db"
+    db.run_migrations(url)
+    here = Path(db.__file__).parent
+    cfg = Config(str(here / "alembic.ini"))
+    cfg.set_main_option("script_location", str(here / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    def columns(table):
+        return {c["name"] for c in inspect(create_engine(url)).get_columns(table)}
+
+    assert {"visibility", "shared_with"} <= columns("market_offers") and "attributed_to" in columns("compute_jobs")
+    command.downgrade(cfg, "d5f1a7c93e08")
+    assert not {"visibility", "shared_with"} & columns("market_offers") and "attributed_to" in columns("compute_jobs")
+    command.downgrade(cfg, "c4e8b2a61f37")
+    assert "attributed_to" not in columns("compute_jobs") and "gpu_hour_quota" not in columns("memberships")
+    command.upgrade(cfg, "head")
+    assert "attributed_to" in columns("compute_jobs") and "visibility" in columns("market_offers")
+
+
+def test_cli_prints_usage_per_person(lab, monkeypatch):
+    from meridian.cli.compute import main
+
+    lab.run(lab.stu, 5400)
+    lab.set_compute("stu@iit.ac.in", group="vision-lab", gpu_hour_quota=4)
+    made = lab.head.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ro", "role": "admin"})
+    token = made.json()["token"]  # everyone's usage is for admins
+    monkeypatch.setenv("MERIDIAN_WORKSPACE", lab.ws)
+    monkeypatch.setenv("MERIDIAN_API_KEY", token)
+    lines: list[str] = []
+    assert main(["usage", "--month", "2026-08"], client=TestClient(lab.app), out=lines.append) == 0
+    assert lines[0] == "usage for 2026-08 (UTC)" and lines[1].split() == [
+        "PERSON", "GROUP", "OWN", "GPU-H", "RENTED", "GPU-H", "JOBS", "QUOTA", "LEFT",
+    ]
+    stu = next(line for line in lines if line.startswith("stu@iit.ac.in"))
+    assert stu.split() == ["stu@iit.ac.in", "vision-lab", "1.50", "0.00", "1", "4", "2.50"]
+    assert lines[-1].split() == ["TOTAL", "1.50", "0.00", "1"]
+    assert main(["usage", "--month", "bad"], client=TestClient(lab.app), out=lines.append) == 1
+
+
+# ── private sharing between institutes ────────────────────────────────────
+
+
+def slug_of(c, ws) -> str:
+    return c.get(f"/api/w/{ws}").json()["slug"]
+
+
+def share(world, **body):
+    """Edit the world's listing as its provider."""
+    return world.provider.patch(f"/api/w/{world.pws}/market/offers/{world.offer['id']}", headers=CSRF, json=body)
+
+
+def test_a_private_listing_is_visible_and_rentable_only_by_the_workspaces_it_is_shared_with(
+    client, tmp_path, clock, world
+):
+    outsider = login(client, tmp_path, "x@other.in", clock)
+    ows = workspace(outsider, "Other Institute")
+    world.node.sync()  # the sign-in moved the clock; keep the host's lease alive
+    world.credit(ows, 10_000_00, "UTR-0002")
+    r = share(world, visibility="private", shared_with=[slug_of(world.consumer, world.cws)])
+    assert r.status_code == 200, r.text
+    assert r.json()["visibility"] == "private" and r.json()["shared_with"] == [slug_of(world.consumer, world.cws)]
+
+    seen = world.consumer.get(f"/api/w/{world.cws}/market/offers").json()["offers"]
+    assert [o["id"] for o in seen] == [world.offer["id"]] and seen[0]["visibility"] == "private"
+    assert "shared_with" not in seen[0] and "node_id" not in seen[0]  # who else is a partner is the owner's business
+    assert world.provider.get(f"/api/w/{world.pws}/market/offers").json()["offers"][0]["mine"] is True
+    assert outsider.get(f"/api/w/{ows}/market/offers").json()["offers"] == []
+
+    # A workspace that was not invited gets the same 404 as for an id that does not exist, however it asks.
+    missing = outsider.post(f"/api/w/{ows}/market/rentals", headers=CSRF, json={"offer_id": "off_nope"})
+    hidden = outsider.post(f"/api/w/{ows}/market/rentals", headers=CSRF, json={"offer_id": world.offer["id"]})
+    assert hidden.status_code == missing.status_code == 404
+    assert hidden.json()["error"]["message"] == missing.json()["error"]["message"]
+    too_big = outsider.post(f"/api/w/{ows}/jobs", headers=CSRF, json={
+        "image": IMAGE, "gpus_per_replica": 3, "offer_id": world.offer["id"],
+    })
+    assert too_big.status_code == 404  # not "TOO_LARGE", which would confirm the listing exists
+    shared_too_big = world.submit(gpus_per_replica=3, offer_id=world.offer["id"])
+    assert shared_too_big.status_code == 409 and shared_too_big.json()["error"]["code"] == "TOO_LARGE"
+
+    assert world.rent()["offer"]["id"] == world.offer["id"]  # the partner can rent it
+
+    # Sharing it with someone else instead ends the old partner's rental and adds the new partner.
+    share(world, shared_with=[slug_of(outsider, ows)])
+    ended = world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]
+    assert (ended["status"], ended["end_reason"]) == ("ended", "sharing_ended")
+    assert world.consumer.get(f"/api/w/{world.cws}/market/offers").json()["offers"] == []
+    assert [o["id"] for o in outsider.get(f"/api/w/{ows}/market/offers").json()["offers"]] == [world.offer["id"]]
+
+
+def test_sharing_is_validated_and_making_a_listing_public_again_forgets_the_partners(world):
+    partner = slug_of(world.consumer, world.cws)
+    r = share(world, visibility="private", shared_with=[partner, "no-such-lab"])
+    assert r.status_code == 400 and r.json()["error"]["code"] == "UNKNOWN_WORKSPACE"
+    assert "'no-such-lab'" in r.json()["error"]["message"]
+    for bad in ({"visibility": "secret"}, {"visibility": "private", "shared_with": "lab"},
+                {"visibility": "private", "shared_with": [5]}, {"visibility": "private", "shared_with": ["a"] * 51}):
+        assert share(world, **bad).status_code == 400, bad
+    assert world.offer["visibility"] == "public" and world.offer["shared_with"] == []
+
+    own = slug_of(world.provider, world.pws)
+    ok = share(world, visibility="private", shared_with=[f" {partner.upper()} ", partner, own])
+    assert ok.json()["shared_with"] == [partner]  # normalised, de-duplicated, and not including the owner
+    back = share(world, visibility="public")
+    assert back.json()["visibility"] == "public" and back.json()["shared_with"] == []
+    assert len(world.consumer.get(f"/api/w/{world.cws}/market/offers").json()["offers"]) == 1
+
+
+def test_only_a_private_listing_may_be_free(client, tmp_path, clock, world):
+    partner = slug_of(world.consumer, world.cws)
+    # Public listings keep the ₹1 minimum, on create and on update.
+    assert share(world, price_paise_per_gpu_hour=0).status_code == 400
+    assert share(world, visibility="private", shared_with=[partner], price_paise_per_gpu_hour=0).json()[
+        "hourly_total_paise"
+    ] == 0
+    r = share(world, visibility="public")  # now free and public: refused until it has a price
+    assert r.status_code == 400 and "at least ₹1" in r.json()["error"]["message"]
+    assert share(world, visibility="public", price_paise_per_gpu_hour=100).status_code == 200
+
+    other = FakeNode(client.app, world.provider, world.pws)
+    body = {"node_id": other.node_id, "title": "Free for partners", "region": "Pune"}
+    free = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+        **body, "visibility": "private", "shared_with": [partner], "price_paise_per_gpu_hour": 0,
+    })
+    assert free.status_code == 201 and free.json()["price_paise_per_gpu_hour"] == 0
+    assert free.json()["hourly_total_paise"] == 0 and free.json()["shared_with"] == [partner]
+    third = FakeNode(client.app, world.provider, world.pws)
+    for extra in ({"price_paise_per_gpu_hour": 0}, {}, {"visibility": "private"}, {"visibility": "public",
+                                                                                    "price_paise_per_gpu_hour": 0}):
+        r = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+            **body, "node_id": third.node_id, **extra,
+        })
+        assert r.status_code == 400, extra  # a missing price is never silently free
+
+
+def test_a_free_rental_needs_no_credit_and_posts_no_ledger_rows(client, tmp_path, clock):
+    world = World(client, tmp_path, clock, credit=0)  # the renter has no credit at all
+    partner = slug_of(world.consumer, world.cws)
+    share(world, visibility="private", shared_with=[partner], price_paise_per_gpu_hour=0)
+    rental = world.rent()
+    assert rental["price_paise_per_gpu_hour"] == 0 and rental["amount_paise"] == 0 and rental["hourly_total_paise"] == 0
+
+    job = world.submit(rental_id=rental["id"], gpus_per_replica=2).json()
+    world.node.sync()
+    world.tick(3 * 3600)  # three hours: a paid rental with no credit would have been ended long ago
+    assert world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]["status"] == "active"
+    assert world.consumer.get(f"/api/w/{world.cws}/jobs/{job['id']}").json()["status"] == "running"
+    world.tick(10 * 3600)
+
+    done = world.consumer.post(f"/api/w/{world.cws}/market/rentals/{rental['id']}/release", headers=CSRF).json()
+    assert done["status"] == "ended" and done["amount_paise"] == 0 and done["seconds"] == 13 * 3600
+    for ws, c in ((world.cws, world.consumer), (world.pws, world.provider)):
+        b = world.balance(c, ws)
+        assert b["balance_paise"] == 0 and b["entries"] == [] and b["burn_paise_per_hour"] == 0
+    with world.app.state.compute._sf() as s:
+        assert s.scalar(select(func.count()).select_from(LedgerEntry)) == 0  # not even a zero-amount row
+
+
+def test_a_free_rental_survives_while_a_paid_one_runs_out_of_credit(client, tmp_path, clock):
+    world = World(client, tmp_path, clock, credit=300_00)  # a little over an hour of the paid listing
+    paid_offer = world.offer
+    free_node = FakeNode(client.app, world.provider, world.pws, name="free-host")
+    partner = slug_of(world.consumer, world.cws)
+    free = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+        "node_id": free_node.node_id, "title": "Free for partners", "region": "Pune", "visibility": "private",
+        "shared_with": [partner], "price_paise_per_gpu_hour": 0,
+    }).json()
+    free_rental = world.consumer.post(f"/api/w/{world.cws}/market/rentals", headers=CSRF, json={"offer_id": free["id"]})
+    paid_rental = world.consumer.post(
+        f"/api/w/{world.cws}/market/rentals", headers=CSRF, json={"offer_id": paid_offer["id"]}
+    )
+    assert free_rental.status_code == paid_rental.status_code == 201
+    for _ in range(3):
+        world.clock.advance(3600)
+        free_node.sync()  # both hosts keep reporting
+        world.tick()
+    rentals = {r["id"]: r for r in world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"]}
+    assert rentals[paid_rental.json()["id"]]["end_reason"] == "insufficient_funds"
+    assert rentals[free_rental.json()["id"]]["status"] == "active"
+    entries = world.balance(world.consumer, world.cws)["entries"]
+    assert entries and all(e["amount_paise"] != 0 for e in entries)  # no zero-amount rows
+
+
+def test_sharing_follows_the_workspace_not_its_slug(client, tmp_path, clock, world):
+    from meridian_control.models import Workspace
+
+    old = slug_of(world.consumer, world.cws)
+    assert share(world, visibility="private", shared_with=[old]).status_code == 200
+    squatter = login(client, tmp_path, "x@squat.in", clock)
+    sws = workspace(squatter, "Squatter")
+    world.node.sync()
+    world.credit(sws, 10_000_00, "UTR-0003")
+    # The partner's slug changes and another workspace takes the old one.
+    with world.app.state.compute._sf() as s:
+        s.get(Workspace, world.cws).slug = "renamed-lab"
+        s.flush()
+        s.get(Workspace, sws).slug = old
+        s.commit()
+    assert squatter.get(f"/api/w/{sws}/market/offers").json()["offers"] == []
+    took = squatter.post(f"/api/w/{sws}/market/rentals", headers=CSRF, json={"offer_id": world.offer["id"]})
+    assert took.status_code == 404
+    assert [o["id"] for o in world.consumer.get(f"/api/w/{world.cws}/market/offers").json()["offers"]] == [
+        world.offer["id"]
+    ]
+    mine = world.provider.get(f"/api/w/{world.pws}/market/offers?mine=true").json()["offers"][0]
+    assert mine["shared_with"] == ["renamed-lab"]  # stored by id, shown by the current slug
+    assert share(world, title="Still shared").json()["shared_with"] == ["renamed-lab"]  # other edits keep it
+
+
+def test_a_removed_partner_loses_its_free_rental_and_its_jobs_stop(client, tmp_path, clock):
+    world = World(client, tmp_path, clock, credit=0)
+    share(world, visibility="private", shared_with=[slug_of(world.consumer, world.cws)], price_paise_per_gpu_hour=0)
+    rental = world.rent()
+    job = world.submit(rental_id=rental["id"]).json()
+    world.node.sync()
+    assert world.consumer.get(f"/api/w/{world.cws}/jobs/{job['id']}").json()["status"] == "running"
+
+    assert share(world, shared_with=[]).status_code == 200  # the provider removes the partner
+    r = world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]
+    assert (r["status"], r["end_reason"]) == ("ended", "sharing_ended")
+    stopped = world.consumer.get(f"/api/w/{world.cws}/jobs/{job['id']}").json()
+    assert stopped["status"] == "failed" and "sharing ended" in stopped["message"]
+    assert all(j["desired_phase"] == "Stopped" for j in world.node.sync()["jobs"])
+    assert world.submit(rental_id=rental["id"]).status_code == 404
+    assert world.consumer.post(f"/api/w/{world.cws}/market/rentals", headers=CSRF,
+                               json={"offer_id": world.offer["id"]}).status_code == 404
+    with world.app.state.compute._sf() as s:
+        assert s.scalar(select(func.count()).select_from(LedgerEntry)) == 0
+
+
+def test_a_free_rental_ends_when_its_listing_goes_public_but_a_paid_one_continues(client, tmp_path, clock):
+    world = World(client, tmp_path, clock, credit=0)
+    partner = slug_of(world.consumer, world.cws)
+    share(world, visibility="private", shared_with=[partner], price_paise_per_gpu_hour=0)
+    world.rent()
+    assert share(world, visibility="public", price_paise_per_gpu_hour=100_00).status_code == 200
+    r = world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]
+    assert (r["status"], r["end_reason"]) == ("ended", "sharing_ended")  # never a free rental on a public listing
+
+    world.credit(world.cws, 10_000_00, "UTR-0009")
+    share(world, visibility="private", shared_with=[partner], price_paise_per_gpu_hour=50_00)
+    paid = world.rent()
+    assert share(world, visibility="public", price_paise_per_gpu_hour=100_00).status_code == 200
+    rentals = {x["id"]: x for x in world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"]}
+    assert rentals[paid["id"]]["status"] == "active"  # still allowed, still paying its starting price
+
+
+def test_a_rental_on_a_listing_no_longer_shared_takes_no_new_jobs(client, tmp_path, clock):
+    from meridian_control.models import MarketOffer
+
+    world = World(client, tmp_path, clock, credit=0)
+    share(world, visibility="private", shared_with=[slug_of(world.consumer, world.cws)], price_paise_per_gpu_hour=0)
+    rental = world.rent()
+    with world.app.state.compute._sf() as s:  # access withdrawn without going through the listing edit
+        s.get(MarketOffer, world.offer["id"]).shared_with = []
+        s.commit()
+    assert world.submit(rental_id=rental["id"]).status_code == 404
+
+
+def test_listing_edits_wait_for_the_service_lock(world):
+    comp = world.app.state.compute
+    calls = (
+        lambda: comp.update_offer(world.pws, "x", world.offer["id"], {"title": "Renamed listing"}),
+        lambda: comp.retire_offer(world.pws, "x", world.offer["id"]),
+    )
+    for call in calls:
+        done = threading.Event()
+
+        def run(call=call, done=done):
+            call()
+            done.set()
+
+        with comp._lock:
+            threading.Thread(target=run, daemon=True).start()
+            assert not done.wait(0.3)  # an edit cannot interleave with a rent or a billing pass
+        assert done.wait(5)
+
+
+def test_cli_lists_a_free_private_listing_as_free(world, monkeypatch):
+    from meridian.cli.compute import main
+
+    share(world, visibility="private", shared_with=[slug_of(world.consumer, world.cws)], price_paise_per_gpu_hour=0)
+    key = world.consumer.post(f"/api/w/{world.cws}/api-keys", headers=CSRF, json={"name": "cli", "role": "viewer"})
+    monkeypatch.setenv("MERIDIAN_WORKSPACE", world.cws)
+    monkeypatch.setenv("MERIDIAN_API_KEY", key.json()["token"])
+    lines: list[str] = []
+    assert main(["offers"], client=TestClient(world.app), out=lines.append) == 0
+    assert lines[1].split()[-6:] == ["Mumbai", "free", "free", "available", "Mumbai", "DC"]
+
+
+def test_migration_adds_listing_visibility_with_public_as_the_default(tmp_path):
+    pytest.importorskip("alembic")
+    from sqlalchemy import create_engine, inspect, text
+
+    from meridian_control.db import run_migrations
+
+    url = f"sqlite:///{tmp_path}/m.db"
+    run_migrations(url)
+    cols = {c["name"]: c for c in inspect(create_engine(url)).get_columns("market_offers")}
+    assert {"visibility", "shared_with"} <= set(cols)
+    with create_engine(url).begin() as conn:  # a row written without the new columns is public and shared with no one
+        conn.execute(text(
+            "INSERT INTO market_offers (id, workspace_id, node_id, title, description, region, gpu_model, gpu_count,"
+            " vram_bytes_per_gpu, device_ids, price_paise_per_gpu_hour, status, created_by, created_at, updated_at)"
+            " VALUES ('o','w','n','t','','r','m',1,0,'[]',100,'listed','','2026-01-01','2026-01-01')"
+        ))
+        assert conn.execute(text("SELECT visibility, shared_with FROM market_offers")).one() == ("public", "[]")
+
+
+# ── public listings feed ──────────────────────────────────────────────────
+
+OFFER_KEYS = {
+    "title", "region", "gpu_model", "gpu_count", "vram_bytes_per_gpu", "price_paise_per_gpu_hour",
+    "hourly_total_paise", "available", "provider_name",
+}
+
+
+def feed(app):
+    """The public feed, fetched with no cookie and no credentials."""
+    return TestClient(app).get("/api/public/offers")
+
+
+def test_public_feed_needs_no_sign_in_and_is_the_only_cacheable_api_route(world):
+    r = feed(world.app)
+    assert r.status_code == 200 and r.headers["cache-control"] == "public, max-age=30"
+    body = r.json()
+    assert len(body["offers"]) == 1 and set(body["offers"][0]) == OFFER_KEYS
+    assert body["offers"][0] == {
+        "title": "2× H100, Mumbai", "region": "Mumbai", "gpu_model": "NVIDIA H100", "gpu_count": 2,
+        "vram_bytes_per_gpu": 80 * GB, "price_paise_per_gpu_hour": 100_00, "hourly_total_paise": 204_00,
+        "available": True, "provider_name": "Mumbai DC",
+    }
+    assert body["summary"] == {
+        "available_gpus": 2, "gpus_by_model": {"NVIDIA H100": 2}, "regions": ["Mumbai"],
+        "lowest_price_paise_per_gpu_hour": 100_00,
+    }
+    # Nothing that identifies a node, a device or a workspace leaks into the page.
+    for secret in (world.node.node_id, world.pws, world.cws, world.offer["id"], world.node.devices[0], "mine"):
+        assert secret not in r.text
+    # Every other /api response is still no-store.
+    anon = TestClient(world.app)
+    assert anon.get("/api/cloud/info").headers["cache-control"] == "no-store"
+    assert anon.get("/api/me").headers["cache-control"] == "no-store"
+
+
+def test_public_feed_never_shows_private_paused_or_retired_listings_and_marks_rented_ones_unavailable(
+    client, tmp_path, clock, world
+):
+    partner = slug_of(world.consumer, world.cws)
+    second = FakeNode(client.app, world.provider, world.pws, gpus=4, model="NVIDIA A100", vram_gb=40, name="a100")
+    made = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+        "node_id": second.node_id, "title": "4× A100, Pune", "region": "Pune", "price_paise_per_gpu_hour": 50_00,
+    })
+    assert made.status_code == 201, made.text
+    hidden = {}
+    for name, extra in (("private", {"visibility": "private", "shared_with": [partner]}), ("paused", {})):
+        node = FakeNode(client.app, world.provider, world.pws, name=name)
+        r = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+            "node_id": node.node_id, "title": f"{name} listing", "region": "Delhi", "price_paise_per_gpu_hour": 10_00,
+            **extra,
+        })
+        assert r.status_code == 201, r.text
+        hidden[name] = r.json()
+    world.provider.patch(f"/api/w/{world.pws}/market/offers/{hidden['paused']['id']}", headers=CSRF,
+                         json={"status": "paused"})
+    retired = FakeNode(client.app, world.provider, world.pws, name="retired")
+    r = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+        "node_id": retired.node_id, "title": "retired listing", "region": "Delhi", "price_paise_per_gpu_hour": 10_00,
+    })
+    world.provider.delete(f"/api/w/{world.pws}/market/offers/{r.json()['id']}", headers=CSRF)
+    clock.advance(31)  # past the feed's cache
+    world.node.sync()
+    second.sync()
+
+    body = feed(world.app).json()
+    assert [o["title"] for o in body["offers"]] == ["4× A100, Pune", "2× H100, Mumbai"]  # cheapest first
+    assert body["summary"] == {
+        "available_gpus": 6, "gpus_by_model": {"NVIDIA A100": 4, "NVIDIA H100": 2}, "regions": ["Mumbai", "Pune"],
+        "lowest_price_paise_per_gpu_hour": 50_00,
+    }
+    assert "private listing" not in feed(world.app).text and "Delhi" not in feed(world.app).text
+
+    # A rented listing stays on the page, marked unavailable, and leaves the summary.
+    world.rent()
+    clock.advance(31)
+    world.node.sync()
+    second.sync()
+    body = feed(world.app).json()
+    shown = [(o["title"], o["available"]) for o in body["offers"]]
+    assert shown == [("4× A100, Pune", True), ("2× H100, Mumbai", False)]
+    assert body["summary"]["available_gpus"] == 4 and body["summary"]["gpus_by_model"] == {"NVIDIA A100": 4}
+    assert body["summary"]["regions"] == ["Pune"]
+
+
+def test_public_feed_is_cached_for_thirty_seconds(world, clock):
+    first = feed(world.app).json()
+    world.provider.patch(f"/api/w/{world.pws}/market/offers/{world.offer['id']}", headers=CSRF,
+                         json={"price_paise_per_gpu_hour": 50_00})
+    clock.advance(29)
+    assert feed(world.app).json() == first  # still the stored copy
+    clock.advance(2)
+    world.node.sync()
+    fresh = feed(world.app).json()
+    assert fresh["offers"][0]["price_paise_per_gpu_hour"] == 50_00 and fresh != first
+
+
+def test_public_feed_with_nothing_listed_is_empty_not_an_error(client, tmp_path, clock):
+    body = feed(client.app).json()
+    assert body == {"offers": [], "total_offers": 0, "summary": {
+        "available_gpus": 0, "gpus_by_model": {}, "regions": [], "lowest_price_paise_per_gpu_hour": None,
+    }}
+
+
+def test_public_feed_is_bounded_but_its_summary_covers_every_listing(client, tmp_path, clock, world, monkeypatch):
+    monkeypatch.setattr("meridian_control.compute.PUBLIC_FEED_MAX_OFFERS", 1)
+    second = FakeNode(client.app, world.provider, world.pws, gpus=4, model="NVIDIA A100", vram_gb=40, name="a100")
+    world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+        "node_id": second.node_id, "title": "4× A100, Pune", "region": "Pune", "price_paise_per_gpu_hour": 50_00,
+    })
+    clock.advance(31)
+    world.node.sync()
+    second.sync()
+    body = feed(world.app).json()
+    assert [o["title"] for o in body["offers"]] == ["4× A100, Pune"] and body["total_offers"] == 2
+    assert body["summary"]["available_gpus"] == 6
+
+
+def test_public_feed_exists_only_in_cloud_mode(tmp_path):
+    from meridian_control.app import create_app
+    from meridian_control.config import ControlConfig
+
+    app = create_app(ControlConfig(db_url=f"sqlite:///{tmp_path}/standalone.db", ca_dir=tmp_path / "ca", cloud=False))
+    assert TestClient(app).get("/api/public/offers").status_code == 404
 
 
 # ── CLI ───────────────────────────────────────────────────────────────────

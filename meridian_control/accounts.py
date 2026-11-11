@@ -97,6 +97,9 @@ class Principal:
     user_id: str
     email: str
     session_hash: str
+    # For a workspace API key: the member who created the key. Compute usage and
+    # quotas count the key's jobs against them. Empty for a signed-in user.
+    on_behalf_of: str = ""
 
 
 @dataclass(frozen=True)
@@ -519,6 +522,7 @@ class AccountsService:
                 "role": role,
                 "created_at": _iso(ws.created_at),
                 "members": members,
+                "default_gpu_hour_quota": ws.default_gpu_hour_quota,
             }
 
     def rename_workspace(self, p: Principal, workspace_id: str, name: str) -> dict:
@@ -567,6 +571,8 @@ class AccountsService:
                         "role": m.role,
                         "joined_at": _iso(m.created_at),
                         "last_login_at": _iso(u.last_login_at),
+                        "group": m.group or "",
+                        "gpu_hour_quota": m.gpu_hour_quota,
                     }
                     for u, m in rows
                 ],
