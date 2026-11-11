@@ -1,100 +1,129 @@
 /* Public site (landing + install configurator). Shares the console's
-   components and tokens, re-tuned to a survey-map palette: cool sage paper,
-   brand ink, contour lines, and amber for requests in flight. */
+   components and tokens, re-tuned to the Meridian website palette: cool paper,
+   night ink, cobalt for actions and a saffron line that is decoration only.
+   Fonts are imported here so the console bundle never ships them. */
 @import "../index.css";
-@import "@fontsource/ibm-plex-sans-condensed/500.css";
-@import "@fontsource/ibm-plex-sans-condensed/600.css";
+@import "@fontsource-variable/bricolage-grotesque";
+@import "@fontsource-variable/instrument-sans";
+@import "@fontsource/jetbrains-mono/400.css";
 
 @theme inline {
-  --font-display: "IBM Plex Sans Condensed", "IBM Plex Sans Variable", ui-sans-serif, system-ui, sans-serif;
-  --color-paper: var(--paper);
+  --font-display: "Bricolage Grotesque Variable", "Instrument Sans Variable", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: var(--font-display);
+  --font-sans: "Instrument Sans Variable", ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
   --color-ink: var(--ink);
-  --color-contour: var(--contour);
-  --color-signal: var(--signal);
-  --color-signal-ink: var(--signal-ink);
-  --color-deep: var(--deep);
+  --color-soft: var(--soft);
+  --color-contour: var(--line);
+  --color-deep: var(--soft);
+  --color-mist: var(--mist);
+  --color-sunken: var(--sunken);
+  --color-link: var(--link);
+  --color-cobalt: var(--cobalt);
+  --color-cobalt-deep: var(--cobalt-deep);
+  --color-saffron: var(--saffron);
+  --color-ok-bg: var(--ok-bg);
+  --color-ok-fg: var(--ok-fg);
+  --color-ok-dot: var(--ok-dot);
+  --color-payout-bg: var(--payout-bg);
+  --color-payout-fg: var(--payout-fg);
+  --color-night: var(--night);
+  --color-night-line: var(--night-line);
+  --color-night-soft: var(--night-soft);
+  --color-band: var(--band);
+  --color-term-dim: var(--term-dim);
+  --color-term-ok: var(--term-ok);
+  --color-term-amb: var(--term-amb);
 }
 
 body.site {
-  --paper: #edf1ec;
-  --ink: #10211f;
-  --contour: #b9c9c0;
-  --signal: #e39b0b;
-  --signal-ink: #855400; /* text-safe amber: 5.4:1 on paper */
-  --deep: #34504a;
+  /* Palette. Saffron is never used for text. */
+  --ink: #0c1230;
+  --soft: #565f82;
+  --line: #d5daea;
+  --mist: #e8ebf6;
+  --sunken: #fafbfe; /* table header and footer strips */
+  --cobalt: #2b4bf2;
+  --cobalt-deep: #1b34c4;
+  --link: #2b4bf2; /* cobalt as text: 5.8:1 on the page */
+  --saffron: #ff9f1c;
+  --ok-bg: #e3f6ee;
+  --ok-fg: #06694a;
+  --ok-dot: #0b8f63;
+  --payout-bg: #fff4e0;
+  --payout-fg: #6b4100;
+  --night: #0c1230;
+  --night-line: #2a3466;
+  --night-soft: #a9b2d6;
+  --band: #0c1230; /* dark bands: pricing, terminal, footer */
+  --term-dim: #7c87b8;
+  --term-ok: #5ee0b0;
+  --term-amb: #ffc46b;
+  --mark-bg: #0c1230;
+  --mark-glyph: #ffffff;
+  --mark-dot: #ff9f1c;
 
-  --background: var(--paper);
+  /* The names the shadcn components read. */
+  --background: #f6f7fb;
   --foreground: var(--ink);
-  --card: #f6f8f5;
+  --card: #ffffff;
   --card-foreground: var(--ink);
-  --popover: #f8faf7;
-  --muted: #e2e8e3;
-  --muted-foreground: #46564f;
-  --border: #cfdad3;
-  --input: #778c84; /* control edges and switch tracks: 3.1:1 on paper */
-  --secondary: #e0e7e1;
-  --accent: #dfe7e0;
-  --ring: #2f6f5e;
-  background: var(--paper);
+  --popover: #ffffff;
+  --popover-foreground: var(--ink);
+  --primary: var(--cobalt);
+  --primary-foreground: #ffffff;
+  --secondary: var(--mist);
+  --secondary-foreground: var(--ink);
+  --muted: var(--mist);
+  --muted-foreground: var(--soft);
+  --accent: var(--mist);
+  --accent-foreground: var(--ink);
+  --border: var(--line);
+  --input: #7a84a8; /* control edges and switch tracks: 3.4:1 on the page */
+  --ring: var(--cobalt);
+
+  background: var(--background);
+  font-feature-settings: normal;
 }
 
 .dark body.site {
-  --paper: #0e1b19;
-  --ink: #e7eee9;
-  --contour: #2c433d;
-  --signal: #f0b23a;
-  --signal-ink: #f0b23a;
-  --deep: #a9bdb5;
+  --ink: #eef1ff;
+  --soft: #a9b2d6;
+  --line: #2a3466;
+  --mist: #1b2452;
+  --sunken: #121a3d;
+  --link: #8da0ff; /* lightened cobalt: 7:1 on night */
+  --ok-bg: #0f3a33;
+  --ok-fg: #7eebc0;
+  --ok-dot: #5ee0b0;
+  --payout-bg: #3a2a0a;
+  --payout-fg: #ffc46b;
+  --band: #070a1e;
+  --mark-bg: #eef1ff;
+  --mark-glyph: #0c1230;
 
-  --card: #132421;
-  --popover: #152724;
-  --muted: #172b28;
-  --muted-foreground: #a3b4ad;
-  --border: #223833;
-  --input: #5b766e;
-  --secondary: #1a2e2a;
-  --accent: #1c312d;
-  --primary: #e4f6c9;
-  --primary-foreground: #10211f;
-  --ring: #8cc7b3;
+  --background: #0c1230;
+  --card: #161e45;
+  --popover: #161e45;
+  --primary: #8da0ff;
+  --primary-foreground: #0c1230;
+  --accent: #222c5e;
+  --input: #5e6ba0;
+  --ring: #8da0ff;
+}
+
+/* Keyboard focus on every link. Buttons draw their own ring. */
+body.site a:not([data-slot="button"]):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
+  border-radius: 4px;
 }
 
 .site-display {
   font-family: var(--font-display);
   font-weight: 600;
-  letter-spacing: -0.012em;
-  line-height: 0.98;
+  letter-spacing: -0.02em;
+  line-height: 1.02;
   font-kerning: normal;
-  text-wrap: balance;
-}
-
-/* A survey line: hairline with a tick at each end. */
-.site-rule {
-  height: 1px;
-  background: var(--contour);
-  position: relative;
-}
-.site-rule::before,
-.site-rule::after {
-  content: "";
-  position: absolute;
-  top: -4px;
-  width: 1px;
-  height: 9px;
-  background: var(--contour);
-}
-.site-rule::before {
-  left: 0;
-}
-.site-rule::after {
-  right: 0;
-}
-
-.site-map .request {
-  fill: var(--signal);
-}
-@media (prefers-reduced-motion: reduce) {
-  .site-map .request {
-    display: none;
-  }
 }
