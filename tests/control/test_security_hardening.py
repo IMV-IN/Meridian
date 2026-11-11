@@ -557,3 +557,14 @@ def test_i8_dev_outbox_file_names_carry_no_path_characters(tmp_path):
     ConsoleMailer(str(tmp_path)).send("a/../../b@lab.in", "s", "t", "<p>t</p>")
     [f] = list(tmp_path.iterdir())
     assert f.parent == tmp_path and "/" not in f.name and f.name.endswith("-a_.._.._b_at_lab.in.json")
+
+
+@pytest.mark.parametrize("path,body", [
+    ("tokens", {"ttl_seconds": "abc"}), ("tokens", {"ttl_seconds": 3600.5}), ("tokens", {"ttl_seconds": True}),
+    ("place", {"required_vram_bytes": "x"}), ("place", {"count": "2"}), ("place", {"count": None}),
+])
+def test_i7_non_integer_fields_are_400_not_500(client, tmp_path, clock, path, body):
+    owner = login(client, tmp_path, "own@lab.in", clock)
+    ws = workspace(owner, "Lab")
+    r = owner.post(f"/api/w/{ws}/{path}", headers=CSRF, json=body)
+    assert r.status_code == 400, r.text
