@@ -14,7 +14,7 @@ import { formatSeconds } from "@/lib/format"
 
 import { atLeast, cloud, type JobDetail } from "../api"
 import { JobStatusBadge, PhaseBadge } from "../components"
-import { serviceHint } from "../compute"
+import { serviceEndpoint, serviceHint, yamlQuote } from "../compute"
 import { useJob } from "../hooks"
 import { useWorkspace } from "../session"
 
@@ -23,18 +23,20 @@ const DONE = ["succeeded", "failed", "cancelled"]
 function ServicePanel({ job }: { job: JobDetail }) {
   const s = job.service
   if (!s) return null
+  const endpoint = serviceEndpoint(s.endpoint)
   const hint = serviceHint(job.image, s.endpoint, s.token)
+  // Every value is quoted: a job name or endpoint can never add lines to the config.
   const gateway = `# Add to a Meridian gateway's config.yaml to route to this service
 backends:
-  - name: ${job.name}
-    url: ${s.endpoint || "<endpoint appears once the service is running>"}
+  - name: ${yamlQuote(job.name)}
+    url: ${endpoint ? yamlQuote(endpoint) : "<endpoint appears once the service is running>"}
     auth_header: "Bearer \${MERIDIAN_SERVICE_TOKEN}"   # export the token below; never write it in the file`
   return (
     <Panel title="Service endpoint" description="Reachable where the host's network allows. The token is what the service was told to require.">
       <div className="space-y-4">
         <KeyValueGrid
           items={[
-            { label: "Endpoint", value: s.endpoint ? <CopyText value={s.endpoint} /> : "Waiting for the service to start", mono: true },
+            { label: "Endpoint", value: endpoint ? <CopyText value={endpoint} /> : "Waiting for the service to start", mono: true },
             { label: "Bearer token", value: s.token ? <CopyText value={s.token} /> : "Visible to operators and admins", mono: true },
           ]}
         />

