@@ -2,9 +2,10 @@ import { Check, Copy } from "lucide-react"
 import { useEffect, useState } from "react"
 
 import { Button } from "@/components/ui/button"
+import { cn } from "@/lib/utils"
 
 /** A shell command with a copy button. Long commands wrap rather than scroll. */
-export function CopyCommand({ command, label = "Install command" }: { command: string; label?: string }) {
+export function CopyCommand({ command, label = "Install command", className }: { command: string; label?: string; className?: string }) {
   const [copied, setCopied] = useState(false)
   useEffect(() => {
     if (!copied) return
@@ -24,7 +25,7 @@ export function CopyCommand({ command, label = "Install command" }: { command: s
   }
 
   return (
-    <div className="flex items-start gap-2 rounded-lg border border-input bg-card py-2 pr-2 pl-4 shadow-[0_1px_0_var(--contour)]">
+    <div className={cn("flex min-h-14 items-start gap-2 rounded-xl border-[1.5px] border-border bg-background py-2 pr-2 pl-4 sm:pl-5", className)}>
       <span aria-hidden className="pt-1.5 font-mono text-sm text-muted-foreground select-none">
         $
       </span>
