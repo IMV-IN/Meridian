@@ -1312,7 +1312,7 @@ class ComputeService:
             job.started_at = min((_aware(r.started_at) for r in replicas if r.started_at), default=now)
         deadline = self._c.job_start_deadline_seconds
         stuck = next((r for r in replicas if r.phase in ("Pending", "Starting")
-                      and (now - _aware(r.scheduled_at)).total_seconds() > deadline), None)
+                      and (now - _aware(r.scheduled_at or now)).total_seconds() > deadline), None)
         if stuck is not None:
             return self._finish_job(s, job, "failed", f"replica {stuck.rank} did not start within "
                                     f"{deadline // 60} minutes of being placed", now)
