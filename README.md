@@ -18,6 +18,7 @@ It is **not** an inference engine — no GPU scheduling, no KV-cache allocator.
 - **Compliance hooks** — India PII pack (request path); optional tamper-evident audit; metadata-only logs
 - **Cost** — actual `usage` ledger + org-scoped + per-key export (`docs/ENTERPRISE_COST.md`)
 - **Operator console** — `/ui`: live fleet health, routing & canary state, request log, chat playground, key lifecycle, usage & budgets, GPU node enrollment and desired state ([`docs/CONSOLE.md`](docs/CONSOLE.md))
+- **Meridian Compute** — rent GPUs from a marketplace or list your own (provider price + 2%, billed per second in ₹), and run training jobs and model services across your nodes ([`docs/COMPUTE.md`](docs/COMPUTE.md))
 - **Meridian Cloud** — host the control plane for your team (Google / email-code sign-in, workspaces, roles); gateways and GPU nodes stay in your network and connect outbound — runs free on a Pi-class board or laptop via Tailscale Funnel ([`docs/CLOUD.md`](docs/CLOUD.md))
 - **Ops** — Prometheus, Helm, air-gap packaging, non-root image
 
@@ -125,6 +126,7 @@ GPU warm state and dynamic batching affect absolute latency. See the
 | [`docs/QUICKSTART.md`](docs/QUICKSTART.md) | First successful run |
 | [`docs/CONSOLE.md`](docs/CONSOLE.md) | Operator console: pages, roles, control-plane connection, development |
 | [`docs/CLOUD.md`](docs/CLOUD.md) | Meridian Cloud: accounts, workspaces, free self-hosting with Tailscale Funnel |
+| [`docs/COMPUTE.md`](docs/COMPUTE.md) | Meridian Compute: GPU marketplace, billing, jobs, the `meridian compute` CLI |
 | [`docs/CONFIGURATION.md`](docs/CONFIGURATION.md) | Full config + auth/budgets/PII examples |
 | [`docs/DEPLOY.md`](docs/DEPLOY.md) · [`docs/OPS_RUNBOOK.md`](docs/OPS_RUNBOOK.md) | Production |
 | [`docs/README.md`](docs/README.md) | **Index of all docs** |

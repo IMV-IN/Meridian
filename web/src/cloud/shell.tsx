@@ -12,9 +12,12 @@ import {
   Network,
   Plus,
   Settings,
+  SquareTerminal,
+  Store,
   Sun,
   Ticket,
   UserRound,
+  Wallet,
   Waypoints,
   type LucideIcon,
 } from "lucide-react"
@@ -92,6 +95,14 @@ const NAV: { label: string; items: CloudNav[] }[] = [
     items: [
       { title: "Overview", to: "/", icon: LayoutDashboard },
       { title: "Gateways", to: "/gateways", icon: Network },
+    ],
+  },
+  {
+    label: "Compute",
+    items: [
+      { title: "Marketplace", to: "/marketplace", icon: Store },
+      { title: "Jobs", to: "/jobs", icon: SquareTerminal },
+      { title: "Billing", to: "/billing", icon: Wallet },
     ],
   },
   {

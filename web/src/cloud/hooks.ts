@@ -38,3 +38,30 @@ export function useGatewayTokens(enabled = true) {
     enabled,
   })
 }
+
+function useLive<T>(key: string, fn: (ws: string, signal: AbortSignal) => Promise<T>, enabled = true, extra: string[] = []) {
+  const ws = useWorkspace()
+  const { interval } = useSettings()
+  return useQuery({
+    queryKey: ["cloud", key, ws.id, ...extra],
+    queryFn: ({ signal }) => fn(ws.id, signal),
+    refetchInterval: interval ? Math.max(interval, 5000) : false,
+    enabled,
+  })
+}
+
+export const useOffers = (mine = false) => useLive(mine ? "my-offers" : "offers", (ws, s) => cloud.offers(ws, mine, s))
+export const useRentals = () => useLive("rentals", cloud.rentals)
+export const useJobs = () => useLive("jobs", cloud.jobs)
+export const useJob = (id: string) => useLive("job", (ws, s) => cloud.job(ws, id, s), true, [id])
+export const useBilling = () => useLive("billing", cloud.billing)
+export const useListableNodes = (enabled: boolean) => useLive("listable-nodes", cloud.listableNodes, enabled)
+
+export function useApiKeys(enabled = true) {
+  const ws = useWorkspace()
+  return useQuery({ queryKey: ["cloud", "api-keys", ws.id], queryFn: ({ signal }) => cloud.apiKeys(ws.id, signal), enabled })
+}
+
+export function usePlatformSummary(enabled: boolean) {
+  return useQuery({ queryKey: ["cloud", "platform"], queryFn: ({ signal }) => cloud.platformSummary(signal), enabled })
+}

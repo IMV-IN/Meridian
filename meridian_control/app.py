@@ -77,4 +77,43 @@ def _install_cloud(app: FastAPI, config: ControlConfig, session_factory, now: Op
         if now is not None
         else AccountsService(session_factory, config, mailer, secret)
     )
+    from .compute import ComputeService
+
+    compute = (
+        ComputeService(session_factory, config, secret, now=now)
+        if now is not None
+        else ComputeService(session_factory, config, secret)
+    )
+    app.state.compute = compute
+    app.state.control_service.compute = compute
     install_cloud(app, config)
+    if config.compute_tick_seconds > 0 and now is None:
+        _start_compute_ticker(app, compute, config.compute_tick_seconds)
+
+
+def _start_compute_ticker(app: FastAPI, compute, interval: int) -> None:
+    """Meter rentals and settle jobs in the background. Every pass is
+    idempotent, so several control replicas may each run one."""
+    import asyncio
+    import logging
+
+    from starlette.concurrency import run_in_threadpool
+
+    log = logging.getLogger("meridian_control.compute")
+
+    async def loop() -> None:
+        while True:
+            await asyncio.sleep(interval)
+            try:
+                await run_in_threadpool(compute.tick)
+            except Exception:
+                log.exception("compute tick failed")
+
+    async def start() -> None:
+        app.state.compute_ticker = asyncio.create_task(loop())
+
+    async def stop() -> None:
+        app.state.compute_ticker.cancel()
+
+    app.router.on_startup.append(start)
+    app.router.on_shutdown.append(stop)

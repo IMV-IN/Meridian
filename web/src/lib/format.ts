@@ -62,6 +62,21 @@ export function formatPercent(v: number | null | undefined, digits = 1): string 
   return `${pct.toFixed(pct === 100 || pct === 0 ? 0 : digits)}%`
 }
 
+/** Indian rupees from integer paise, with Indian digit grouping: 1234567 → ₹12,345.67. */
+export function formatINR(paise: number | null | undefined, opts: { signed?: boolean } = {}): string {
+  if (paise === null || paise === undefined || Number.isNaN(paise)) return "—"
+  const abs = Math.abs(Math.trunc(paise))
+  const whole = Math.floor(abs / 100).toLocaleString("en-IN")
+  const sign = paise < 0 ? "−" : opts.signed && paise > 0 ? "+" : ""
+  return `${sign}₹${whole}.${String(abs % 100).padStart(2, "0")}`
+}
+
+/** VRAM in whole GB, the way GPUs are sold: 85899345920 → "80 GB". */
+export function formatVram(bytes: number | null | undefined): string {
+  if (!bytes) return "—"
+  return `${Math.round(bytes / 1024 ** 3)} GB`
+}
+
 const UNITS = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"]
 export function formatBytes(v: number | null | undefined, digits = 1): string {
   if (v === null || v === undefined || Number.isNaN(v)) return "—"

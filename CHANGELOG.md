@@ -4,6 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Meridian Compute: GPU marketplace, per-second billing and jobs** ([`docs/COMPUTE.md`](docs/COMPUTE.md)).
+  - A workspace lists a node's GPUs at a price per GPU-hour; another rents them exclusively.
+    The renter pays the provider's price plus a 2% fee (`MERIDIAN_CONTROL_MARKET_FEE_BPS`),
+    metered per second in integer paise on an append-only ledger. Credit is prepaid; a rental
+    ends itself when credit runs out.
+  - Jobs and services: digest-pinned containers on own or rented GPUs, placed all-or-nothing,
+    with rank and peer addresses for multi-node training. `run --offer` rents for one job only.
+  - The control plane composes each node's `jobs` list, so a host cannot read or change a
+    tenant's job and a tenant cannot touch a host's engines.
+  - Workspace API keys (`mck_…`) and a `meridian compute` CLI. Console: Marketplace, Jobs, Billing.
+  - Migration `c4e8b2a61f37` (additive). Needs `meridian-node` with jobs support on the hosts.
+  - Not included: payment gateway, GST invoices, cross-organisation networking, job secrets.
+
 - **Public site and one-line installer on Meridian Cloud.**
   - `/` explains the product (a live routing diagram, what the gateway does, how gateways,
     Meridian Cloud and GPU nodes fit, and exactly what reaches the cloud).

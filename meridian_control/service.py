@@ -16,7 +16,7 @@ import json
 import secrets
 import urllib.parse
 from datetime import datetime, timedelta, timezone
-from typing import Callable, Optional, cast
+from typing import TYPE_CHECKING, Callable, Optional, cast
 
 from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
@@ -34,6 +34,9 @@ from .models import (
     ObservationRow,
     StopAuthorization,
 )
+
+if TYPE_CHECKING:
+    from .compute import ComputeService
 
 
 class ControlServiceError(Exception):
@@ -69,6 +72,9 @@ class ControlService:
         self._ca = ca
         self._config = config
         self._now = now
+        # Meridian Compute (cloud mode). When set, it owns the `jobs` list of
+        # every desired snapshot and is told about each observation.
+        self.compute: Optional["ComputeService"] = None
 
     def _ttl(self) -> timedelta:
         return timedelta(seconds=self._config.lease_ttl_seconds)
@@ -133,6 +139,14 @@ class ControlService:
         with self._sf() as s:
             node = self._scoped_node(s, node_id, workspace_id)
             generation = int(snapshot["generation"])
+            if self.compute is not None:
+                if generation <= node.desired_generation:
+                    raise ControlServiceError(
+                        "LOWER_GENERATION",
+                        f"this node is already at generation {node.desired_generation}; reload and publish again",
+                        http_status=409,
+                    )
+                snapshot = self.compute.merge_owner_snapshot(s, node_id, snapshot)
             existing = s.scalar(
                 select(DesiredSnapshotRow).where(
                     DesiredSnapshotRow.node_id == node_id, DesiredSnapshotRow.generation == generation
@@ -366,6 +380,9 @@ class ControlService:
                 raise ControlServiceError("CONFLICT", "sequence is not greater than highest accepted", http_status=409)
             node.highest_sequence = request["sequence"]
             node.lease_expires_at = self._now() + self._ttl()
+            gpus = request.get("gpus")
+            if isinstance(gpus, list) and gpus[:64] != (node.inventory or []):
+                node.inventory = gpus[:64]
             stop_ids = [
                 r.engine_id for r in s.scalars(
                     select(StopAuthorization).where(StopAuthorization.node_id == node_id)
@@ -418,7 +435,9 @@ class ControlService:
                 row.observation = observation
                 row.updated_at = self._now()
             s.commit()
-            return {"received": True}
+        if self.compute is not None:
+            self.compute.on_observation(node_id)
+        return {"received": True}
 
     # --- placement (Phase 5, control side) -----------------------------
     def select_placement(

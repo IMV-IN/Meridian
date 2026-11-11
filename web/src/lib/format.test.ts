@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest"
 import {
   backendLabel,
   formatBytes,
+  formatINR,
+  formatVram,
   formatEwma,
   formatMs,
   formatMsShort,
@@ -68,5 +70,23 @@ describe("capabilitiesFor mirrors IdentityContext.can_*", () => {
     [{ role: null, cost_admin: false, ops_admin: true }, { view_ops: true, reload: true, manage_keys: true, read_all_cost: false }],
   ] as const)("%o", (k, expected) => {
     expect(capabilitiesFor(k)).toEqual(expected)
+  })
+})
+
+describe("formatINR", () => {
+  it("formats integer paise as rupees with Indian grouping", () => {
+    expect(formatINR(20400)).toBe("₹204.00")
+    expect(formatINR(5)).toBe("₹0.05")
+    expect(formatINR(1234567805)).toBe("₹1,23,45,678.05")
+    expect(formatINR(0)).toBe("₹0.00")
+  })
+  it("marks debits and, when asked, credits", () => {
+    expect(formatINR(-10200)).toBe("−₹102.00")
+    expect(formatINR(10200, { signed: true })).toBe("+₹102.00")
+    expect(formatINR(null)).toBe("—")
+  })
+  it("formats VRAM in GB", () => {
+    expect(formatVram(80 * 1024 ** 3)).toBe("80 GB")
+    expect(formatVram(0)).toBe("—")
   })
 })

@@ -326,7 +326,9 @@ try {
     const ws = me.workspaces[0].id
     const gws = await page.evaluate(async (w) => (await fetch(`/api/w/${w}/gateways`)).json(), ws)
     const nodes = await page.evaluate(async (w) => (await fetch(`/api/w/${w}/nodes`)).json(), ws)
-    routes = ["/", "/gateways", "/gateways?connect=1", "/fleet", "/fleet/enrollment", "/fleet/serving", "/fleet/audit", "/settings", "/settings?tab=members", "/settings?tab=tokens", "/settings?tab=account", "/does-not-exist"]
+    routes = ["/", "/gateways", "/gateways?connect=1", "/fleet", "/fleet/enrollment", "/fleet/serving", "/fleet/audit", "/marketplace", "/marketplace?tab=rentals", "/marketplace?tab=listings&list=1", "/jobs", "/jobs?new=1", "/billing", "/settings", "/settings?tab=members", "/settings?tab=tokens", "/settings?tab=account", "/does-not-exist"]
+    const jobs = await page.evaluate(async (w) => (await fetch(`/api/w/${w}/jobs`)).json(), ws)
+    if (jobs.jobs?.[0]) routes.push(`/jobs/${encodeURIComponent(jobs.jobs[0].id)}`)
     if (gws.gateways?.[0]) routes.push(`/gateways/${encodeURIComponent(gws.gateways[0].gateway_id)}`)
     if (nodes.nodes?.[0]) routes.push(`/fleet/nodes/${encodeURIComponent(nodes.nodes[0].node_id)}`)
     await ctx.close()
