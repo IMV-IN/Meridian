@@ -601,13 +601,23 @@ def mount_console(app: FastAPI, cfg: ControlConfig) -> None:
             return RedirectResponse("/ui/", status_code=302)
         return HTMLResponse(page.read_text(encoding="utf-8"), headers={**_UI_HEADERS, "Cache-Control": "no-cache"})
 
-    # Public site: what Meridian is (/) and the install configurator (/install).
+    # Public site: what Meridian is (/), the pages for labs (/labs) and teaching
+    # (/teaching), and the install configurator (/install). One React bundle serves all of
+    # them; the client router picks the page.
     @app.get("/", include_in_schema=False)
     def root():
         return site()
 
     @app.get("/install", include_in_schema=False)
     def install_page():
+        return site()
+
+    @app.get("/labs", include_in_schema=False)
+    def labs_page():
+        return site()
+
+    @app.get("/teaching", include_in_schema=False)
+    def teaching_page():
         return site()
 
     @app.get("/ui", include_in_schema=False)

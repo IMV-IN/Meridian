@@ -128,6 +128,22 @@ so raw keys, upstream `auth_header` values and file paths are never included.
 | `GET /admin/nodes`, `/admin/nodes/{id}` (control) | network | node summaries. Detail adds the latest observation, desired snapshot, certificate validity, stop authorizations and recent audit events. |
 | `GET /admin/claims?status=`, `/admin/tokens`, `/admin/audit` (control) | network | enrollment claims, tokens by hash prefix (never the token), and the audit trail |
 
+## Public site
+
+A cloud-mode `meridian-control` also serves a public site from the same bundle as the console
+(`web/site.html`, source in `web/src/website/`): `/` for what Meridian is, `/labs` for institutes that share GPUs,
+`/teaching` for courses, and `/install` for the install configurator. Nothing on it needs a sign-in.
+
+- It reads one feed, `GET /api/public/offers` (see [`COMPUTE.md`](COMPUTE.md#public-listings-feed-for-a-website)),
+  with TanStack Query, every 30 seconds. It shows each listing's **region**, never `provider_name`: providers have
+  not agreed to be named. While the feed loads, is empty or fails, the page says so. The console recreations (job
+  page, usage report, Compute limits) are labelled sample data.
+- The template list in `web/src/website/templates.ts` is a copy of `meridian_control/templates.py`;
+  `tests/control/test_site_templates.py` fails if they drift.
+- Fonts come from `@fontsource` packages, so the site makes no request to any CDN. Under `prefers-reduced-motion`
+  the demo animations show their final state and do not run.
+- An older console build without `site.html` makes `/`, `/labs` and `/teaching` redirect to `/ui/`.
+
 ## Develop
 
 ```bash

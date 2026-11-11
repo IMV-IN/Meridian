@@ -229,7 +229,8 @@ your first workspace.
 
 ## Install a gateway with one command
 
-Meridian Cloud serves a public site: `/` explains the product and `/install`
+Meridian Cloud serves a public site: `/` explains the product, `/labs` and
+`/teaching` are for institutes that share GPUs and for courses, and `/install`
 builds an install command from the options you pick (port, model servers,
 routing strategy, retries and circuit breaker, session affinity, tiering, API
 keys, Meridian Cloud connection, rate limits, budgets, PII policy, cost

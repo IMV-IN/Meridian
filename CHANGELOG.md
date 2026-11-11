@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **New public site.** `/` is rewritten and `/labs` (institutes sharing GPUs) and `/teaching` (courses) are added,
+  served by `meridian-control` next to `/install`. The site reads `GET /api/public/offers` (loading, empty and
+  error states; regions, never `provider_name`), with a rental cost calculator, an earnings estimator, the job
+  templates, and console recreations marked as sample data. The install command shown is
+  `curl -fsSL <origin>/install.sh | bash`. Fonts are bundled (`@fontsource`), no CDN. Console under `/ui`
+  unchanged. No migration.
+
 - **Public listings feed.** `GET /api/public/offers` (no sign-in, cloud mode only) returns up to 100 public, listed
   offers, `total_offers`, and a summary of all of them (available GPUs, GPUs by model, regions, lowest price) with no
   node, device, listing or workspace ids.

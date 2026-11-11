@@ -49,9 +49,10 @@ def test_site_pages(tmp_path, clock):
     (dist / "index.html").write_text("<html><head></head><body>console</body></html>")
     (dist / "site.html").write_text("<html><head></head><body>site</body></html>")
     c = make(tmp_path, clock, console_dir=str(dist))
-    for path in ("/", "/install"):
+    for path in ("/", "/install", "/labs", "/teaching"):
         r = c.get(path, follow_redirects=False)
         assert r.status_code == 200 and "site" in r.text
         assert "frame-ancestors 'none'" in r.headers["content-security-policy"]
     (dist / "site.html").unlink()
-    assert c.get("/", follow_redirects=False).headers["location"] == "/ui/"  # older builds
+    for path in ("/", "/labs", "/teaching"):  # older builds
+        assert c.get(path, follow_redirects=False).headers["location"] == "/ui/"
