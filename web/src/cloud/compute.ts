@@ -8,6 +8,36 @@ export function splitArgs(text: string): string[] {
   return out
 }
 
+/** The inverse of splitArgs: quote what needs it so splitArgs(joinArgs(a)) equals a. */
+export function joinArgs(args: string[]): string {
+  return args.map((a) => (a !== "" && /^[^\s"'\\]+$/.test(a) ? a : `"${a.replace(/[\\"]/g, "\\$&")}"`)).join(" ")
+}
+
+/** NAME=value lines for the environment box. */
+export function formatEnv(env: Record<string, string>): string {
+  return Object.entries(env)
+    .map(([k, v]) => `${k}=${v}`)
+    .join("\n")
+}
+
+/** A time limit in seconds as the hours the form asks for ("" for no limit). */
+export function secondsToHours(seconds: number): string {
+  return seconds > 0 ? String(Number((seconds / 3600).toFixed(4))) : ""
+}
+
+/** How to open a running service, from its image: a notebook link or a curl call. Null for anything else. */
+export function serviceHint(image: string, endpoint: string, token: string | null): { title: string; code: string } | null {
+  if (!endpoint) return null
+  const base = endpoint.replace(/\/+$/, "")
+  const secret = token ?? "<token>"
+  const repo = image.split("@")[0]
+  if (/jupyter/i.test(repo)) return { title: "Open JupyterLab in your browser", code: `${base}/lab?token=${secret}` }
+  if (/vllm/i.test(repo)) {
+    return { title: "Call the model", code: `curl ${base}/v1/models -H "Authorization: Bearer ${secret}"` }
+  }
+  return null
+}
+
 /** KEY=VALUE lines → env map, or the first line that is not one. */
 export function parseEnv(text: string): { env: Record<string, string>; bad: string | null } {
   const env: Record<string, string> = {}

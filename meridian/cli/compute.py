@@ -67,14 +67,16 @@ def _parser() -> argparse.ArgumentParser:
     rel.add_argument("rental_id")
     sub.add_parser("balance", help="credit balance and burn rate")
     sub.add_parser("jobs", help="recent jobs")
+    sub.add_parser("templates", help="job templates you can start from with `run --template`")
 
     run = sub.add_parser("run", help="run a container on your own or rented GPUs")
-    run.add_argument("--image", required=True, help="digest-pinned image: <registry>/<repo>@sha256:<digest>")
+    run.add_argument("--template", help="start from a template (see `meridian compute templates`); flags override it")
+    run.add_argument("--image", help="digest-pinned image <registry>/<repo>@sha256:<digest> (optional with --template)")
     run.add_argument("--name")
-    run.add_argument("--gpus", type=int, default=1, help="GPUs per replica (default 1)")
-    run.add_argument("--replicas", type=int, default=1, help="replicas, for multi-node training (default 1)")
-    run.add_argument("--min-vram-gb", type=int, default=0)
-    run.add_argument("--timeout", type=int, default=0, help="seconds; 0 = no limit")
+    run.add_argument("--gpus", type=int, help="GPUs per replica (default 1)")
+    run.add_argument("--replicas", type=int, help="replicas, for multi-node training (default 1)")
+    run.add_argument("--min-vram-gb", type=int)
+    run.add_argument("--timeout", type=int, help="seconds; 0 = no limit")
     run.add_argument("--service", action="store_true", help="long-running service with a port, not a batch job")
     run.add_argument("-e", "--env", action="append", default=[], metavar="KEY=VALUE")
     where = run.add_mutually_exclusive_group()
@@ -203,7 +205,17 @@ def _dispatch(args: argparse.Namespace, api: Api, out: Callable[[str], None], sl
                          str(j["replicas"] * j["gpus_per_replica"]), j["created_at"]])
         _table(rows, out)
         return 0
+    if args.command == "templates":
+        templates = api.call("GET", "/job-templates")["templates"]
+        rows = [["ID", "TYPE", "GPUS", "WHAT IT DOES"]]
+        for t in templates:
+            rows.append([t["id"], t["kind"], f"{t['replicas']} x {t['gpus_per_replica']}", t["summary"]])
+        _table(rows, out)
+        out("Run one with: meridian compute run --template <id> [--follow]")
+        return 0
     if args.command == "run":
+        if not args.template and not args.image:
+            raise CliError("give --image, or start from a template with --template (see `meridian compute templates`)")
         env = {}
         for item in args.env:
             name, sep, value = item.partition("=")
@@ -211,11 +223,21 @@ def _dispatch(args: argparse.Namespace, api: Api, out: Callable[[str], None], sl
                 raise CliError(f"--env expects KEY=VALUE, got {item!r}")
             env[name] = value
         command = args.args[1:] if args.args[:1] == ["--"] else args.args
-        body: dict = {
-            "image": args.image, "args": command, "env": env, "gpus_per_replica": args.gpus,
-            "replicas": args.replicas, "min_vram_gb": args.min_vram_gb, "timeout_seconds": args.timeout,
-            "kind": "service" if args.service else "job",
+        # With a template, send only what was asked for: the template supplies the rest.
+        body: dict = {"template": args.template} if args.template else {
+            "args": [], "env": {}, "gpus_per_replica": 1, "replicas": 1, "min_vram_gb": 0, "timeout_seconds": 0,
+            "kind": "job",
         }
+        for key, value in (("image", args.image), ("gpus_per_replica", args.gpus), ("replicas", args.replicas),
+                           ("min_vram_gb", args.min_vram_gb), ("timeout_seconds", args.timeout)):
+            if value is not None:
+                body[key] = value
+        if command:
+            body["args"] = command
+        if env:
+            body["env"] = env
+        if args.service:
+            body["kind"] = "service"
         if args.name:
             body["name"] = args.name
         if args.offer:

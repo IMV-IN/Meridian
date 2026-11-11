@@ -13,6 +13,7 @@ from fastapi import Body, Depends, Query, Request, Response
 
 from .accounts import ROLE_RANK, Principal
 from .compute import ComputeService
+from .templates import list_templates
 from .web import Ctx, admin, api_router, operator, principal, viewer, w
 
 
@@ -73,6 +74,11 @@ def jobs(request: Request, status: Optional[str] = Query(None), limit: int = Que
 def submit_job(request: Request, body: dict = Body(...), ctx: Ctx = Depends(operator)):
     may_rent = ROLE_RANK[ctx[2]] >= ROLE_RANK["admin"]
     return _compute(request).submit_job(ctx[1], ctx[0].email, body, may_rent=may_rent)
+
+
+@w.get("/job-templates")
+def job_templates(ctx: Ctx = Depends(viewer)):
+    return {"templates": list_templates()}
 
 
 @w.get("/jobs/{job_id}")

@@ -58,6 +58,7 @@ from .models import (
 )
 from .security import new_id, sha256_hex
 from .service import ControlServiceError
+from .templates import apply_template
 
 CURRENCY = "INR"
 IMAGE_REF = re.compile(r"^[a-z0-9]([a-z0-9._:-]*[a-z0-9])?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)+@sha256:[0-9a-f]{64}$")
@@ -708,7 +709,7 @@ class ComputeService:
     @_locked
     def submit_job(self, workspace_id: str, actor: str, body: dict, may_rent: bool = False) -> dict:
         now = self._now()
-        spec = self._validate_job(body)
+        spec = self._validate_job(apply_template(body))
         offer_id, rental_id = body.get("offer_id"), body.get("rental_id")
         if offer_id and rental_id:
             raise err("INVALID_FIELD", "give offer_id or rental_id, not both")
