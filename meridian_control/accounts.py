@@ -55,6 +55,7 @@ from .security import (
     unsign,
 )
 from .service import ControlServiceError
+from .validation import clean_text, strip_control
 
 logger = logging.getLogger("meridian_control.accounts")
 
@@ -289,7 +290,7 @@ class AccountsService:
             user = self._upsert_user(
                 s,
                 email=email,
-                name=str(claims.get("name", ""))[:200],
+                name=strip_control(str(claims.get("name", ""))).strip()[:200],
                 avatar=str(claims.get("picture", ""))[:1024],
                 google_sub=str(claims["sub"]),
             )
@@ -465,9 +466,7 @@ class AccountsService:
             }
 
     def update_profile(self, p: Principal, name: str) -> dict:
-        name = (name or "").strip()
-        if not 1 <= len(name) <= 200:
-            raise err("INVALID_NAME", "name must be 1–200 characters", 400)
+        name = clean_text(name, "name", 1, 200, code="INVALID_NAME")
         with self._sf() as s:
             user = s.get(User, p.user_id)
             user.name = name
@@ -476,9 +475,7 @@ class AccountsService:
 
     # -------------------------------------------------------------- workspaces
     def create_workspace(self, p: Principal, name: str) -> dict:
-        name = (name or "").strip()
-        if not 2 <= len(name) <= 120:
-            raise err("INVALID_NAME", "workspace name must be 2–120 characters", 400)
+        name = clean_text(name, "workspace name", 2, 120, code="INVALID_NAME")
         with self._sf() as s:
             owned = s.scalar(
                 select(func.count())
@@ -527,9 +524,7 @@ class AccountsService:
 
     def rename_workspace(self, p: Principal, workspace_id: str, name: str) -> dict:
         role = self.require_role(p, workspace_id, "admin")
-        name = (name or "").strip()
-        if not 2 <= len(name) <= 120:
-            raise err("INVALID_NAME", "workspace name must be 2–120 characters", 400)
+        name = clean_text(name, "workspace name", 2, 120, code="INVALID_NAME")
         with self._sf() as s:
             ws = s.get(Workspace, workspace_id)
             ws.name = name
@@ -696,7 +691,7 @@ class AccountsService:
     # ---------------------------------------------------------- gateway tokens
     def create_gateway_token(self, p: Principal, workspace_id: str, name: str) -> tuple[str, dict]:
         self.require_role(p, workspace_id, "admin")
-        name = (name or "").strip() or "gateway"
+        name = clean_text(name or "", "name", 0, 120, code="INVALID_NAME") or "gateway"
         token = "mgw_" + secrets.token_urlsafe(32)
         with self._sf() as s:
             active = s.scalar(
@@ -902,11 +897,11 @@ class AccountsService:
                         workspace_id=gp.workspace_id,
                         actor=f"gateway:{gid}",
                         kind="gateway_connected",
-                        detail=str(report.get("name", ""))[:200],
+                        detail=strip_control(str(report.get("name", "")))[:200],
                     )
                 )
-            row.name = str(report.get("name", "") or gid)[:200]
-            row.version = str(report.get("version", ""))[:40]
+            row.name = strip_control(str(report.get("name", "") or gid))[:200]
+            row.version = strip_control(str(report.get("version", "")))[:40]
             row.token_id = gp.token_id
             row.last_seen_at = now
             stored = {**report, "received_at": _iso(now)}

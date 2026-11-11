@@ -331,7 +331,9 @@ def nodes(request: Request, ctx: Ctx = Depends(viewer)):
 @w.get("/nodes/{node_id}")
 def node(request: Request, node_id: str, ctx: Ctx = Depends(viewer)):
     detail = _svc(request).node_detail(node_id, workspace_id=ctx[1])
-    return request.app.state.compute.redact_node_detail(ctx[1], detail)
+    # Rendered job args and env hold service tokens and credentials: operators and up only.
+    reveal = ROLE_RANK[ctx[2]] >= ROLE_RANK["operator"]
+    return request.app.state.compute.redact_node_detail(ctx[1], detail, reveal=reveal)
 
 
 @w.get("/claims")
@@ -363,8 +365,8 @@ def crl(request: Request, ctx: Ctx = Depends(viewer)):
 
 @w.post("/tokens", status_code=201)
 def mint_token(request: Request, body: dict = Body(default={}), ctx: Ctx = Depends(operator)):
-    ttl = int(body.get("ttl_seconds", 3600))
-    if not 300 <= ttl <= 7 * 86400:
+    ttl = body.get("ttl_seconds", 3600)
+    if isinstance(ttl, bool) or not isinstance(ttl, int) or not 300 <= ttl <= 7 * 86400:
         raise err("INVALID_TTL", "ttl_seconds must be between 300 and 604800", 400)
     token = _svc(request).create_token(
         auto_approve=bool(body.get("auto_approve", False)), ttl_seconds=ttl, workspace_id=ctx[1], actor=ctx[0].email
@@ -407,11 +409,11 @@ def revoke(request: Request, node_id: str, ctx: Ctx = Depends(admin)):
 
 @w.post("/place")
 def place(request: Request, body: dict = Body(...), ctx: Ctx = Depends(viewer)):
+    vram, count = body.get("required_vram_bytes", 0), body.get("count", 1)
+    if any(isinstance(x, bool) or not isinstance(x, int) for x in (vram, count)):
+        raise err("INVALID_FIELD", "required_vram_bytes and count must be integers", 400)
     placement = _svc(request).select_placement(
-        int(body.get("required_vram_bytes", 0)),
-        count=max(1, min(int(body.get("count", 1)), 16)),
-        artifact_digest=body.get("artifact_digest"),
-        workspace_id=ctx[1],
+        vram, count=max(1, min(count, 16)), artifact_digest=body.get("artifact_digest"), workspace_id=ctx[1],
     )
     return {"placement": placement}
 

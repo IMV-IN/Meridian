@@ -1,8 +1,7 @@
 // The public marketplace feed: GET /api/public/offers (meridian_control/compute.py, public_offers).
 // Same origin as the site, so no CORS. Money is integer paise.
 //
-// The feed also carries `provider_name`. It is deliberately left out of this type: the site
-// does not name providers (they have not agreed to it), so it shows the region instead.
+// The feed does not name providers (they have not agreed to it), so the site shows the region instead.
 
 export interface PublicOffer {
   title: string

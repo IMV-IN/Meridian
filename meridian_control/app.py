@@ -14,7 +14,7 @@ from fastapi import FastAPI
 from .ca import NodeCA
 from .config import ControlConfig
 from .db import make_session_factory
-from .routes import admin_router, register_error_handler, router
+from .routes import BodyLimit, admin_router, register_error_handler, router
 from .service import ControlService
 
 
@@ -39,6 +39,8 @@ def create_app(config: Optional[ControlConfig] = None, now: Optional[Callable] =
             allow_methods=["GET", "POST"],
             allow_headers=["content-type", "authorization"],
         )
+    # Every route, node-facing ones included: a body over its limit is 413 before it is parsed.
+    app.add_middleware(BodyLimit, config=config)
     app.include_router(router)
     if config.legacy_admin_enabled:
         app.include_router(admin_router)

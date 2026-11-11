@@ -13,6 +13,7 @@ import { BrandPanel } from "@/pages/sign-in"
 import { autoFocusDesktop } from "@/lib/utils"
 
 import { cloud } from "../api"
+import { safeReturnPath } from "../safe-return"
 import { useCloud } from "../session"
 
 const AUTH_ERRORS: Record<string, string> = {
@@ -41,11 +42,6 @@ function GoogleMark() {
 function message(e: unknown): string {
   if (e instanceof ApiError) return e.isNetwork ? "Can't reach Meridian Cloud. Check your connection." : e.message
   return "Something went wrong."
-}
-
-function safeReturnPath(value: string | null): string | null {
-  if (!value || !value.startsWith("/") || value.startsWith("//") || /[\\\r\n]/.test(value)) return null
-  return value
 }
 
 export function CloudSignIn() {

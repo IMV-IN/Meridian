@@ -32,14 +32,18 @@ import functools
 import hashlib
 import hmac
 import json
+import logging
 import re
 import secrets
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Callable, Iterable, Optional, TypeVar, cast
+from typing import Any, Callable, Iterable, Iterator, Optional, TypeVar, cast
 
 from sqlalchemy import func, select, update
 
+from . import validation
+from .accounts import ROLE_RANK
 from .config import ControlConfig
 from .models import (
     PLATFORM_ACCOUNT,
@@ -61,9 +65,11 @@ from .security import new_id, sha256_hex
 from .service import ControlServiceError
 from .templates import apply_template
 
+log = logging.getLogger("meridian_control.compute")
+
 CURRENCY = "INR"
 IMAGE_REF = re.compile(r"^[a-z0-9]([a-z0-9._:-]*[a-z0-9])?(/[a-z0-9]([a-z0-9._-]*[a-z0-9])?)+@sha256:[0-9a-f]{64}$")
-ENV_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]{0,127}$")
+MASKED = "********"  # an environment value shown to a role that may not read it
 TERMINAL_JOB = ("succeeded", "failed", "cancelled")
 TERMINAL_REPLICA = frozenset({"Succeeded", "Failed", "Cancelled"})
 REPLICA_PHASES = frozenset({"Pending", "Starting", "Running"}) | TERMINAL_REPLICA
@@ -129,11 +135,16 @@ def _int(body: dict, key: str, default: int, lo: int, hi: int) -> int:
     return v
 
 
-def _text(body: dict, key: str, lo: int, hi: int, default: Optional[str] = None) -> str:
-    v = body.get(key, default)
-    if not isinstance(v, str) or not lo <= len(v.strip()) <= hi:
-        raise err("INVALID_FIELD", f"{key} must be {lo}–{hi} characters")
-    return v.strip()
+def _text(body: dict, key: str, lo: int, hi: int, default: Optional[str] = None, multiline: bool = False) -> str:
+    return validation.clean_text(body.get(key, default), key, lo, hi, multiline=multiline)
+
+
+def _clamp(d: datetime, lo: datetime, hi: datetime) -> datetime:
+    return max(lo, min(d, hi))
+
+
+def _masked_env(env: dict) -> dict:
+    return {k: MASKED for k in env}
 
 
 def _hours(seconds: int) -> float:
@@ -169,6 +180,17 @@ class ComputeService:
         self._public_feed: Optional[tuple[datetime, dict]] = None
 
     # ------------------------------------------------------------------ nodes
+    @contextmanager
+    def _isolated(self, s, kind: str, item_id: str) -> Iterator[None]:
+        """Run one item of a background pass in a savepoint. If it fails, undo only
+        that item and keep going: one bad node, offer, rental or job never stops
+        metering or scheduling for everyone else. Logs ids and the error type only."""
+        try:
+            with s.begin_nested():
+                yield
+        except Exception as e:  # noqa: BLE001 - isolation is the point
+            log.error("compute: skipped %s %s this pass (%s)", kind, item_id, type(e).__name__)
+
     def _online(self, node: Node, now: datetime) -> bool:
         return (not node.revoked) and node.lease_expires_at is not None and now < _aware(node.lease_expires_at)
 
@@ -180,15 +202,15 @@ class ComputeService:
 
     @staticmethod
     def _capacity(s, node_id: str) -> dict:
+        """The node's last reported capacity, validated; {} if it has none or it is invalid."""
         obs = s.get(ObservationRow, node_id)
-        cap = (obs.observation or {}).get("capacity") if obs is not None else None
-        return cap if isinstance(cap, dict) else {}
+        return validation.stored_capacity(obs.observation, node_id) if obs is not None else {}
 
     @staticmethod
     def _gpu_facts(node: Node, device_ids: Iterable[str], cap: dict) -> tuple[str, int]:
         """(model, VRAM per GPU) for a set of devices, from the node's inventory;
         falls back to the committed VRAM budget when the inventory lacks them."""
-        inv = {g.get("device_id"): g for g in (node.inventory or []) if isinstance(g, dict)}
+        inv = {g["device_id"]: g for g in validation.stored_inventory(node.inventory)}
         ids = list(device_ids)
         models = [str(inv[d].get("model") or "") for d in ids if d in inv]
         vram = [int(inv[d].get("memory_total_bytes") or 0) for d in ids if d in inv]
@@ -197,6 +219,16 @@ class ComputeService:
             vram = [int(alloc.get(d, 0)) for d in ids]
         model = max(set(models), key=models.count) if models else ""
         return model, (min(vram) if vram else 0)
+
+    @staticmethod
+    def _snapshot_load(s, node_id: str) -> int:
+        """Upper bound, in characters, on the job part of a node's desired snapshot."""
+        total = 0
+        for r in s.scalars(select(JobReplica).where(JobReplica.node_id == node_id, JobReplica.released.is_(False))):
+            job = s.get(Job, r.job_id)
+            if job is not None:
+                total += validation.spec_size(list(job.args or []), dict(job.env or {}), job.replicas)[0]
+        return total
 
     def _held(self, s, node_id: str) -> tuple[set[str], set[int]]:
         """Devices and ports held on a node by replicas it has not released."""
@@ -355,7 +387,7 @@ class ComputeService:
             dup = s.scalar(select(LedgerEntry).where(LedgerEntry.kind == "topup", LedgerEntry.reference == reference))
             if dup is not None:
                 raise err("DUPLICATE_REFERENCE", "a credit with this payment reference already exists", 409)
-            memo = str(body.get("memo", ""))[:400]
+            memo = validation.strip_control(str(body.get("memo", "")))[:400]
             self._post(s, ws.id, "topup", amount, reference=reference, memo=memo, actor=actor)
             self._audit(s, ws.id, actor, "credit_added", f"{amount} paise ref={reference}")
             s.commit()
@@ -374,7 +406,7 @@ class ComputeService:
                 raise err("DUPLICATE_REFERENCE", "a payout with this reference already exists", 409)
             if self._spendable(s, ws.id, now) < amount:
                 raise err("INSUFFICIENT_FUNDS", "payout exceeds the workspace's available balance", 409)
-            memo = str(body.get("memo", ""))[:400]
+            memo = validation.strip_control(str(body.get("memo", "")))[:400]
             self._post(s, ws.id, "payout", -amount, reference=reference, memo=memo, actor=actor)
             self._audit(s, ws.id, actor, "payout_recorded", f"{amount} paise ref={reference}")
             s.commit()
@@ -409,6 +441,13 @@ class ComputeService:
 
     # ----------------------------------------------------------------- offers
     def _offer_availability(self, s, o: MarketOffer, now: datetime) -> tuple[bool, str]:
+        try:
+            return self._offer_availability_unsafe(s, o, now)
+        except Exception as e:  # noqa: BLE001 - one listing never breaks the marketplace
+            log.error("compute: availability of offer %s failed (%s)", o.id, type(e).__name__)
+            return False, "unavailable"
+
+    def _offer_availability_unsafe(self, s, o: MarketOffer, now: datetime) -> tuple[bool, str]:
         if o.status != "listed":
             return False, o.status
         if self._active_rental_for_offer(s, o.id) is not None:
@@ -507,12 +546,12 @@ class ComputeService:
             q = select(MarketOffer).where(MarketOffer.status == "listed", MarketOffer.visibility == "public")
             for o in s.scalars(q):
                 hourly = o.price_paise_per_gpu_hour * o.gpu_count
-                owner = s.get(Workspace, o.workspace_id)
                 offers.append({
                     "title": o.title, "region": o.region, "gpu_model": o.gpu_model, "gpu_count": o.gpu_count,
                     "vram_bytes_per_gpu": o.vram_bytes_per_gpu, "price_paise_per_gpu_hour": o.price_paise_per_gpu_hour,
                     "hourly_total_paise": hourly + fee_for(hourly, self._c.market_fee_bps),
-                    "available": self._offer_availability(s, o, now)[0], "provider_name": owner.name if owner else "",
+                    # No provider name: providers have not agreed to be named on the public site.
+                    "available": self._offer_availability(s, o, now)[0],
                 })
         offers.sort(key=lambda o: (not o["available"], o["price_paise_per_gpu_hour"], o["title"]))
         free = [o for o in offers if o["available"]]  # the summary covers every listing, not only those shown
@@ -565,7 +604,7 @@ class ComputeService:
         now = self._now()
         title = _text(body, "title", 3, 120)
         region = _text(body, "region", 2, 80)
-        description = _text(body, "description", 0, 2000, default="")
+        description = _text(body, "description", 0, 2000, default="", multiline=True)
         node_id = str(body.get("node_id", ""))
         with self._sf() as s:
             visibility, shared = self._sharing(s, workspace_id, body, "public", [])
@@ -625,7 +664,7 @@ class ComputeService:
             if "region" in body:
                 o.region = _text(body, "region", 2, 80)
             if "description" in body:
-                o.description = _text(body, "description", 0, 2000)
+                o.description = _text(body, "description", 0, 2000, multiline=True)
             o.visibility, o.shared_with = self._sharing(s, workspace_id, body, o.visibility, list(o.shared_with or []))
             if "price_paise_per_gpu_hour" in body:
                 o.price_paise_per_gpu_hour = _int(
@@ -807,22 +846,13 @@ class ComputeService:
                 "image must be pinned by digest, like docker.io/pytorch/pytorch@sha256:<64 hex>. "
                 "A tag can change after you submit; a digest cannot.",
             )
-        args = body.get("args", [])
-        if not isinstance(args, list) or len(args) > 256 or not all(
-            isinstance(a, str) and len(a) <= 8192 and "\x00" not in a for a in args
-        ):
-            raise err("INVALID_FIELD", "args must be a list of at most 256 strings")
-        env = body.get("env", {})
-        if not isinstance(env, dict) or len(env) > 64:
-            raise err("INVALID_FIELD", "env must be an object with at most 64 variables")
-        for k, v in env.items():
-            if not isinstance(k, str) or not ENV_NAME.match(k) or k.startswith("MERIDIAN_"):
-                raise err("INVALID_FIELD", f"invalid environment variable name: {k!r} (MERIDIAN_* is reserved)")
-            if not isinstance(v, str) or len(v) > 8192 or "\x00" in v:
-                raise err("INVALID_FIELD", f"environment variable {k} must be a string of at most 8192 characters")
+        args = validation.check_args(body.get("args", []))
+        env = validation.check_env(body.get("env", {}))
         replicas = _int(body, "replicas", 1, 1, 64)
         if kind == "service" and replicas != 1:
             raise err("INVALID_FIELD", "a service runs as one replica")
+        # Placeholders expand on the node (`{{peers}}` grows with replicas): bound the result now.
+        validation.check_spec_size(args, env, replicas)
         default_name = image.split("@")[0].rsplit("/", 1)[-1]
         return {
             "name": _text(body, "name", 1, 120, default=default_name), "kind": kind, "image": image,
@@ -923,18 +953,21 @@ class ComputeService:
             "phases": [r.phase for r in replicas],
         }
         if full:
+            # Environment values can be credentials: operators and up only; viewers see the names.
+            env = dict(job.env or {})
             names = {
                 n.node_id: n.display_name for n in s.scalars(
                     select(Node).where(Node.node_id.in_([r.node_id for r in replicas] or [""]))
                 )
             }
             view.update({
-                "args": list(job.args or []), "env": dict(job.env or {}), "expose_port": job.expose_port,
+                "args": list(job.args or []), "env": env if reveal else _masked_env(env),
+                "expose_port": job.expose_port,
                 "placements": [
                     {
                         "rank": r.rank, "node_id": r.node_id, "node_name": names.get(r.node_id, ""),
                         "gpus": len(r.device_ids or []), "phase": r.phase, "exit_code": r.exit_code,
-                        "reason": r.reason, "message": r.message, "endpoint": r.endpoint,
+                        "reason": r.reason, "message": r.message, "endpoint": validation.valid_endpoint(r.endpoint),
                         "started_at": _iso(r.started_at), "finished_at": _iso(r.finished_at),
                         "log_tail": r.log_tail,
                     }
@@ -942,7 +975,7 @@ class ComputeService:
                 ],
             })
             if job.kind == "service":
-                endpoint = next((r.endpoint for r in replicas if r.endpoint), "")
+                endpoint = next((e for e in (validation.valid_endpoint(r.endpoint) for r in replicas) if e), "")
                 view["service"] = {"endpoint": endpoint, "token": self.service_token(job.id) if reveal else None}
         return view
 
@@ -1083,7 +1116,7 @@ class ComputeService:
                 group = body["group"]
                 if group is not None and (not isinstance(group, str) or len(group.strip()) > 64):
                     raise err("INVALID_FIELD", "group must be at most 64 characters")
-                m.group = (group.strip() or None) if isinstance(group, str) else None
+                m.group = (validation.clean_text(group, "group", 0, 64) or None) if isinstance(group, str) else None
             if "gpu_hour_quota" in body:
                 m.gpu_hour_quota = _quota(body["gpu_hour_quota"], "gpu_hour_quota")
             self._audit(s, workspace_id, actor, "member_compute_changed",
@@ -1116,29 +1149,15 @@ class ComputeService:
             ).order_by(Rental.started_at)))
             own = list(s.scalars(select(Node).where(Node.workspace_id == ws, Node.revoked.is_(False))
                                  .order_by(Node.created_at))) if own_nodes else []
-        out: list[dict] = []
+        out: list[Optional[dict]] = []
 
         def consider(node: Optional[Node], allowed: Optional[set[str]], blocked: set[str]) -> None:
             if node is None or not self._online(node, now):
                 return
-            cap = self._capacity(s, node.node_id)
-            if not cap.get("jobs_enabled"):
-                return
-            held_devices, held_ports = self._held(s, node.node_id)
-            alloc = cap.get("allocatable_vram_bytes") or {}
-            free = cap.get("free_devices")
-            pool = list(free) if isinstance(free, list) else [d for d, v in alloc.items() if int(v) > 0]
-            inv = {g.get("device_id"): g for g in (node.inventory or []) if isinstance(g, dict)}
-            devices = []
-            for d in sorted(pool):
-                if d in held_devices or d in blocked or (allowed is not None and d not in allowed):
-                    continue
-                vram = int((inv.get(d) or {}).get("memory_total_bytes") or alloc.get(d, 0))
-                if vram >= job.min_vram_bytes:
-                    devices.append(d)
-            rng = cap.get("job_port_range") or [0, 0]
-            ports = [p for p in range(int(rng[0]), int(rng[1])) if p not in held_ports]
-            out.append({"node": node, "devices": devices, "ports": ports, "host": str(cap.get("advertise_host") or "")})
+            try:
+                out.append(self._candidate(s, node, job, allowed, blocked))
+            except Exception as e:  # noqa: BLE001 - one bad node never blocks placement on the others
+                log.error("compute: skipped node %s as a candidate (%s)", node.node_id, type(e).__name__)
 
         for node in own:
             # GPUs on the marketplace are for sale: the owner's own new jobs stay off
@@ -1150,7 +1169,29 @@ class ComputeService:
             consider(node, None, blocked)
         for r in rentals:
             consider(s.get(Node, r.node_id), set(r.device_ids or []), set())
-        return out
+        return [c for c in out if c is not None]
+
+    def _candidate(self, s, node: Node, job: Job, allowed: Optional[set[str]], blocked: set[str]) -> Optional[dict]:
+        """One node's free devices and ports for `job`, from its validated capacity."""
+        cap = self._capacity(s, node.node_id)
+        if not cap.get("jobs_enabled"):
+            return None
+        held_devices, held_ports = self._held(s, node.node_id)
+        alloc: dict[str, int] = cap.get("allocatable_vram_bytes") or {}
+        free = cap.get("free_devices")
+        pool = list(free) if isinstance(free, list) else [d for d, v in alloc.items() if v > 0]
+        inv = {g["device_id"]: g for g in validation.stored_inventory(node.inventory)}
+        devices = []
+        for d in sorted(pool):
+            if d in held_devices or d in blocked or (allowed is not None and d not in allowed):
+                continue
+            vram = (inv.get(d) or {}).get("memory_total_bytes") or alloc.get(d, 0)
+            if vram >= job.min_vram_bytes:
+                devices.append(d)
+        start, stop = cap.get("job_port_range") or (0, 0)  # validated: at most MAX_JOB_PORTS ports
+        ports = [p for p in range(start, stop) if p not in held_ports]
+        return {"node": node, "devices": devices, "ports": ports, "host": cap.get("advertise_host") or "",
+                "load": self._snapshot_load(s, node.node_id)}
 
     def _place(self, s, job: Job, now: datetime) -> set[str]:
         """Place every replica or none. Returns the nodes that changed."""
@@ -1164,11 +1205,15 @@ class ComputeService:
             person = job.attributed_to or self._person(self._key_owners(s, job.workspace_id), job)
         over = self._quota_hit(s, job.workspace_id, person, now) if person else ""
         candidates = self._candidates(s, job, now, own_nodes=not over)
+        size = validation.spec_size(list(job.args or []), dict(job.env or {}), job.replicas)[0]
         plan: list[tuple[dict, list[str], int]] = []
         for _rank in range(job.replicas):
             for c in candidates:
                 if len(c["devices"]) < job.gpus_per_replica or (job.expose_port and not c["ports"]):
                     continue
+                if c["load"] + size > validation.MAX_SNAPSHOT_JOB_BYTES:
+                    continue  # the node's desired snapshot would grow past its limit
+                c["load"] += size
                 devices = [c["devices"].pop(0) for _ in range(job.gpus_per_replica)]
                 plan.append((c, devices, c["ports"].pop(0) if job.expose_port else 0))
                 break
@@ -1187,6 +1232,7 @@ class ComputeService:
             s.add(JobReplica(
                 job_id=job.id, rank=rank, node_id=c["node"].node_id, device_ids=devices, port=port,
                 host=c["host"], phase="Pending", reason="", message="", endpoint="", log_tail="", released=False,
+                scheduled_at=now,
             ))
         job.status, job.error = "scheduled", ""
         s.flush()
@@ -1206,39 +1252,13 @@ class ComputeService:
 
     def _advance(self, s, now: datetime) -> set[str]:
         """One pass over unfinished work: detect lost nodes, settle job status,
-        enforce timeouts, release finished replicas, place what is queued."""
+        enforce deadlines and timeouts, release finished replicas, place what is
+        queued. Each job and replica is isolated: one that fails is skipped."""
         dirty: set[str] = set()
         placed = select(Job).where(Job.status.in_(("scheduled", "running"))).order_by(Job.created_at)
         for job in list(s.scalars(placed)):
-            replicas = self._replicas(s, job.id)
-            if not replicas:
-                continue
-            for r in replicas:
-                if r.phase in TERMINAL_REPLICA:
-                    continue
-                node = s.get(Node, r.node_id)
-                if self._lost(node, now):
-                    r.phase, r.reason, r.finished_at = "Failed", "NodeLost", now
-                    r.message = "the node stopped reporting while this replica was running"
-            phases = [r.phase for r in replicas]
-            failed = next((r for r in replicas if r.phase in ("Failed", "Cancelled")), None)
-            if failed is not None:
-                detail = failed.message or failed.reason or "stopped"
-                dirty |= self._finish_job(s, job, "failed", f"replica {failed.rank}: {detail}", now)
-            elif all(p == "Succeeded" for p in phases):
-                if job.kind == "service":
-                    dirty |= self._finish_job(s, job, "failed", "the service exited", now)
-                else:
-                    dirty |= self._finish_job(s, job, "succeeded", "", now)
-            else:
-                if job.status == "scheduled" and all(p in ("Running", "Succeeded") for p in phases):
-                    job.status = "running"
-                if job.started_at is None and any(p != "Pending" for p in phases):
-                    job.started_at = min((_aware(r.started_at) for r in replicas if r.started_at), default=now)
-                if job.timeout_seconds and job.started_at and (
-                    (now - _aware(job.started_at)).total_seconds() > job.timeout_seconds
-                ):
-                    dirty |= self._finish_job(s, job, "failed", f"timed out after {job.timeout_seconds}s", now)
+            with self._isolated(s, "job", job.id):
+                dirty |= self._settle(s, job, now)
 
         # A finished job's replica leaves the snapshot once its node has stopped it
         # (or the node is gone and cannot be holding the GPU for us any more).
@@ -1246,57 +1266,109 @@ class ComputeService:
             JobReplica.released.is_(False), Job.status.in_(TERMINAL_JOB)
         )
         for r in list(s.scalars(pending_release)):
-            node = s.get(Node, r.node_id)
-            if r.phase in TERMINAL_REPLICA or self._lost(node, now):
-                if r.phase not in TERMINAL_REPLICA:
-                    r.phase, r.reason, r.finished_at = "Cancelled", "NodeLost", now
-                r.released = True
-                dirty.add(r.node_id)
+            with self._isolated(s, "replica", f"{r.job_id}/{r.rank}"):
+                node = s.get(Node, r.node_id)
+                if r.phase in TERMINAL_REPLICA or self._lost(node, now):
+                    if r.phase not in TERMINAL_REPLICA:
+                        r.phase, r.reason, r.finished_at = "Cancelled", "NodeLost", now
+                    r.released = True
+                    dirty.add(r.node_id)
         s.flush()
 
         for job in list(s.scalars(select(Job).where(Job.status == "queued").order_by(Job.created_at))):
-            dirty |= self._place(s, job, now)
+            with self._isolated(s, "job", job.id):
+                dirty |= self._place(s, job, now)
         return dirty
 
-    # -------------------------------------------------------- desired snapshot
-    def _render(self, value: str, ctx: dict[str, str]) -> str:
-        for key, sub in ctx.items():
-            value = value.replace("{{" + key + "}}", sub)
-        return value
+    def _settle(self, s, job: Job, now: datetime) -> set[str]:
+        """Fold a placed job's replica phases into its status. Deadlines run on the
+        control plane's clock: a node's reported times and phases can end a job
+        early (it stopped) but never keep it, or a rental pinned to it, alive."""
+        replicas = self._replicas(s, job.id)
+        if not replicas:
+            return set()
+        for r in replicas:
+            if r.scheduled_at is None:
+                r.scheduled_at = now  # placed before the control plane recorded placement times
+            if r.phase in TERMINAL_REPLICA:
+                continue
+            node = s.get(Node, r.node_id)
+            if self._lost(node, now):
+                r.phase, r.reason, r.finished_at = "Failed", "NodeLost", now
+                r.message = "the node stopped reporting while this replica was running"
+        phases = [r.phase for r in replicas]
+        failed = next((r for r in replicas if r.phase in ("Failed", "Cancelled")), None)
+        if failed is not None:
+            detail = failed.message or failed.reason or "stopped"
+            return self._finish_job(s, job, "failed", f"replica {failed.rank}: {detail}", now)
+        if all(p == "Succeeded" for p in phases):
+            if job.kind == "service":
+                return self._finish_job(s, job, "failed", "the service exited", now)
+            return self._finish_job(s, job, "succeeded", "", now)
+        if job.status == "scheduled" and all(p in ("Running", "Succeeded") for p in phases):
+            job.status = "running"
+        if job.started_at is None and any(p != "Pending" for p in phases):
+            # Replica start times are already clamped to when the control plane heard of them.
+            job.started_at = min((_aware(r.started_at) for r in replicas if r.started_at), default=now)
+        deadline = self._c.job_start_deadline_seconds
+        stuck = next((r for r in replicas if r.phase in ("Pending", "Starting")
+                      and (now - _aware(r.scheduled_at or now)).total_seconds() > deadline), None)
+        if stuck is not None:
+            return self._finish_job(s, job, "failed", f"replica {stuck.rank} did not start within "
+                                    f"{deadline // 60} minutes of being placed", now)
+        if job.timeout_seconds and job.started_at and (
+            (now - _aware(job.started_at)).total_seconds() > job.timeout_seconds
+        ):
+            return self._finish_job(s, job, "failed", f"timed out after {job.timeout_seconds}s", now)
+        return set()
 
+    # -------------------------------------------------------- desired snapshot
     def jobs_for_node(self, s, node_id: str) -> list[dict]:
         """The `jobs` list of a node's desired snapshot (contracts/v1)."""
         out: list[dict] = []
+        size = 0
         q = select(JobReplica).where(JobReplica.node_id == node_id, JobReplica.released.is_(False)) \
             .order_by(JobReplica.job_id, JobReplica.rank)
         for r in s.scalars(q):
             job = s.get(Job, r.job_id)
             if job is None:
                 continue
-            peers = [f"{p.host or '127.0.0.1'}:{p.port}" for p in self._replicas(s, job.id) if p.port]
-            ctx = {
-                "rank": str(r.rank), "replicas": str(job.replicas), "port": str(r.port or ""),
-                "peers": ",".join(peers), "master": peers[0] if peers else "", "job_id": job.id,
-                "service_token": self.service_token(job.id) if job.kind == "service" else "",
-            }
-            env = {k: self._render(v, ctx) for k, v in (job.env or {}).items()}
-            env.update({
-                "MERIDIAN_JOB_ID": job.id, "MERIDIAN_JOB_NAME": job.name,
-                "MERIDIAN_JOB_RANK": ctx["rank"], "MERIDIAN_JOB_REPLICAS": ctx["replicas"],
-            })
-            if r.port:
-                env.update({"MERIDIAN_JOB_PORT": ctx["port"], "MERIDIAN_JOB_PEERS": ctx["peers"],
-                            "MERIDIAN_JOB_MASTER": ctx["master"]})
-            if job.kind == "service":
-                env["MERIDIAN_SERVICE_TOKEN"] = ctx["service_token"]
-            out.append({
-                "job_id": job.id, "replica": r.rank, "kind": job.kind, "image": job.image,
-                "args": [self._render(a, ctx) for a in (job.args or [])], "env": env,
-                "device_ids": list(r.device_ids or []), "memory_limit_bytes": 0, "port": r.port,
-                "timeout_seconds": job.timeout_seconds,
-                "desired_phase": "Stopped" if job.status in TERMINAL_JOB else "Running",
-            })
+            item = self._replica_spec(s, job, r)
+            size += len(json.dumps(item))
+            if size > validation.MAX_SNAPSHOT_JOB_BYTES:
+                # Placement keeps snapshots under the limit; only rows from before it can get here.
+                log.error("compute: desired snapshot for node %s is over its size limit; left out %s/%s",
+                          node_id, r.job_id, r.rank)
+                continue
+            out.append(item)
         return out
+
+    def _replica_spec(self, s, job: Job, r: JobReplica) -> dict:
+        peers = [validation.host_port(p.host if validation.valid_host(p.host) else "127.0.0.1", p.port)
+                 for p in self._replicas(s, job.id) if p.port]
+        ctx = {
+            "rank": str(r.rank), "replicas": str(job.replicas), "port": str(r.port or ""),
+            "peers": ",".join(peers), "master": peers[0] if peers else "", "job_id": job.id,
+            "service_token": self.service_token(job.id) if job.kind == "service" else "",
+        }
+        # One pass: text substituted in is never scanned again for placeholders.
+        env = {k: validation.render(v, ctx) for k, v in (job.env or {}).items()}
+        env.update({
+            "MERIDIAN_JOB_ID": job.id, "MERIDIAN_JOB_NAME": job.name,
+            "MERIDIAN_JOB_RANK": ctx["rank"], "MERIDIAN_JOB_REPLICAS": ctx["replicas"],
+        })
+        if r.port:
+            env.update({"MERIDIAN_JOB_PORT": ctx["port"], "MERIDIAN_JOB_PEERS": ctx["peers"],
+                        "MERIDIAN_JOB_MASTER": ctx["master"]})
+        if job.kind == "service":
+            env["MERIDIAN_SERVICE_TOKEN"] = ctx["service_token"]
+        return {
+            "job_id": job.id, "replica": r.rank, "kind": job.kind, "image": job.image,
+            "args": [validation.render(a, ctx) for a in (job.args or [])], "env": env,
+            "device_ids": list(r.device_ids or []), "memory_limit_bytes": 0, "port": r.port,
+            "timeout_seconds": job.timeout_seconds,
+            "desired_phase": "Stopped" if job.status in TERMINAL_JOB else "Running",
+        }
 
     def merge_owner_snapshot(self, s, node_id: str, snapshot: dict) -> dict:
         """The node owner publishes engine assignments; jobs are ours. Whatever
@@ -1321,28 +1393,32 @@ class ComputeService:
     def _publish(self, s, node_ids: Iterable[str]) -> None:
         """Publish a new desired generation for each node whose jobs changed."""
         for node_id in sorted(set(node_ids)):
-            node = s.get(Node, node_id)
-            if node is None:
-                continue
-            latest = s.scalar(
-                select(DesiredSnapshotRow).where(DesiredSnapshotRow.node_id == node_id)
-                .order_by(DesiredSnapshotRow.generation.desc())
-            )
-            previous = dict(latest.snapshot) if latest is not None else {}
-            jobs = self.jobs_for_node(s, node_id)
-            if jobs == (previous.get("jobs") or []):
-                continue
-            generation = node.desired_generation + 1
-            snapshot: dict[str, Any] = {
-                "node_id": node_id, "generation": generation,
-                "assignments": previous.get("assignments") or [],
-            }
-            if jobs:
-                snapshot["jobs"] = jobs
-            canonical = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
-            snapshot["snapshot_hash"] = "sha256:" + hashlib.sha256(canonical).hexdigest()
-            s.add(DesiredSnapshotRow(node_id=node_id, generation=generation, snapshot=snapshot, created_at=self._now()))
-            node.desired_generation = generation
+            with self._isolated(s, "snapshot", node_id):
+                self._publish_one(s, node_id)
+
+    def _publish_one(self, s, node_id: str) -> None:
+        node = s.get(Node, node_id)
+        if node is None:
+            return
+        latest = s.scalar(
+            select(DesiredSnapshotRow).where(DesiredSnapshotRow.node_id == node_id)
+            .order_by(DesiredSnapshotRow.generation.desc())
+        )
+        previous = dict(latest.snapshot) if latest is not None else {}
+        jobs = self.jobs_for_node(s, node_id)
+        if jobs == (previous.get("jobs") or []):
+            return
+        generation = node.desired_generation + 1
+        snapshot: dict[str, Any] = {
+            "node_id": node_id, "generation": generation,
+            "assignments": previous.get("assignments") or [],
+        }
+        if jobs:
+            snapshot["jobs"] = jobs
+        canonical = json.dumps(snapshot, sort_keys=True, separators=(",", ":")).encode()
+        snapshot["snapshot_hash"] = "sha256:" + hashlib.sha256(canonical).hexdigest()
+        s.add(DesiredSnapshotRow(node_id=node_id, generation=generation, snapshot=snapshot, created_at=self._now()))
+        node.desired_generation = generation
 
     # ------------------------------------------------------------ observation
     @_locked
@@ -1351,11 +1427,10 @@ class ComputeService:
         now = self._now()
         with self._sf() as s:
             obs = s.get(ObservationRow, node_id)
-            reported = (obs.observation or {}).get("jobs") if obs is not None else None
-            if isinstance(reported, list):
-                for item in reported:
-                    if isinstance(item, dict):
-                        self._ingest(s, node_id, item)
+            reported = validation.stored_observation(obs.observation, node_id).get("jobs", []) if obs else []
+            for item in reported:
+                with self._isolated(s, "report", f"{node_id}/{item.get('job_id')}"):
+                    self._ingest(s, node_id, item, now)
             has_work = s.scalar(select(func.count()).select_from(Job).where(Job.status.notin_(TERMINAL_JOB)))
             has_unreleased = s.scalar(
                 select(func.count()).select_from(JobReplica).where(JobReplica.released.is_(False))
@@ -1364,7 +1439,10 @@ class ComputeService:
                 self._publish(s, self._advance(s, now))
             s.commit()
 
-    def _ingest(self, s, node_id: str, item: dict) -> None:
+    def _ingest(self, s, node_id: str, item: dict, now: datetime) -> None:
+        """Fold one validated replica report in. The node's clock is not trusted: a
+        time it reports is clamped into [placed, received], and the endpoint is built
+        here from the validated host and the port the control plane assigned."""
         r = s.get(JobReplica, (str(item.get("job_id", "")), item.get("replica", -1)))
         if r is None or r.node_id != node_id or r.released:
             return
@@ -1376,10 +1454,15 @@ class ComputeService:
         r.exit_code = code if isinstance(code, int) and not isinstance(code, bool) else None
         r.reason = str(item.get("reason") or "")[:256]
         r.message = str(item.get("message") or "")[:1024]
-        r.endpoint = str(item.get("endpoint") or "")[:512]
+        host = r.host if validation.valid_host(r.host) else ""
+        r.endpoint = f"http://{validation.host_port(host, r.port)}" if item.get("endpoint") and host and r.port else ""
         r.log_tail = str(item.get("log_tail") or "")[-8192:]
-        r.started_at = _parse(item.get("started_at")) or r.started_at
-        r.finished_at = _parse(item.get("finished_at")) or r.finished_at
+        placed = _aware(r.scheduled_at) if r.scheduled_at else now
+        if r.started_at is None and phase != "Pending":
+            r.started_at = _clamp(_parse(item.get("started_at")) or now, placed, now)
+        if r.finished_at is None and phase in TERMINAL_REPLICA:
+            began = _aware(r.started_at) if r.started_at else placed
+            r.finished_at = _clamp(_parse(item.get("finished_at")) or now, began, now)
 
     @_locked
     def tick(self) -> None:
@@ -1389,38 +1472,51 @@ class ComputeService:
             dirty: set[str] = set()
             broke: set[str] = set()
             for r in list(s.scalars(select(Rental).where(Rental.status == "active").with_for_update())):
-                node = s.get(Node, r.node_id)
-                if self._lost(node, now):
-                    # Bill only to the node's last lease, never before what is already billed.
-                    lease = node.lease_expires_at if node is not None else None
-                    end = min(_aware(lease), now) if lease else _aware(r.billed_through)
-                    end = max(end, _aware(r.started_at), _aware(r.billed_through))
-                    dirty |= self._end_rental(s, r, "node_lost", now, ended_at=end)
-                    continue
-                self._meter(s, r, now)
-                if (r.price_paise_per_gpu_hour > 0 and r.consumer_workspace_id not in broke
-                        and self._spendable(s, r.consumer_workspace_id, now) <= 0):
-                    broke.add(r.consumer_workspace_id)
+                with self._isolated(s, "rental", r.id):
+                    node = s.get(Node, r.node_id)
+                    if self._lost(node, now):
+                        # Bill only to the node's last lease, never before what is already billed.
+                        lease = node.lease_expires_at if node is not None else None
+                        end = min(_aware(lease), now) if lease else _aware(r.billed_through)
+                        end = max(end, _aware(r.started_at), _aware(r.billed_through))
+                        dirty |= self._end_rental(s, r, "node_lost", now, ended_at=end)
+                        continue
+                    self._meter(s, r, now)
+                    if (r.price_paise_per_gpu_hour > 0 and r.consumer_workspace_id not in broke
+                            and self._spendable(s, r.consumer_workspace_id, now) <= 0):
+                        broke.add(r.consumer_workspace_id)
             for ws in broke:
                 for r in list(s.scalars(select(Rental).where(
                     Rental.consumer_workspace_id == ws, Rental.status == "active", Rental.price_paise_per_gpu_hour > 0
                 ))):
-                    dirty |= self._end_rental(s, r, "insufficient_funds", now)
+                    with self._isolated(s, "rental", r.id):
+                        dirty |= self._end_rental(s, r, "insufficient_funds", now)
             dirty |= self._advance(s, now)
             self._publish(s, dirty)
             s.commit()
 
     # --------------------------------------------------------------- redaction
-    def redact_node_detail(self, workspace_id: str, detail: dict) -> dict:
+    def redact_node_detail(self, workspace_id: str, detail: dict, reveal: bool = False) -> dict:
         """A node's owner sees that a tenant's job occupies a GPU, never what it
-        runs: image, arguments, environment and logs are the tenant's."""
+        runs: image, arguments, environment and logs are the tenant's. Within the
+        workspace, rendered arguments and environment values (service tokens,
+        credentials) are for operators and up (`reveal`); a viewer sees the names."""
         with self._sf() as s:
             own = {j for (j,) in s.execute(select(Job.id).where(Job.workspace_id == workspace_id))}
 
         def scrub(job: Any, keep: tuple[str, ...]) -> Any:
-            if not isinstance(job, dict) or job.get("job_id") in own:
+            if not isinstance(job, dict):
                 return job
-            return {**{k: job[k] for k in keep if k in job}, "tenant": True}
+            if job.get("job_id") not in own:
+                return {**{k: job[k] for k in keep if k in job}, "tenant": True}
+            if reveal:
+                return job
+            masked = dict(job)
+            if isinstance(job.get("env"), dict):
+                masked["env"] = _masked_env(job["env"])
+            if isinstance(job.get("args"), list):
+                masked["args"] = [MASKED for _ in job["args"]]
+            return masked
 
         observation = detail.get("observation")
         if isinstance(observation, dict) and isinstance(observation.get("jobs"), list):
@@ -1441,13 +1537,17 @@ class ComputeService:
         return detail
 
     # ---------------------------------------------------------------- API keys
-    def create_api_key(self, workspace_id: str, actor: str, body: dict, on_behalf_of: str = "") -> tuple[str, dict]:
+    def create_api_key(self, workspace_id: str, actor: str, body: dict, on_behalf_of: str = "",
+                       caller_role: str = "owner") -> tuple[str, dict]:
         """`created_by` is the member responsible for the key: the signed-in admin, or, when an
-        admin key makes a key, the member behind that key. Its jobs count against them."""
+        admin key makes a key, the member behind that key. Its jobs count against them.
+        A key is never minted above the caller's own (effective) role."""
         name = _text(body, "name", 1, 120)
         role = body.get("role", "operator")
         if role not in API_KEY_ROLES:
             raise err("INVALID_FIELD", f"role must be one of {', '.join(API_KEY_ROLES)}")
+        if ROLE_RANK[role] > ROLE_RANK.get(caller_role, -1):
+            raise err("FORBIDDEN", "you cannot create a key with a role above your own", 403)
         token = "mck_" + secrets.token_urlsafe(32)
         with self._sf() as s:
             count = s.scalar(select(func.count()).select_from(ApiKey).where(
@@ -1486,7 +1586,9 @@ class ComputeService:
             s.commit()
 
     def authenticate_api_key(self, token: str) -> Optional[tuple[str, str, str, str]]:
-        """(workspace_id, role, label, the member who created it) for a live key, else None."""
+        """(workspace_id, effective role, label, the member who created it) for a live key, else None.
+        A key acts for its creator: its role is capped by the creator's role now, and it stops
+        working when the creator leaves the workspace or is disabled."""
         if not token.startswith("mck_"):
             return None
         now = self._now()
@@ -1494,11 +1596,17 @@ class ComputeService:
             k = s.scalar(select(ApiKey).where(ApiKey.token_hash == sha256_hex(token)))
             if k is None or k.revoked:
                 return None
+            member = s.scalar(select(Membership.role).join(User, User.id == Membership.user_id).where(
+                Membership.workspace_id == k.workspace_id, User.email == k.created_by, User.disabled.is_(False),
+            ))
+            if member is None:
+                return None
+            role = min(k.role, str(member), key=lambda r: ROLE_RANK.get(r, -1))
             # Coarse last-used stamp: at most one write a minute per key.
             if k.last_used_at is None or (now - _aware(k.last_used_at)).total_seconds() > 60:
                 k.last_used_at = now
                 s.commit()
-            return k.workspace_id, k.role, f"key:{k.name}", k.created_by
+            return k.workspace_id, role, f"key:{k.name}", k.created_by
 
     # ---------------------------------------------------------------- overview
     def overview(self, workspace_id: str) -> dict:

@@ -10,6 +10,7 @@ from __future__ import annotations
 import html as _html
 import json
 import logging
+import re
 import smtplib
 import ssl
 import time
@@ -39,7 +40,8 @@ class ConsoleMailer:
     def send(self, to: str, subject: str, text: str, html: str) -> None:
         logger.warning("DEV MAILER (no SMTP configured) → %s | %s", to, subject)
         if self._outbox:
-            name = f"{int(time.time() * 1000)}-{to.replace('@', '_at_')}.json"
+            safe = re.sub(r"[^A-Za-z0-9._-]", "_", to.replace("@", "_at_"))  # an address is data, not a path
+            name = f"{int(time.time() * 1000)}-{safe}.json"
             (self._outbox / name).write_text(json.dumps({"to": to, "subject": subject, "text": text}))
 
 

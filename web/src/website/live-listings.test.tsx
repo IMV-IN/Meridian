@@ -9,8 +9,7 @@ import { arrange, type PublicOffer, type PublicOffers } from "./offers"
 
 const GB = 1024 ** 3
 
-// The real feed also sends provider_name; the site must never show it.
-const offer = (o: Partial<PublicOffer> & { provider_name?: string }): PublicOffer & { provider_name: string } => ({
+const offer = (o: Partial<PublicOffer>): PublicOffer => ({
   title: "4× A100, Mumbai",
   region: "Mumbai",
   gpu_model: "A100",
@@ -19,7 +18,6 @@ const offer = (o: Partial<PublicOffer> & { provider_name?: string }): PublicOffe
   price_paise_per_gpu_hour: 18500,
   hourly_total_paise: 75480,
   available: true,
-  provider_name: "Secret Provider Pvt Ltd",
   ...o,
 })
 
@@ -57,7 +55,7 @@ describe("LiveListings", () => {
     expect(document.querySelector(".offers")).toHaveAttribute("aria-busy", "true")
   })
 
-  it("lists offers with the region and paise prices in rupees, and never the provider", async () => {
+  it("lists offers with the region and paise prices in rupees", async () => {
     respond(feed([offer({}), offer({ title: "2× L40S, Pune", region: "Pune", gpu_model: "L40S", gpu_count: 2, price_paise_per_gpu_hour: 9200, hourly_total_paise: 18768 })]))
     renderListings()
     const table = await screen.findByRole("table", { name: "GPU listings" })
@@ -66,7 +64,6 @@ describe("LiveListings", () => {
     expect(within(table).getByText("₹185.00")).toBeInTheDocument()
     expect(within(table).getByText("₹754.80")).toBeInTheDocument()
     expect(screen.getByText("2 of 2 listings available. Updated every 30 seconds.")).toBeInTheDocument()
-    expect(document.body.textContent).not.toContain("Secret Provider")
   })
 
   it("puts available listings first and marks a rented one", async () => {

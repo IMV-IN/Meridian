@@ -25,6 +25,10 @@
 # Console, accounts and gateway API.
 {$MERIDIAN_HOST}:8441 {
 	encode zstd gzip
+	# Outer bound only; meridian-control enforces tighter per-route limits.
+	request_body {
+		max_size 8MB
+	}
 
 	# Node-protocol calls belong on :8443 where client certificates are verified.
 	@nodes path /control/v1/*
@@ -46,6 +50,10 @@
 			mode verify_if_given
 			trust_pool file /etc/caddy/node-ca.pem
 		}
+	}
+
+	request_body {
+		max_size 8MB
 	}
 
 	@node path /control/v1/* /healthz

@@ -246,20 +246,20 @@ In the console, **Billing → GPU-hour usage** has a month picker, the per-perso
 - When a member's own-node usage this month has reached the quota, a new job is refused with `409 QUOTA_EXCEEDED`, saying what was used and when the quota resets (the first of next month, UTC). A job pinned to a rental or a listing (`rental_id`, `offer_id`) is not checked: it runs on another workspace's GPUs (paid with credit, or free from a partner) and cannot reach your own nodes. A template is applied, and the merged job validated, before the quota check, so a template cannot get round it.
 - A job with several replicas or several GPUs counts every GPU: 2 replicas × 4 GPUs for one hour is 8 GPU-hours.
 - A job that was already queued when its submitter went over quota stays queued with "waiting: monthly GPU-hour quota used" and does not take a GPU on the workspace's own nodes. It can still be placed on rented GPUs, and it starts when the quota is raised or the month rolls over.
-- **Running jobs are never stopped.** A long job can take a person past their quota; the quota stops the next job, not this one.
+- **Running jobs are never stopped.** Quotas are soft: a running job is never stopped at the quota, so a long job can take a person past it; the quota stops the next job, not this one. **Set a timeout** (`timeout_seconds`, `--timeout`) on every job you want bounded: the timeout is the hard stop, measured on the control plane's clock.
 - **At the boundary.** Quotas are checked, under the scheduler's lock, when a job is submitted and when a queued job is considered (every background pass). The check counts hours already used, not hours a job will use, so a member below quota can still start a job that takes them over it, and a job that is already running when the quota is reached, or when the month ends, runs on. Its hours count in the month they are used. A member can therefore exceed a quota by what their running jobs use; an admin who needs a hard stop cancels the job.
 
 ## Roles
 
 | Action | Viewer | Operator | Admin |
 | --- | --- | --- | --- |
-| See jobs, listings, billing | ✓ | ✓ | ✓ |
-| Run and cancel jobs, read a service's token | | ✓ | ✓ |
+| See jobs, listings, billing (environment variable names, values masked) | ✓ | ✓ | ✓ |
+| Run and cancel jobs, read a service's token, environment values and rendered job specs | | ✓ | ✓ |
 | See your own GPU-hour usage and the workspace total | ✓ | ✓ | ✓ |
 | See everyone's GPU-hour usage and group totals | | | ✓ |
 | Set groups and quotas, rent, list (public or private), create API keys | | | ✓ |
 
-API keys (`mck_…`) act in one workspace with the role you choose. They cannot manage members. A key's jobs count for the member who created it, against that member's quota.
+API keys (`mck_…`) act in one workspace with the role you choose. They cannot manage members. A key's jobs count for the member who created it, against that member's quota. A key acts for its creator: its role is capped by the creator's current role (demote the creator and the key is demoted with them), it stops working when the creator leaves the workspace or is disabled, and it can never create a key above its own role.
 
 ## Adding credit and paying providers
 
@@ -281,8 +281,43 @@ A payment reference can be credited only once, and a payout reference can be use
 | `MERIDIAN_CONTROL_METER_INTERVAL` | `600` | Seconds between ledger postings for a running rental |
 | `MERIDIAN_CONTROL_COMPUTE_TICK` | `30` | Seconds between background passes (metering, credit, timeouts, queue) |
 | `MERIDIAN_CONTROL_NODE_LOST_SECONDS` | `300` | Silence after which a node's running replicas are declared lost |
+| `MERIDIAN_CONTROL_JOB_START_DEADLINE` | `1800` | Seconds a placed replica may stay Pending or Starting (image pulls included) before the job fails |
+| `MERIDIAN_CONTROL_MAX_BODY_BYTES` | `1048576` | Largest request body on signed-in routes |
+| `MERIDIAN_CONTROL_MAX_UNAUTHENTICATED_BODY_BYTES` | `65536` | Largest request body on `/auth`, `/oauth`, `/api/public`, `/docs`, `/download`, `/install` and node enrollment |
+| `MERIDIAN_CONTROL_MAX_OBSERVATION_BYTES` | `4194304` | Largest node observation |
 
 Upgrading an existing cloud: run `meridian-control migrate`. The migrations only add tables and columns; existing listings stay public.
+
+## Trust model and limits
+
+What the control plane trusts, what it checks, and the limits it enforces. The checks live in one module, `meridian_control/validation.py`.
+
+**Nodes are not trusted.** A node is a provider's machine. Everything it reports is data, validated where it is stored:
+
+- Heartbeats, observations, enrollment and session requests are typed schemas. Wrong types, out-of-range numbers and over-long lists or strings are rejected with `400 INVALID_REQUEST` and nothing is stored. Unknown fields are accepted and dropped (so a newer agent keeps working); they are never stored.
+- Bounds: at most 64 devices per node; device ids `[A-Za-z0-9._:/-]`, up to 128 characters; VRAM 0 to 2 TiB per device; `advertise_host` an IP address or an RFC 1123 host name of at most 253 characters; `job_port_range` `[start, stop)` with `1024 ≤ start < stop ≤ 65536`, clamped to 1024 ports; at most 512 job replicas, 256 engines and 64 conditions per report. A replica's `reason` and `message` are cut to 256 and 1024 characters and lose control characters; `log_tail` keeps its last 8 KiB, as written (the console and the CLI escape it).
+- Endpoints: a job's address is built by the control plane from the validated `advertise_host` and the port it assigned; the string the node sends only says "listening". An engine endpoint is kept only if it is a plain `http(s)://host:port`, since it becomes a gateway's backend URL. The console additionally builds copyable snippets only from a parsed `http(s)` origin, shell-quotes the `curl` line and YAML-quotes the gateway snippet.
+- Time: the control plane keeps its own clock. A replica's start and finish times are clamped into [when it was placed, when the report arrived], and set once. Timeouts run on that clock, and a replica still `Pending` or `Starting` 30 minutes after placement (`MERIDIAN_CONTROL_JOB_START_DEADLINE`) fails its job, which ends a rental pinned to it. A node cannot keep a job, or the rental billing for it, alive by lying about times or phases. It can end one early, by reporting it stopped.
+- Rows stored before this validation existed are re-read through the same schemas. Anything that no longer validates reads as "not reported": the node is not offered jobs and its listing shows as unavailable. Nothing crashes on it.
+- The background pass (metering, credit, timeouts, scheduling) runs each rental, job, replica and node snapshot in its own savepoint. If one fails, that item is rolled back and skipped for this pass, the error type and item id are logged (no values), and everything else proceeds.
+
+**Hardware is self-reported.** There is no attestation: a provider's GPU model, count and VRAM are what its node reports, within the bounds above. What a renter pays is fixed when the rental starts: the GPU count and price are copied from the listing, and nothing the node reports later changes them. A listing's GPU count is fixed when it is listed. Renters should check a new provider's hardware (`nvidia-smi` in a first short job) before a long run.
+
+**Job specs.** Submitted with `operator` or higher, and checked at submit:
+
+- At most 256 args, 64 environment variables and 64 replicas; every arg and value at most 8192 characters; names at most 120 characters.
+- Environment names match `[A-Za-z_][A-Za-z0-9_]{0,127}`. Reserved, and refused with `400 RESERVED_ENV`: `MERIDIAN_*` (set by Meridian), and what the NVIDIA container runtime reads to choose GPUs: `NVIDIA_VISIBLE_DEVICES`, `NVIDIA_DRIVER_CAPABILITIES`, `NVIDIA_REQUIRE_*`, `NVIDIA_DISABLE_REQUIRE`, `NVIDIA_MIG_CONFIG_DEVICES`, `NVIDIA_MIG_MONITOR_DEVICES`, `NVIDIA_IMEX_CHANNELS`, `CUDA_VISIBLE_DEVICES` and `CUDA_MPS_*`. (The node agent enforces the same rule and masks devices for 0-GPU jobs.)
+- Placeholders render once: text substituted in is never scanned again. Their worst-case expansion is bounded at submit: each arg or value at most 8192 characters after expansion (so `{{peers}}` inside one value works for up to 31 replicas; `MERIDIAN_JOB_PEERS` is always set), and one replica's args and environment at most 64 KiB. A node's desired snapshot never holds more than 4 MiB of job specs; a job that would push a node past that waits for another node. Over-limit jobs get `400 TOO_LARGE`.
+
+**People's text.** Names, titles, regions, groups and key names reject control characters, line breaks and bidi overrides (`400`). A listing's description may have line breaks. Names Google returns, and gateway-reported names, have control characters removed.
+
+**Credentials.** A service's token, environment values and rendered job specs (in node detail) are shown to operators and up. Viewers see environment variable names with values masked. The public listings feed names no provider. Service tokens are derived from the job id and cannot be rotated; jobs are reachable over plain `http://` where the host network allows, and JupyterLab takes its token in the URL. Put a TLS-terminating proxy in front of services that leave a trusted network. Job environment variables are stored as plain text and the provider's node receives them: do not put long-lived secrets in them.
+
+**Requests.** Request bodies are limited as they stream in, chunked or not: 64 KiB on unauthenticated routes, 4 MiB for node observations, 1 MiB elsewhere (see Settings), `413 TOO_LARGE` beyond. The Caddy edge adds an outer 8 MB bound. Post-sign-in redirects (`next`) must be same-origin paths: no control characters, no backslashes, no scheme or host.
+
+**Quotas are soft.** A running job is never stopped at the quota (see above). Set timeouts.
+
+**Known gaps.** Sharing a listing with an unknown workspace slug says so (`UNKNOWN_WORKSPACE`), which lets a workspace admin test whether a slug exists; slugs are not secret, ids are random. Tenant containers on one host share its network and have no memory or CPU caps beyond what the host's node policy sets (node-side work).
 
 ## What it does not do yet
 

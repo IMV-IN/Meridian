@@ -93,7 +93,7 @@ def job_templates(ctx: Ctx = Depends(viewer)):
 
 @w.get("/jobs/{job_id}")
 def job(request: Request, job_id: str, ctx: Ctx = Depends(viewer)):
-    # A service's bearer token is a credential: operators and up only.
+    # A service's bearer token and env values are credentials: operators and up only.
     reveal = ROLE_RANK[ctx[2]] >= ROLE_RANK["operator"]
     return _compute(request).job_detail(ctx[1], job_id, reveal=reveal)
 
@@ -120,8 +120,9 @@ _CSV_COLUMNS = ("email", "name", "group", "gpu_hours_own", "gpu_hours_rented", "
 
 
 def _csv_cell(value):
-    """A spreadsheet runs a cell that starts with = + - @ as a formula: defuse names a member chose."""
-    return "'" + value if isinstance(value, str) and value[:1] in ("=", "+", "-", "@") else value
+    """A spreadsheet runs a cell that starts with = + - @ as a formula, and some importers trim a
+    leading tab or line break first: defuse names a member chose."""
+    return "'" + value if isinstance(value, str) and value[:1] in ("=", "+", "-", "@", "\t", "\r", "\n") else value
 
 
 @w.get("/usage")
@@ -162,7 +163,9 @@ def api_keys(request: Request, ctx: Ctx = Depends(admin)):
 
 @w.post("/api-keys", status_code=201)
 def create_api_key(request: Request, body: dict = Body(...), ctx: Ctx = Depends(admin)):
-    token, view = _compute(request).create_api_key(ctx[1], ctx[0].email, body, on_behalf_of=ctx[0].on_behalf_of)
+    token, view = _compute(request).create_api_key(
+        ctx[1], ctx[0].email, body, on_behalf_of=ctx[0].on_behalf_of, caller_role=ctx[2]
+    )
     return {**view, "token": token}  # shown once
 
 

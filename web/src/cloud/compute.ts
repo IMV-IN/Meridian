@@ -37,17 +37,60 @@ export function secondsToHours(seconds: number): string {
   return seconds > 0 ? String(Number((seconds / 3600).toFixed(4))) : ""
 }
 
+/** A service endpoint as a plain `http(s)://host:port` origin, or null when it is anything else
+ * (credentials, a path, a query, whitespace or shell characters). The server already builds endpoints
+ * from validated parts; this keeps a copyable snippet safe even if one is not. */
+export function serviceEndpoint(endpoint: string): string | null {
+  if (!endpoint || /[^\x21-\x7e]/.test(endpoint)) return null
+  let u: URL
+  try {
+    u = new URL(endpoint)
+  } catch {
+    return null
+  }
+  if ((u.protocol !== "http:" && u.protocol !== "https:") || u.username || u.password || u.search || u.hash) return null
+  if (u.pathname !== "/" || !/^(\[[0-9a-fA-F:.]+\]|[A-Za-z0-9.-]+)$/.test(u.hostname)) return null
+  return u.origin
+}
+
+/** A value as one single-quoted POSIX shell word. */
+export function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+/** A value as one shell word: as is when it has nothing the shell would read, else single-quoted. */
+export function shellWord(value: string): string {
+  return /^[A-Za-z0-9_./:@%+=,-]+$/.test(value) ? value : shellQuote(value)
+}
+
+/** A value as a YAML double-quoted scalar (a JSON string is one). */
+export function yamlQuote(value: string): string {
+  return JSON.stringify(value)
+}
+
 /** How to open a running service, from its image: a notebook link or a curl call. Null for anything else. */
 export function serviceHint(image: string, endpoint: string, token: string | null): { title: string; code: string } | null {
-  if (!endpoint) return null
-  const base = endpoint.replace(/\/+$/, "")
+  const base = serviceEndpoint(endpoint)
+  if (!base) return null
   const secret = token ?? "<token>"
   const repo = image.split("@")[0]
   if (/jupyter/i.test(repo)) return { title: "Open JupyterLab in your browser", code: `${base}/lab?token=${secret}` }
   if (/vllm/i.test(repo)) {
-    return { title: "Call the model", code: `curl ${base}/v1/models -H "Authorization: Bearer ${secret}"` }
+    return { title: "Call the model", code: `curl ${shellQuote(`${base}/v1/models`)} -H ${shellQuote(`Authorization: Bearer ${secret}`)}` }
   }
   return null
+}
+
+// Set by Meridian or read by the NVIDIA container runtime; the server refuses them too
+// (meridian_control/validation.py RESERVED_ENV).
+const RESERVED_ENV = new Set([
+  "CUDA_VISIBLE_DEVICES", "NVIDIA_VISIBLE_DEVICES", "NVIDIA_DRIVER_CAPABILITIES", "NVIDIA_DISABLE_REQUIRE",
+  "NVIDIA_MIG_CONFIG_DEVICES", "NVIDIA_MIG_MONITOR_DEVICES", "NVIDIA_IMEX_CHANNELS",
+])
+const RESERVED_ENV_PREFIXES = ["MERIDIAN_", "NVIDIA_REQUIRE_", "CUDA_MPS_"]
+
+export function reservedEnv(name: string): boolean {
+  return RESERVED_ENV.has(name) || RESERVED_ENV_PREFIXES.some((p) => name.startsWith(p))
 }
 
 /** KEY=VALUE lines → env map, or the first line that is not one. */
@@ -58,7 +101,7 @@ export function parseEnv(text: string): { env: Record<string, string>; bad: stri
     if (!line) continue
     const eq = line.indexOf("=")
     const name = eq > 0 ? line.slice(0, eq) : ""
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || name.startsWith("MERIDIAN_")) return { env, bad: line }
+    if (!/^[A-Za-z_][A-Za-z0-9_]{0,127}$/.test(name) || reservedEnv(name)) return { env, bad: line }
     env[name] = line.slice(eq + 1)
   }
   return { env, bad: null }
@@ -80,5 +123,7 @@ export function endReason(reason: string): string {
 
 /** How to install the meridian CLI from this control plane (its own wheel, else the installer), never from GitHub. */
 export function cliInstallLine(info: { public_url: string; wheel?: string | null }): string {
-  return info.wheel ? `pip install ${info.public_url}/download/${info.wheel}` : `curl -fsSL ${info.public_url}/install.sh | bash`
+  return info.wheel
+    ? `pip install ${shellWord(`${info.public_url}/download/${info.wheel}`)}`
+    : `curl -fsSL ${shellWord(`${info.public_url}/install.sh`)} | bash`
 }

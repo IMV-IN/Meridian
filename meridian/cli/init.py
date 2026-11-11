@@ -25,6 +25,7 @@ import getpass
 import json
 import os
 import platform
+import re
 import secrets
 import shlex
 import shutil
@@ -45,6 +46,9 @@ PII_POLICIES = ["redact_and_replace", "redact_for_logs", "audit_only", "block"]
 ENGINES = ["ollama", "vllm", "sglang", "trtllm", "openai"]
 SERVICE_NAME = "meridian-gateway"
 LAUNCHD_LABEL = "dev.meridian.gateway"
+# What Meridian Cloud mints: "mgw_" + URL-safe base64. Anything else is refused, since
+# the token is written to a file that sh sources.
+GATEWAY_TOKEN = re.compile(r"mgw_[A-Za-z0-9_-]{20,128}")
 
 # Inference servers commonly found on a workstation, probed with --detect.
 KNOWN_LOCAL = [
@@ -443,8 +447,8 @@ def gather(args: argparse.Namespace, ask: Prompter) -> Plan:
             say(f"\nConnect to Meridian Cloud: in {plan.cloud_url}/ui go to Gateways → Connect gateway")
             say("and mint a token. It's shown once; paste it here.")
             plan.cloud_token = ask.secret("Paste the gateway token (mgw_…)")
-        if plan.cloud_token and not plan.cloud_token.startswith("mgw_"):
-            raise SystemExit("That isn't a gateway token: they start with mgw_.")
+        if plan.cloud_token and not GATEWAY_TOKEN.fullmatch(plan.cloud_token):
+            raise SystemExit("That isn't a gateway token: they start with mgw_ followed by letters, digits, - and _.")
         if not plan.cloud_token:
             warn(
                 "No gateway token: setting up without Meridian Cloud. Re-run with MERIDIAN_CLOUD_TOKEN set to connect."
@@ -497,9 +501,10 @@ def write_files(plan: Plan) -> Path:
     write_private(home / "config.yaml", header + yaml.safe_dump(cfg, sort_keys=False))
     if plan.auth:
         write_private(home / "keys.yaml", yaml.safe_dump({"keys": plan.keys}, sort_keys=False))
-    env_lines = [f"MERIDIAN_CONFIG={home / 'config.yaml'}"]
+    # run-gateway.sh sources this file with sh: quote every value so none can run as a command.
+    env_lines = [f"MERIDIAN_CONFIG={shlex.quote(str(home / 'config.yaml'))}"]
     if plan.cloud_token:
-        env_lines.append(f"MERIDIAN_CLOUD_TOKEN={plan.cloud_token}")
+        env_lines.append(f"MERIDIAN_CLOUD_TOKEN={shlex.quote(plan.cloud_token)}")
     write_private(home / "meridian.env", "\n".join(env_lines) + "\n")
 
     meridian_bin = Path(sys.executable).parent / "meridian"

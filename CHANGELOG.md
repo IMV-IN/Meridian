@@ -4,6 +4,28 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Security: input handling and trust boundaries for Meridian Compute** ([`docs/COMPUTE.md`](docs/COMPUTE.md#trust-model-and-limits)).
+  - Node reports (heartbeat, observation, enrollment, session) are validated against typed schemas with bounded
+    sizes and ranges in `meridian_control/validation.py`; a malformed report is `400 INVALID_REQUEST` and nothing
+    is stored. Unknown fields are dropped. Stored rows are re-validated on read. The background pass isolates each
+    rental, job and node, so one bad item never stops metering or scheduling.
+  - The control plane's clock decides timeouts: node-reported times are clamped, and a replica stuck in
+    `Pending`/`Starting` for 30 minutes (`MERIDIAN_CONTROL_JOB_START_DEADLINE`) fails its job and ends a pinned rental.
+  - Job placeholders render in one pass; their expanded size is bounded at submit (`400 TOO_LARGE`) and per node.
+  - `NVIDIA_VISIBLE_DEVICES`, `CUDA_VISIBLE_DEVICES` and the other GPU-runtime variables are reserved, like `MERIDIAN_*`.
+  - Viewers see environment variable names with values masked in job detail and node detail; rendered job specs
+    and service tokens are for operators and up.
+  - An API key acts for its creator: capped by the creator's current role, disabled when they leave.
+  - Job and engine endpoints are rebuilt from validated parts; the console quotes its shell and YAML snippets.
+  - Sign-in `next` redirects must be same-origin paths (fixes `/%09/evil.com`-style TAB bypasses).
+  - Request bodies are size-limited as they stream (`413`), tighter on unauthenticated routes.
+  - Free text (names, titles, regions, groups, key names) rejects control characters and bidi overrides; the CLI
+    strips terminal escape sequences from what it prints; usage CSV cells starting with TAB or CR are defused.
+  - `GET /api/public/offers` no longer returns `provider_name`.
+  - `meridian init` validates and shell-quotes the gateway token it writes to `meridian.env`.
+  - Dev dependency: `minimatch` (via shadcn's `ts-morph`) overridden to 11.x.
+  - Migration `f2b6d8e41a53` (additive: `compute_job_replicas.scheduled_at`).
+
 - **Works with a private repository.** Nothing a visitor or user touches depends on github.com.
   - The control plane serves the documentation at `/docs/` (the strict `mkdocs` build, shipped in the wheel and built in
     the `meridian-control` image; `MERIDIAN_CONTROL_DOCS_DIR` overrides the path). Static files only, paths held inside
