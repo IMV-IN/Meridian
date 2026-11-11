@@ -233,10 +233,10 @@ function NewJobBody({ onClose, offerId }: { onClose: () => void; offerId: string
           <Textarea id="job-env" className="font-mono text-[12.5px]" spellCheck={false} rows={3} value={envText} onChange={(e) => setEnvText(e.target.value)} placeholder={"WANDB_MODE=offline\nHF_HOME=/tmp/hf"} />
           {parsed.bad !== null ? (
             <FieldError>
-              “{parsed.bad}” is not NAME=value. Names starting with MERIDIAN_ are reserved.
+              “{parsed.bad}” is not NAME=value, or uses a reserved name (MERIDIAN_*, or a GPU variable such as CUDA_VISIBLE_DEVICES).
             </FieldError>
           ) : (
-            <FieldDescription>One NAME=value per line. These are stored as plain text, so do not put secrets here.</FieldDescription>
+            <FieldDescription>One NAME=value per line. They are stored as plain text and the GPU’s provider can read them, so do not put secrets here.</FieldDescription>
           )}
         </Field>
         {submit.isError && (

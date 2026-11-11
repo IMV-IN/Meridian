@@ -549,3 +549,11 @@ def test_l5_gateway_token_cannot_inject_shell(tmp_path, monkeypatch):
     monkeypatch.setenv("MERIDIAN_CLOUD_TOKEN", "mgw_" + "a" * 30 + "$(touch /tmp/pwned)")
     with pytest.raises(SystemExit, match="mgw_"):
         init_mod.main(["--yes", "--dir", str(tmp_path / "m"), "--no-start", "--cloud", "https://c"])
+
+
+def test_i8_dev_outbox_file_names_carry_no_path_characters(tmp_path):
+    from meridian_control.mailer import ConsoleMailer
+
+    ConsoleMailer(str(tmp_path)).send("a/../../b@lab.in", "s", "t", "<p>t</p>")
+    [f] = list(tmp_path.iterdir())
+    assert f.parent == tmp_path and "/" not in f.name and f.name.endswith("-a_.._.._b_at_lab.in.json")
