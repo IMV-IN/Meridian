@@ -263,6 +263,23 @@ The control image builds the gateway package (with the console) into
 serves. Elsewhere, set `MERIDIAN_CONTROL_DOWNLOADS_DIR` to a folder holding
 the wheel and a `meridian.whl.sha256` file (`sha256sum meridian-*.whl`).
 
+## Documentation at `/docs/`
+
+The control plane serves this documentation at `https://<MERIDIAN_HOST>/docs/`,
+and the public site and the console link there, so nothing a visitor reads
+lives on GitHub. It is the `mkdocs` site, built into the package like the
+console:
+
+```bash
+pip install -e ".[docs]"
+mkdocs build --strict -d meridian_control/docs_site   # gitignored, shipped in the wheel
+```
+
+The `meridian-control` image runs this in its own build stage. Without a build,
+`/docs/` answers `404` with a one-line hint. To serve a site from somewhere
+else, set `MERIDIAN_CONTROL_DOCS_DIR`. Pages under `docs/internal` are not part
+of the site.
+
 ## Gateway console sign-in
 
 Each gateway serves its own console for the traffic it handles (requests,

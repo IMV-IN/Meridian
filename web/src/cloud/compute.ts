@@ -77,3 +77,8 @@ export function endReason(reason: string): string {
     }[reason] ?? "Ended"
   )
 }
+
+/** How to install the meridian CLI from this control plane (its own wheel, else the installer), never from GitHub. */
+export function cliInstallLine(info: { public_url: string; wheel?: string | null }): string {
+  return info.wheel ? `pip install ${info.public_url}/download/${info.wheel}` : `curl -fsSL ${info.public_url}/install.sh | bash`
+}

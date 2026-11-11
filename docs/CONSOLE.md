@@ -26,6 +26,9 @@ managed by `meridian-control`.
 | `docker compose up --build` or the published image | `http://<gateway>:8080/ui`. The image builds the console. |
 | From source with `pip install -e .` | `cd web && npm ci && npm run build` once, then `/ui`. Without a build, `/ui` serves the single-page legacy dashboard. |
 
+The Meridian Cloud control plane also serves the documentation at `/docs/`, built
+separately with `mkdocs build --strict -d meridian_control/docs_site` (see [Meridian Cloud](CLOUD.md#documentation-at-docs)).
+
 With `auth.enabled: true` the console asks for an API key. The key is validated
 with `GET /meridian/whoami` and then sent only to this gateway as a Bearer
 token. By default it is kept for the browser tab only (sessionStorage). Choose

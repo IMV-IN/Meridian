@@ -7,10 +7,13 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
-# Do not cancel matrix siblings when one job flakes on setup.
+permissions:
+  contents: read
+
+# A newer push to the same ref supersedes the run in progress (private repos have limited Actions minutes).
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: false
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint-and-test:

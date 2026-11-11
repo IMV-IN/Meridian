@@ -16,6 +16,8 @@ export interface CloudInfo {
   signup: "open" | "invite"
   public_url: string
   node_url: string
+  /** Filename of the gateway wheel this server hosts at /download/, if it carries one. */
+  wheel?: string | null
 }
 
 export interface CloudUser {

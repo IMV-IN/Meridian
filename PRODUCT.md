@@ -28,14 +28,14 @@ Meridian runs on GPUs the institute already owns. Datasets, checkpoints, weights
 
 Nodes and gateways only connect outward to the control plane. The cloud receives health, job specs, GPU-hour counts and the last 8 KB of job output. It never receives prompts or keys.
 
-The control plane can be hosted (Meridian Cloud) or self-hosted on campus. The code is in the IMV-IN GitHub org.
+The control plane can be hosted (Meridian Cloud) or self-hosted on campus.
 
 ## Operating Context
 
 - The node agent `meridian-node` runs on each GPU server.
 - The console is at `/ui`.
 - The CLI is `meridian compute offers|rent|rentals|release|balance|jobs|run|logs|cancel|usage|templates`.
-- The gateway is installed with `curl -fsSL <your server>/install.sh | sh`. The package is not on PyPI, so no page may show `pip install meridian-gateway`.
+- The gateway is installed with `curl -fsSL <your server>/install.sh | bash`. The package is not on PyPI, so no page may show `pip install meridian-gateway`.
 - Roles are viewer, operator and admin.
 - API keys start with `mck_`.
 - A public read-only listings feed exists at `GET /api/public/offers`.

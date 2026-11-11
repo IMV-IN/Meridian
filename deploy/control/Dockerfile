@@ -9,7 +9,8 @@
 #              -v meridian-ca:/var/lib/meridian-control/ca \
 #              meridian-control migrate
 #   docker run ... meridian-control run --host 0.0.0.0 --port 8443
-# The console (web/) is served by the control plane in cloud mode.
+# The console (web/) and the documentation site (docs/, built with mkdocs) are served by
+# the control plane in cloud mode, at /ui and /docs/.
 FROM --platform=$BUILDPLATFORM node:22-slim AS console
 
 WORKDIR /src/web
@@ -18,6 +19,17 @@ RUN npm ci --no-audit --no-fund
 COPY web/ ./
 # vite.config.ts writes to ../meridian/ui/dist → /src/meridian/ui/dist
 RUN npm run build
+
+
+# The documentation site, served at /docs/ so nothing a visitor reads lives on GitHub.
+# --strict fails the image build on a broken link or nav entry.
+FROM python:3.14-slim-trixie AS docs
+
+WORKDIR /src
+RUN pip install --no-cache-dir "mkdocs-material>=9.5,<10"
+COPY mkdocs.yml ./
+COPY docs/ docs/
+RUN mkdocs build --strict -d /out/docs_site
 
 
 # Python 3.14 is the project's runtime everywhere (images, CI, docs). 3.15 is
@@ -32,6 +44,7 @@ COPY pyproject.toml README.md ./
 COPY meridian/ meridian/
 COPY meridian_control/ meridian_control/
 COPY --from=console /src/meridian/ui/dist meridian/ui/dist
+COPY --from=docs /out/docs_site meridian_control/docs_site
 
 RUN python -m venv /opt/venv \
     && /opt/venv/bin/pip install --no-cache-dir --upgrade "pip>=26.1.2" \

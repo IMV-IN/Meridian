@@ -2,10 +2,10 @@
 import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react"
 import { useLocation } from "react-router"
 
-export const REPO = "https://github.com/IMV-IN/Meridian"
-export const DOCS = `${REPO}/tree/main/docs`
-export const COMPUTE_GUIDE = `${REPO}/blob/main/docs/COMPUTE.md`
-export const QUICKSTART = `${REPO}/blob/main/docs/QUICKSTART.md`
+// The control plane serves the mkdocs site at /docs/, so no link depends on GitHub.
+export const DOCS = "/docs/"
+export const COMPUTE_GUIDE = "/docs/COMPUTE/"
+export const QUICKSTART = "/docs/QUICKSTART/"
 
 /** The installer one-liner. The control plane serves /install.sh for its own address. */
 export const installCommand = (origin: string) => `curl -fsSL ${origin}/install.sh | bash`

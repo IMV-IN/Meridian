@@ -2,7 +2,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Link, useLocation } from "react-router"
 
-import { COMPUTE_GUIDE, DOCS, QUICKSTART, REPO, usePageMeta } from "./site-lib"
+import { COMPUTE_GUIDE, DOCS, QUICKSTART, usePageMeta } from "./site-lib"
 
 /** Section anchors live on the home page: on other pages they link there. */
 function useAnchor() {
@@ -91,7 +91,7 @@ export function SiteFooter() {
       <div className="wrap foot">
         <div>
           <Wordmark small />
-          <p style={{ marginTop: 8, maxWidth: "36ch" }}>Open source. Prices and bills in rupees.</p>
+          <p style={{ marginTop: 8, maxWidth: "36ch" }}>Prices and bills in rupees.</p>
         </div>
         <div>
           <h2>Product</h2>
@@ -129,9 +129,6 @@ export function SiteFooter() {
             </li>
             <li>
               <a href={COMPUTE_GUIDE}>Compute guide</a>
-            </li>
-            <li>
-              <a href={REPO}>Source on GitHub</a>
             </li>
             <li>
               <a href="/ui/">Console sign-in</a>

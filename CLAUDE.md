@@ -61,6 +61,7 @@ Key modules
 - Telemetry: `meridian/telemetry/`
 - Config schema: `meridian/config/models.py`
 - Operator console: `web/` (React + TS + Vite + shadcn/ui) → built into `meridian/ui/dist/`, served at `/ui`; console read models in `meridian/api/console.py`; legacy fallback `meridian/ui/index.html`. See `docs/CONSOLE.md`.
+- Docs site: `mkdocs build --strict -d meridian_control/docs_site` (gitignored, shipped in the wheel), served by `meridian_control/web.py` at `/docs/`. Site and console link to `/docs/...`, never to github.com. See `docs/CLOUD.md`.
 
 **Milestone status:** A–N plus Phases 1–3 shipped and tagged through **v0.12.0** (see `docs/ship.md`). Next: **no new features** — the **v1.0 gate is on hold** pending cofounder / design-partner PoC sign-off (see `docs/internal/V1_GATE.md`).
 

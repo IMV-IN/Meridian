@@ -139,7 +139,7 @@ The 8 hour limit on services stops a forgotten notebook from holding a GPU for e
 
 ### Digests are pinned; bumping them
 
-Every template image is pinned by digest, the same rule as any other job. The templates live in [`meridian_control/templates.py`](https://github.com/IMV-IN/Meridian/blob/main/meridian_control/templates.py), and the comment above each digest records the tag it was resolved from:
+Every template image is pinned by digest, the same rule as any other job. The templates live in `meridian_control/templates.py`, and the comment above each digest records the tag it was resolved from:
 
 | Constant | Resolved from | Digest covers |
 | --- | --- | --- |
