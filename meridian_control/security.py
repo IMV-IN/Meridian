@@ -11,6 +11,7 @@ import re
 import secrets
 import threading
 import time
+import urllib.parse
 from collections import deque
 from pathlib import Path
 from typing import Any, Deque, Dict, Optional
@@ -92,8 +93,16 @@ def normalize_email(value: str) -> Optional[str]:
 
 
 def safe_next(path: Optional[str], default: str = "/ui/") -> str:
-    """Post-login redirect target: same-origin absolute paths only (no open redirect)."""
-    if not path or not path.startswith("/") or path.startswith("//") or "\\" in path or "\n" in path or "\r" in path:
+    """Post-login redirect target: a same-origin path only (no open redirect). Rejects
+    backslashes and every control character (browsers drop TAB/CR/LF from URLs, which
+    turns "/\t/evil.com" into "//evil.com"), then requires that the value parses with
+    no scheme and no host."""
+    if not path or len(path) > 2048 or not path.startswith("/") or path.startswith("//") or "\\" in path:
+        return default
+    if any(ord(c) < 0x20 or 0x7F <= ord(c) <= 0x9F for c in path):
+        return default
+    parts = urllib.parse.urlsplit(path)
+    if parts.scheme or parts.netloc or parts.path.startswith("//"):
         return default
     return path
 

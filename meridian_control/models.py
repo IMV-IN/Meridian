@@ -336,6 +336,9 @@ class JobReplica(Base):
     log_tail: Mapped[str] = mapped_column(String(8192), default="")
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # When the control plane placed the replica, on its own clock: start deadlines
+    # and the clamp on node-reported times are measured from here.
+    scheduled_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     # True once the node no longer needs this replica in its desired snapshot:
     # it holds no GPU and its container may be removed.
     released: Mapped[bool] = mapped_column(default=False, index=True)

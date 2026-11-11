@@ -94,6 +94,15 @@ class ControlConfig:
     node_lost_seconds: int = 300
     # Gateway status reports kept per gateway (bytes of JSON).
     max_report_bytes: int = 256 * 1024
+    # A placed job replica must leave Pending/Starting within this long (image pulls
+    # included), measured on the control plane's clock, or the job fails.
+    job_start_deadline_seconds: int = 1800
+    # Request body limits (bytes), enforced while the body streams in, chunked or not.
+    max_body_bytes: int = 1024 * 1024
+    # Routes anyone can call without signing in (/auth, /oauth, /api/public, enrollment).
+    max_unauthenticated_body_bytes: int = 64 * 1024
+    # A node's observation (it carries up to 8 KiB of log tail per job replica).
+    max_observation_bytes: int = 4 * 1024 * 1024
     extra: dict = field(default_factory=dict)
 
     @property
@@ -146,4 +155,10 @@ class ControlConfig:
             meter_interval_seconds=int(os.environ.get("MERIDIAN_CONTROL_METER_INTERVAL", "600")),
             compute_tick_seconds=int(os.environ.get("MERIDIAN_CONTROL_COMPUTE_TICK", "30")),
             node_lost_seconds=int(os.environ.get("MERIDIAN_CONTROL_NODE_LOST_SECONDS", "300")),
+            job_start_deadline_seconds=int(os.environ.get("MERIDIAN_CONTROL_JOB_START_DEADLINE", "1800")),
+            max_body_bytes=int(os.environ.get("MERIDIAN_CONTROL_MAX_BODY_BYTES", str(1024 * 1024))),
+            max_unauthenticated_body_bytes=int(
+                os.environ.get("MERIDIAN_CONTROL_MAX_UNAUTHENTICATED_BODY_BYTES", str(64 * 1024))
+            ),
+            max_observation_bytes=int(os.environ.get("MERIDIAN_CONTROL_MAX_OBSERVATION_BYTES", str(4 * 1024 * 1024))),
         )

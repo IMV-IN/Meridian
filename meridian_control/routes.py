@@ -8,7 +8,7 @@ import base64
 from datetime import datetime, timezone
 from typing import Optional, cast
 
-from fastapi import APIRouter, Body, Header, Query, Request
+from fastapi import APIRouter, Body, Header, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 
 from .service import ControlService, ControlServiceError
@@ -180,13 +180,83 @@ def place(request: Request, body: dict = Body(...)):
     return {"placement": placement}
 
 
+def error_response(exc: ControlServiceError) -> JSONResponse:
+    """The contracts/v1 error envelope."""
+    return JSONResponse(
+        status_code=exc.http_status,
+        content={"error": {
+            "code": exc.code, "message": exc.message, "retryable": exc.retryable,
+            "server_time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        }},
+    )
+
+
+class BodyTooLarge(HTTPException):
+    """Raised while a request body streams in past its route's limit. An
+    HTTPException, so FastAPI's body parsing passes it through untouched."""
+
+    def __init__(self, limit: int) -> None:
+        super().__init__(status_code=413)
+        self.error = ControlServiceError("TOO_LARGE", f"the request body is larger than {limit} bytes", http_status=413)
+
+
+class BodyLimit:
+    """ASGI middleware: reject a request body over its route's limit with 413.
+    Checks Content-Length up front and counts the bytes as they stream in, so a
+    chunked body without a length is cut off too, before anything parses it."""
+
+    UNAUTHENTICATED = ("/auth/", "/oauth/", "/api/public/", "/control/v1/enroll")
+
+    def __init__(self, app, config) -> None:
+        self.app = app
+        self.config = config
+
+    def limit_for(self, path: str) -> int:
+        c = self.config
+        if path.startswith("/control/v1/nodes/") and path.endswith("/observations"):
+            return int(c.max_observation_bytes)
+        if path.startswith(self.UNAUTHENTICATED):
+            return int(c.max_unauthenticated_body_bytes)
+        return int(c.max_body_bytes)
+
+    async def __call__(self, scope, receive, send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        limit = self.limit_for(scope.get("path", ""))
+        declared = dict(scope.get("headers") or []).get(b"content-length")
+        if declared is not None and (not declared.isdigit() or int(declared) > limit):
+            await error_response(BodyTooLarge(limit).error)(scope, receive, send)
+            return
+        received = 0
+        started = False
+
+        async def counted():
+            nonlocal received
+            message = await receive()
+            if message["type"] == "http.request":
+                received += len(message.get("body", b""))
+                if received > limit:
+                    raise BodyTooLarge(limit)
+            return message
+
+        async def tracked(message) -> None:
+            nonlocal started
+            started = started or message["type"] == "http.response.start"
+            await send(message)
+
+        try:
+            await self.app(scope, counted, tracked)
+        except BodyTooLarge as e:  # read outside FastAPI's handlers (a raw ASGI read)
+            if not started:
+                await error_response(e.error)(scope, receive, send)
+
+
 def register_error_handler(app) -> None:
     @app.exception_handler(ControlServiceError)
     async def _handle(request: Request, exc: ControlServiceError):
-        return JSONResponse(
-            status_code=exc.http_status,
-            content={"error": {
-                "code": exc.code, "message": exc.message, "retryable": exc.retryable,
-                "server_time": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-            }},
-        )
+        return error_response(exc)
+
+    @app.exception_handler(BodyTooLarge)
+    async def _too_large(request: Request, exc: BodyTooLarge):
+        return error_response(exc.error)

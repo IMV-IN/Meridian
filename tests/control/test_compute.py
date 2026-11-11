@@ -1444,7 +1444,7 @@ def test_migration_adds_listing_visibility_with_public_as_the_default(tmp_path):
 
 OFFER_KEYS = {
     "title", "region", "gpu_model", "gpu_count", "vram_bytes_per_gpu", "price_paise_per_gpu_hour",
-    "hourly_total_paise", "available", "provider_name",
+    "hourly_total_paise", "available",
 }
 
 
@@ -1461,14 +1461,16 @@ def test_public_feed_needs_no_sign_in_and_is_the_only_cacheable_api_route(world)
     assert body["offers"][0] == {
         "title": "2× H100, Mumbai", "region": "Mumbai", "gpu_model": "NVIDIA H100", "gpu_count": 2,
         "vram_bytes_per_gpu": 80 * GB, "price_paise_per_gpu_hour": 100_00, "hourly_total_paise": 204_00,
-        "available": True, "provider_name": "Mumbai DC",
+        "available": True,
     }
     assert body["summary"] == {
         "available_gpus": 2, "gpus_by_model": {"NVIDIA H100": 2}, "regions": ["Mumbai"],
         "lowest_price_paise_per_gpu_hour": 100_00,
     }
     # Nothing that identifies a node, a device or a workspace leaks into the page.
-    for secret in (world.node.node_id, world.pws, world.cws, world.offer["id"], world.node.devices[0], "mine"):
+    # No provider name either: providers have not agreed to be named publicly (L3).
+    for secret in (world.node.node_id, world.pws, world.cws, world.offer["id"], world.node.devices[0], "mine",
+                   "Mumbai DC", "provider"):
         assert secret not in r.text
     # Every other /api response is still no-store.
     anon = TestClient(world.app)

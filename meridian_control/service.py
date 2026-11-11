@@ -22,8 +22,10 @@ from cryptography.exceptions import InvalidSignature
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 from sqlalchemy import select
 
+from . import validation
 from .ca import NodeCA, node_id_from_cert
 from .config import ControlConfig
+from .errors import ControlServiceError
 from .models import (
     AuditEvent,
     Claim,
@@ -38,14 +40,7 @@ from .models import (
 if TYPE_CHECKING:
     from .compute import ComputeService
 
-
-class ControlServiceError(Exception):
-    def __init__(self, code: str, message: str, retryable: bool = False, http_status: int = 400):
-        super().__init__(f"{code}: {message}")
-        self.code = code
-        self.message = message
-        self.retryable = retryable
-        self.http_status = http_status
+__all__ = ["ControlService", "ControlServiceError"]
 
 
 def _utcnow() -> datetime:
@@ -202,6 +197,7 @@ class ControlService:
 
     # --- enrollment -----------------------------------------------------
     def enroll(self, token: Optional[str], request: dict) -> dict:
+        req = validation.parse_report(validation.EnrollRequest, request)
         with self._sf() as s:
             row = s.get(EnrollmentToken, _hash_token(token)) if token else None
             if row is None:
@@ -213,10 +209,10 @@ class ControlService:
             row.used = True
 
             node_id = "node_" + secrets.token_hex(12)
-            public_key = _b64url_decode(request["node_public_key"])
+            public_key = _b64url_decode(req.node_public_key)
             ws = row.workspace_id
             if row.auto_approve:
-                self._create_node(s, node_id, public_key, request, workspace_id=ws)
+                self._create_node(s, node_id, public_key, req.host_claims.hostname, workspace_id=ws)
                 resp = self._approved_response(s, node_id)
                 s.add(AuditEvent(node_id=node_id, workspace_id=ws, kind="enrolled_auto"))
                 s.commit()
@@ -252,20 +248,19 @@ class ControlService:
             if claim.status != "approved":
                 return {"status": "pending", "claim_id": claim_id}
             if s.get(Node, claim.node_id) is None:
-                self._create_node(s, claim.node_id, claim.public_key, {}, workspace_id=claim.workspace_id)
+                self._create_node(s, claim.node_id, claim.public_key, "", workspace_id=claim.workspace_id)
             resp = self._approved_response(s, claim.node_id)
             s.add(AuditEvent(node_id=claim.node_id, workspace_id=claim.workspace_id, kind="enrolled_approved"))
             s.commit()
             return resp
 
     def _create_node(
-        self, s, node_id: str, public_key: bytes, request: dict, workspace_id: Optional[str] = None
+        self, s, node_id: str, public_key: bytes, hostname: str, workspace_id: Optional[str] = None
     ) -> None:
         cert = self._ca.issue_node_cert(node_id, public_key, self._config.cert_lifetime_hours)
-        host_claims = request.get("host_claims", {}) if request else {}
         s.add(Node(
             node_id=node_id, public_key=public_key, certificate_pem=cert,
-            display_name=host_claims.get("hostname", ""), workspace_id=workspace_id,
+            display_name=hostname, workspace_id=workspace_id,
         ))
         s.flush()
 
@@ -329,6 +324,7 @@ class ControlService:
 
     # --- session --------------------------------------------------------
     def establish_session(self, node_id: str, request: dict) -> dict:
+        req = validation.parse_report(validation.NodeSessionRequest, request)
         with self._sf() as s:
             node = s.get(Node, node_id)
             if node is None:
@@ -336,10 +332,10 @@ class ControlService:
             if node.revoked:
                 raise ControlServiceError("NODE_NOT_AUTHORIZED", "node certificate revoked", http_status=403)
             inc = self._incarnation(s)
-            session_id = request["agent_session_id"]
+            session_id = req.agent_session_id
             lease_valid = node.lease_expires_at is not None and self._now() < _aware(node.lease_expires_at)
             has_active = node.active_session_id is not None and node.active_session_id != session_id
-            if lease_valid and has_active and not request.get("handoff_token"):
+            if lease_valid and has_active and not req.handoff_token:
                 raise ControlServiceError(
                     "CONFLICT", "active session holds a valid lease; wait for expiry or supply a handoff token",
                     http_status=409,
@@ -368,21 +364,23 @@ class ControlService:
 
     # --- heartbeat ------------------------------------------------------
     def heartbeat(self, node_id: str, request: dict) -> dict:
+        hb = validation.parse_report(validation.NodeHeartbeat, request)
         with self._sf() as s:
             node = s.get(Node, node_id)
             if node is None:
                 raise ControlServiceError("NODE_NOT_FOUND", "unknown node", http_status=404)
             if node.revoked:
                 raise ControlServiceError("NODE_NOT_AUTHORIZED", "node certificate revoked", http_status=403)
-            if request["agent_session_id"] != node.active_session_id or request["fencing_epoch"] != node.fencing_epoch:
+            if hb.agent_session_id != node.active_session_id or hb.fencing_epoch != node.fencing_epoch:
                 raise ControlServiceError("STALE_AGENT_SESSION", "agent session is no longer active", http_status=409)
-            if request["sequence"] <= node.highest_sequence:
+            if hb.sequence <= node.highest_sequence:
                 raise ControlServiceError("CONFLICT", "sequence is not greater than highest accepted", http_status=409)
-            node.highest_sequence = request["sequence"]
+            node.highest_sequence = hb.sequence
             node.lease_expires_at = self._now() + self._ttl()
-            gpus = request.get("gpus")
-            if isinstance(gpus, list) and gpus[:64] != (node.inventory or []):
-                node.inventory = gpus[:64]
+            if hb.gpus is not None:
+                gpus = [validation.report_dict(g) for g in hb.gpus]
+                if gpus != (node.inventory or []):
+                    node.inventory = gpus
             stop_ids = [
                 r.engine_id for r in s.scalars(
                     select(StopAuthorization).where(StopAuthorization.node_id == node_id)
@@ -391,7 +389,7 @@ class ControlService:
             s.commit()
             return {
                 "server_time": _iso(self._now()),
-                "accepted_sequence": request["sequence"],
+                "accepted_sequence": hb.sequence,
                 "fencing_epoch": node.fencing_epoch,
                 "lease_expires_at": _iso(node.lease_expires_at),
                 "desired_generation": node.desired_generation,
@@ -421,10 +419,13 @@ class ControlService:
                 raise ControlServiceError("GENERATION_NOT_FOUND", "no desired state published", http_status=404)
             return dict(row.snapshot)
 
-    def post_observation(self, node_id: str, observation: dict) -> dict:
+    def post_observation(self, node_id: str, body: dict) -> dict:
+        """Store a node's report after validating all of it; a malformed one is 400 and stores nothing."""
+        report = validation.parse_report(validation.NodeObservation, body)
+        observation = validation.report_dict(report)
         with self._sf() as s:
             self._active_node(s, node_id)
-            seq = int(observation.get("sequence", 0))
+            seq = report.sequence
             row = s.get(ObservationRow, node_id)
             if row is None:
                 s.add(ObservationRow(
@@ -460,8 +461,8 @@ class ControlService:
                 obs = s.get(ObservationRow, node.node_id)
                 if obs is None:
                     continue
-                cap = obs.observation.get("capacity", {})
-                alloc = {d: int(v) for d, v in cap.get("allocatable_vram_bytes", {}).items()}
+                cap = validation.stored_capacity(obs.observation, node.node_id)
+                alloc = dict(cap.get("allocatable_vram_bytes", {}))
                 devices = _pick_devices(alloc, cap.get("nvlink_groups", {}), required_vram_bytes, count)
                 if devices is None:
                     continue
@@ -511,7 +512,7 @@ class ControlService:
             for node in s.scalars(self._nodes_q(workspace_id)):
                 lease_valid = node.lease_expires_at is not None and self._now() < _aware(node.lease_expires_at)
                 obs = s.get(ObservationRow, node.node_id)
-                engines = (obs.observation.get("engines", []) if obs else [])
+                engines = validation.stored_observation(obs.observation, node.node_id).get("engines", []) if obs else []
                 for e in engines:
                     if e.get("phase") == "Ready" and e.get("endpoint"):
                         out.append({
@@ -537,14 +538,14 @@ class ControlService:
         return "online" if self._now() < _aware(node.lease_expires_at) else "offline"
 
     def _node_summary(self, node: Node, obs: Optional[ObservationRow]) -> dict:
-        observation = obs.observation if obs is not None else {}
+        observation = validation.stored_observation(obs.observation, node.node_id) if obs is not None else {}
         engines = observation.get("engines", []) or []
         cap = observation.get("capacity", {}) or {}
         by_phase: dict[str, int] = {}
         for e in engines:
             phase = str(e.get("phase", "Unknown"))
             by_phase[phase] = by_phase.get(phase, 0) + 1
-        alloc = {d: int(v) for d, v in (cap.get("allocatable_vram_bytes", {}) or {}).items()}
+        alloc = dict(cap.get("allocatable_vram_bytes", {}))
         return {
             "node_id": node.node_id,
             "display_name": node.display_name,
@@ -614,7 +615,7 @@ class ControlService:
             )
             detail.update({
                 "certificate": cert,
-                "observation": dict(obs.observation) if obs is not None else None,
+                "observation": validation.stored_observation(obs.observation, node_id) if obs is not None else None,
                 "desired": {
                     "generation": desired.generation,
                     "created_at": _iso(desired.created_at) if desired.created_at else None,
