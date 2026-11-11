@@ -27,7 +27,8 @@ def create_app(config: Optional[ControlConfig] = None, now: Optional[Callable] =
     service_kwargs = {"now": now} if now is not None else {}
     service = ControlService(session_factory, ca, config, **service_kwargs)
 
-    app = FastAPI(title="meridian-control", version="0.1.0")
+    # Cloud serves the product documentation at /docs/, so FastAPI's Swagger UI moves out of the way.
+    app = FastAPI(title="meridian-control", version="0.1.0", docs_url=None if config.cloud else "/docs")
     app.state.control_service = service
     if config.cors_origins:
         from fastapi.middleware.cors import CORSMiddleware

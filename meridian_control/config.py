@@ -79,6 +79,8 @@ class ControlConfig:
     trust_proxy_headers: bool = False
     # Built console bundle to serve at /ui (default: the meridian package's ui/dist).
     console_dir: str = ""
+    # Built documentation site to serve at /docs/ (default: the package's docs_site).
+    docs_dir: str = ""
     # Gateway package (wheel + .sha256) the one-line installer downloads from
     # this server (/download/*). The control image builds it at /opt/meridian/downloads.
     downloads_dir: str = "/opt/meridian/downloads"
@@ -142,6 +144,7 @@ class ControlConfig:
             dev_mail_outbox=os.environ.get("MERIDIAN_CONTROL_DEV_MAIL_OUTBOX", ""),
             trust_proxy_headers=_flag("MERIDIAN_CONTROL_TRUST_PROXY_HEADERS"),
             console_dir=os.environ.get("MERIDIAN_CONTROL_CONSOLE_DIR", ""),
+            docs_dir=os.environ.get("MERIDIAN_CONTROL_DOCS_DIR", ""),
             market_fee_bps=int(os.environ.get("MERIDIAN_CONTROL_MARKET_FEE_BPS", "200")),
             meter_interval_seconds=int(os.environ.get("MERIDIAN_CONTROL_METER_INTERVAL", "600")),
             compute_tick_seconds=int(os.environ.get("MERIDIAN_CONTROL_COMPUTE_TICK", "30")),

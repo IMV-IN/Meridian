@@ -183,6 +183,7 @@ def cloud_info_payload(app: FastAPI, cfg: ControlConfig) -> dict:
         "signup": cfg.signup,
         "public_url": cfg.public_url,
         "node_url": cfg.node_url or cfg.public_url,
+        "wheel": _wheel_name(cfg),
     }
 
 
@@ -544,6 +545,64 @@ def download(request: Request, name: str) -> Response:
     return FileResponse(path, media_type=media, headers={"Cache-Control": cache, "X-Content-Type-Options": "nosniff"})
 
 
+def _wheel_name(cfg: ControlConfig) -> Optional[str]:
+    """The gateway wheel this server hosts at /download/, from its own downloads
+    dir (never from a request), or None when the image carries no wheel."""
+    try:
+        names = sorted(p.name for p in Path(cfg.downloads_dir).glob("meridian-*-py3-none-any.whl") if p.is_file())
+    except OSError:
+        return None
+    names = [n for n in names if _DOWNLOAD_NAME.fullmatch(n)]
+    return names[-1] if names else None
+
+
+# ── documentation site (mkdocs build, shipped as package data) ────────────
+_DOCS_HEADERS = {
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "strict-origin-when-cross-origin",
+    "X-Frame-Options": "DENY",
+}
+
+
+def docs_dir(cfg: ControlConfig) -> Path:
+    return Path(cfg.docs_dir) if cfg.docs_dir else Path(__file__).resolve().parent / "docs_site"
+
+
+def mount_docs(app: FastAPI, cfg: ControlConfig) -> None:
+    root = docs_dir(cfg)
+
+    @app.get("/docs", include_in_schema=False)
+    def docs_root():
+        return RedirectResponse("/docs/", status_code=308)
+
+    @app.get("/docs/{path:path}", include_in_schema=False)
+    def docs_path(path: str):
+        base = root.resolve()
+        if not (base / "index.html").is_file():
+            return Response(
+                "The documentation isn't built on this server. Run `mkdocs build -d meridian_control/docs_site`, "
+                "or rebuild the meridian-control image.\n",
+                status_code=404,
+                media_type="text/plain",
+                headers=_DOCS_HEADERS,
+            )
+        try:
+            candidate = (base / path).resolve()
+        except (ValueError, OSError):  # NUL byte, symlink loop
+            candidate = base.parent
+        if candidate != base and base not in candidate.parents:
+            return Response("not found", status_code=404, media_type="text/plain", headers=_DOCS_HEADERS)
+        if candidate.is_dir():
+            if path and not path.endswith("/"):  # keep relative links working
+                return RedirectResponse(f"/docs/{path}/", status_code=308)
+            candidate = candidate / "index.html"
+        if not candidate.is_file():
+            return Response("not found", status_code=404, media_type="text/plain", headers=_DOCS_HEADERS)
+        html_page = candidate.suffix == ".html"
+        cache = "no-cache" if html_page else "public, max-age=86400"
+        return FileResponse(candidate, headers={**_DOCS_HEADERS, "Cache-Control": cache})
+
+
 # ── console bundle ────────────────────────────────────────────────────────
 _UI_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -649,6 +708,7 @@ def install_cloud(app: FastAPI, cfg: ControlConfig) -> None:
     app.include_router(gateway_router)
     app.include_router(oauth_router)
     app.include_router(install_router)
+    mount_docs(app, cfg)
     mount_console(app, cfg)
 
     @app.middleware("http")

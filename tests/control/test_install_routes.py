@@ -56,3 +56,85 @@ def test_site_pages(tmp_path, clock):
     (dist / "site.html").unlink()
     for path in ("/", "/labs", "/teaching"):  # older builds
         assert c.get(path, follow_redirects=False).headers["location"] == "/ui/"
+
+
+def _docs(tmp_path):
+    root = tmp_path / "docs_site"
+    (root / "COMPUTE").mkdir(parents=True)
+    (root / "assets").mkdir()
+    (root / "index.html").write_text("<h1>Meridian docs</h1>")
+    (root / "COMPUTE" / "index.html").write_text("<h1>Compute</h1>")
+    (root / "assets" / "app.css").write_text("body{}")
+    (tmp_path / "secret.txt").write_text("outside the docs root")
+    return root
+
+
+def test_docs_are_served_as_static_files(tmp_path, clock):
+    c = make(tmp_path, clock, docs_dir=str(_docs(tmp_path)))
+    assert c.get("/docs", follow_redirects=False).headers["location"] == "/docs/"
+    page = c.get("/docs/")
+    assert page.status_code == 200 and "Meridian docs" in page.text
+    assert page.headers["cache-control"] == "no-cache" and page.headers["x-content-type-options"] == "nosniff"
+    assert "Compute" in c.get("/docs/COMPUTE/").text
+    assert c.get("/docs/COMPUTE", follow_redirects=False).headers["location"] == "/docs/COMPUTE/"
+    css = c.get("/docs/assets/app.css")
+    assert css.headers["content-type"].startswith("text/css") and "max-age" in css.headers["cache-control"]
+    assert c.get("/docs/assets/").status_code == 404  # no directory listing
+    assert c.get("/docs/nope.html").status_code == 404
+    assert c.get("/openapi.json").status_code == 200  # /docs/ replaced Swagger, not the schema
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/docs/../secret.txt",
+        "/docs/%2e%2e/secret.txt",
+        "/docs/%2e%2e%2fsecret.txt",
+        "/docs/assets/..%2f..%2fsecret.txt",
+        "/docs/..%5csecret.txt",
+        "/docs//etc/passwd",
+        "/docs/%2fetc/passwd",
+        "/docs/index.html%00.png",
+        "/docs/%00",
+    ],
+)
+def test_docs_refuse_paths_outside_the_root(tmp_path, clock, path):
+    c = make(tmp_path, clock, docs_dir=str(_docs(tmp_path)))
+    r = c.get(path, follow_redirects=False)
+    assert r.status_code == 404 and "outside the docs root" not in r.text and "root:" not in r.text
+    assert r.headers["x-content-type-options"] == "nosniff"
+
+
+def test_docs_not_built_is_a_plain_404_with_a_hint(tmp_path, clock):
+    c = make(tmp_path, clock, docs_dir=str(tmp_path / "nowhere"))
+    for path in ("/docs/", "/docs/COMPUTE/"):
+        r = c.get(path)
+        assert r.status_code == 404 and r.headers["content-type"].startswith("text/plain")
+        assert "mkdocs build" in r.text and r.text.count("\n") == 1
+
+
+def test_built_docs_leave_out_internal_pages():
+    import pathlib
+
+    import yaml
+
+    repo = pathlib.Path(__file__).resolve().parents[2]
+    cfg = yaml.safe_load((repo / "mkdocs.yml").read_text())
+    assert "internal/" in cfg["exclude_docs"]
+    built = repo / "meridian_control" / "docs_site"
+    if not built.is_dir():
+        pytest.skip("docs not built (mkdocs build -d meridian_control/docs_site)")
+    assert not (built / "internal").exists()
+    assert not (built / "scans").exists() and not (built / "superpowers").exists()
+
+
+def test_cloud_info_names_the_wheel_it_hosts(tmp_path, clock):
+    dl = tmp_path / "downloads"
+    dl.mkdir()
+    (dl / "meridian.whl.sha256").write_text("x")
+    (dl / "meridian-evil.tar.gz").write_text("x")
+    assert make(tmp_path, clock, downloads_dir=str(dl)).get("/api/cloud/info").json()["wheel"] is None
+    (dl / "meridian-0.12.0-py3-none-any.whl").write_bytes(b"PK")
+    info = make(tmp_path, clock, downloads_dir=str(dl)).get("/api/cloud/info").json()
+    assert info["wheel"] == "meridian-0.12.0-py3-none-any.whl"
+    assert make(tmp_path, clock, downloads_dir=str(tmp_path / "nowhere")).get("/api/cloud/info").json()["wheel"] is None

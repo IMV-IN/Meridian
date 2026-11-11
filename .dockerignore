@@ -47,3 +47,4 @@ CHANGELOG.md
 # Console: the image builds web/ from source in its own stage.
 web/node_modules
 meridian/ui/dist
+meridian_control/docs_site

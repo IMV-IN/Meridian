@@ -1,7 +1,6 @@
 # Meridian
 
-**Latest release: [![GitHub release](https://img.shields.io/github/v/release/IMV-IN/Meridian?sort=semver)](https://github.com/IMV-IN/Meridian/releases/latest)** ·  
-**Website:** [imv-in.github.io/Meridian](https://imv-in.github.io/Meridian/) · **Quickstart:** [`docs/QUICKSTART.md`](docs/QUICKSTART.md)
+**Quickstart:** [`docs/QUICKSTART.md`](docs/QUICKSTART.md)
 
 Meridian is an **L7 inference gateway** for self-hosted / on-soil LLM fleets. It sits between your apps and OpenAI-compatible backends (vLLM, SGLang, TensorRT-LLM, Ollama, …) and adds **routing, health/failover, multi-tenant controls, and compliance hooks** without changing application code.
 
@@ -163,6 +162,8 @@ ruff check . && mypy meridian && pytest -q
 
 # Operator console (web/) — React + TypeScript + Vite + shadcn/ui
 cd web && npm ci && npm run check && npm run build   # → meridian/ui/dist
+# Docs site served by Meridian Cloud at /docs/ (needs `pip install -e ".[docs]"`)
+mkdocs build --strict -d meridian_control/docs_site   # → meridian_control/docs_site
 python scripts/console_demo.py                       # full local stack for UI work
 ```
 

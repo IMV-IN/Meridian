@@ -97,7 +97,6 @@ change.
 ## Project posture
 
 Meridian is MIT-licensed, self-hosted, and currently focused on reliability,
-visibility, and platform controls for inference fleets. Read the [security
-policy](https://github.com/IMV-IN/Meridian/blob/main/SECURITY.md), [release
-notes](https://github.com/IMV-IN/Meridian/blob/main/CHANGELOG.md), and [known
+visibility, and platform controls for inference fleets. Read the security
+policy (`SECURITY.md`), the release notes (`CHANGELOG.md`) and the [known
 issues](KNOWN_ISSUES.md) before evaluating it for production.

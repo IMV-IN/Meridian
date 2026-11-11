@@ -8,7 +8,7 @@ A scannable record of **what's shipped** and **what's next**.
 | **First run** | [`QUICKSTART.md`](./QUICKSTART.md) |
 | **Full story (what + why for every milestone)** | [`MILESTONES.md`](./MILESTONES.md) |
 | Backlog order | [`ROADMAP.md`](./ROADMAP.md) |
-| Release-note detail | [`CHANGELOG.md`](https://github.com/IMV-IN/Meridian/blob/main/CHANGELOG.md) |
+| Release-note detail | `CHANGELOG.md` |
 | Pitchable claims only | [`internal/PITCH.md`](./internal/PITCH.md) |
 
 _Last updated: 2026-10-12 — **v0.12.0 tagged**; control service on main;

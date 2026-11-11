@@ -1,6 +1,6 @@
 # meridian-control
 
-The central control plane for [`meridian-node`](https://github.com/IMV-IN/meridian-node)
+The central control plane for `meridian-node`
 GPU agents. It is a **separate service** from the Meridian gateway (it does not
 import or modify gateway code); the gateway consumes its serving projection
 read-only.

@@ -4,6 +4,20 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Works with a private repository.** Nothing a visitor or user touches depends on github.com.
+  - The control plane serves the documentation at `/docs/` (the strict `mkdocs` build, shipped in the wheel and built in
+    the `meridian-control` image; `MERIDIAN_CONTROL_DOCS_DIR` overrides the path). Static files only, paths held inside
+    the docs root, no directory listing. Without a build it answers `404` with a hint. In cloud mode FastAPI's Swagger UI
+    no longer sits at `/docs` (the OpenAPI schema is still at `/openapi.json`).
+  - The public site and console link to `/docs/...` instead of GitHub; "Source on GitHub" and "Open source." are gone.
+  - `GET /api/cloud/info` adds `wheel`, the gateway wheel this server hosts. The console's "Run from your terminal"
+    snippet installs from `/download/<wheel>`, or shows the `/install.sh` one-liner when the server has no wheel.
+  - `meridian init` no longer writes a github.com link into `config.yaml`.
+  - `mkdocs.yml` drops the repository link, edit button and GitHub icon; links to repo files became plain file names.
+    The `docs.yml` workflow no longer deploys to GitHub Pages (it still checks the strict build on pull requests);
+    CI, control-plane and docs workflows cancel superseded runs and request read-only `contents`.
+  No migration.
+
 - **New public site.** `/` is rewritten and `/labs` (institutes sharing GPUs) and `/teaching` (courses) are added,
   served by `meridian-control` next to `/install`. The site reads `GET /api/public/offers` (loading, empty and
   error states; regions, never `provider_name`), with a rental cost calculator, an earnings estimator, the job
