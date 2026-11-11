@@ -315,7 +315,7 @@ function CliPanel() {
     setName("")
     create.reset()
   }
-  const snippet = `pip install meridian-gateway
+  const snippet = `pip install "meridian @ git+https://github.com/IMV-IN/Meridian"
 export MERIDIAN_CLOUD_URL=${info.public_url}
 export MERIDIAN_WORKSPACE=${ws.id}
 export MERIDIAN_API_KEY=mck_…          # your API key
