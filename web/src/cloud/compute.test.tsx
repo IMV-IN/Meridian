@@ -9,9 +9,9 @@ import { makeQueryClient } from "@/lib/query-client"
 import { SettingsProvider } from "@/providers/settings-provider"
 import { ThemeProvider } from "@/providers/theme-provider"
 
-import { rupeesToPaise, type Billing, type CloudInfo, type JobDetail, type Member, type Offer, type Rental, type Usage, type WorkspaceRole } from "./api"
+import { rupeesToPaise, type Billing, type CloudInfo, type JobDetail, type JobTemplate, type Member, type Offer, type Rental, type Usage, type WorkspaceRole } from "./api"
 import { cloudRoutes } from "./app"
-import { endReason, parseEnv, parseSlugs, priceLabel, splitArgs } from "./compute"
+import { endReason, joinArgs, parseEnv, parseSlugs, priceLabel, serviceHint, splitArgs } from "./compute"
 import { CloudSessionProvider } from "./session"
 
 const INFO: CloudInfo = {
@@ -126,6 +126,35 @@ const USAGE: Usage = {
 
 const MEMBER: Member = { ...USER, role: "operator", joined_at: null, last_login_at: null, group: "vision-lab", gpu_hour_quota: null }
 
+const TEMPLATES: JobTemplate[] = [
+  {
+    id: "jupyterlab",
+    title: "JupyterLab",
+    summary: "A notebook server with PyTorch and CUDA.",
+    kind: "service",
+    image: `quay.io/jupyter/pytorch-notebook@sha256:${"b".repeat(64)}`,
+    args: ["start-notebook.py", "--ServerApp.port={{port}}", "--IdentityProvider.token={{service_token}}"],
+    env: { JUPYTER_ENABLE_LAB: "yes" },
+    gpus_per_replica: 1,
+    replicas: 1,
+    timeout_seconds: 28800,
+    docs: "Open the notebook link on the job page.",
+  },
+  {
+    id: "pytorch-ddp",
+    title: "PyTorch distributed (2 nodes)",
+    summary: "Two replicas all-reduce.",
+    kind: "job",
+    image: IMAGE,
+    args: ["torchrun", "--nnodes={{replicas}}", "--rdzv-endpoint={{master}}", "--no-python", "python", "-c", "import torch\nprint('hi there')"],
+    env: {},
+    gpus_per_replica: 1,
+    replicas: 2,
+    timeout_seconds: 900,
+    docs: "Replace the script with your own.",
+  },
+]
+
 function json(status: number, body: unknown) {
   return new Response(body === undefined ? null : JSON.stringify(body), { status, headers: { "content-type": "application/json" } })
 }
@@ -145,6 +174,7 @@ function serve(role: WorkspaceRole, routes: Record<string, Handler>, platformAdm
     "/api/w/w1/usage": () => json(200, USAGE),
     "/api/w/w1/members": () => json(200, { members: [MEMBER], invitations: [] }),
     "/api/w/w1": () => json(200, { id: "w1", slug: "acme", name: "Acme", role, created_at: null, members: 1, default_gpu_hour_quota: 20 }),
+    "/api/w/w1/job-templates": () => json(200, { templates: TEMPLATES }),
   }
   const all = { ...base, ...routes }
   vi.stubGlobal(
@@ -211,6 +241,22 @@ describe("compute helpers", () => {
     expect(splitArgs(`python train.py --name "my run" --tag 'a b' --lr=1e-4`)).toEqual(["python", "train.py", "--name", "my run", "--tag", "a b", "--lr=1e-4"])
     expect(splitArgs("   ")).toEqual([])
     expect(splitArgs(`echo "say \\"hi\\""`)).toEqual(["echo", 'say "hi"'])
+  })
+
+  it("joins arguments so splitting them again gives the same list", () => {
+    for (const args of TEMPLATES.map((t) => t.args).concat([["python", "my script.py", 'say "hi"', "a\\b", "", "it's"]])) {
+      expect(splitArgs(joinArgs(args))).toEqual(args)
+    }
+    expect(joinArgs(["python", "train.py"])).toBe("python train.py")
+  })
+
+  it("says how to open a service from its image, endpoint and token", () => {
+    const jupyter = TEMPLATES[0].image
+    expect(serviceHint(jupyter, "http://10.0.0.5:9000/", "mst_x")?.code).toBe("http://10.0.0.5:9000/lab?token=mst_x")
+    expect(serviceHint(jupyter, "http://10.0.0.5:9000", null)?.code).toBe("http://10.0.0.5:9000/lab?token=<token>")
+    expect(serviceHint(`docker.io/vllm/vllm-openai@sha256:${"c".repeat(64)}`, "http://h:9001", "mst_x")?.code).toContain("Bearer mst_x")
+    expect(serviceHint(IMAGE, "http://h:1", "t")).toBeNull()
+    expect(serviceHint(jupyter, "", "t")).toBeNull()
   })
 
   it("parses NAME=value lines and names the first bad one", () => {
@@ -306,6 +352,84 @@ describe("Jobs", () => {
       timeout_seconds: 0,
       offer_id: "off_1",
     })
+  })
+
+  it("prefills every field from a template, keeps them editable, and submits its id", async () => {
+    const calls = serve("operator", {
+      "POST /api/w/w1/jobs": () => json(201, { ...JOB, status: "scheduled", message: "" }),
+      "/api/w/w1/jobs/job_1": () => json(200, { ...JOB, status: "scheduled", message: "" }),
+    })
+    const user = userEvent.setup()
+    const router = renderAt("/jobs?new=1")
+    const dialog = await screen.findByRole("dialog")
+
+    const radios = await within(dialog).findAllByRole("radio")
+    expect(radios.map((r) => r.id)).toEqual(["tpl-jupyterlab", "tpl-pytorch-ddp", "tpl-custom"])
+    expect(within(dialog).getByRole("radio", { name: /Custom/ })).toBeChecked()
+
+    await user.click(within(dialog).getByRole("radio", { name: /PyTorch distributed/ }))
+    expect(within(dialog).getByText("Replace the script with your own.")).toBeInTheDocument()
+    expect(within(dialog).getByLabelText("Container image")).toHaveValue(IMAGE)
+    expect(within(dialog).getByLabelText("Command")).toHaveValue(joinArgs(TEMPLATES[1].args))
+    expect(within(dialog).getByLabelText("GPUs per replica")).toHaveValue("1")
+    expect(within(dialog).getByLabelText("Replicas")).toHaveValue("2")
+    expect(within(dialog).getByLabelText("Stop after (hours)")).toHaveValue("0.25")
+    expect(within(dialog).getByRole("button", { name: "Run" })).toBeEnabled()
+
+    await user.click(within(dialog).getByRole("radio", { name: /JupyterLab/ }))
+    expect(within(dialog).getByLabelText("Type")).toHaveTextContent(/Service/)
+    expect(within(dialog).getByLabelText("Environment (optional)")).toHaveValue("JUPYTER_ENABLE_LAB=yes")
+    expect(within(dialog).getByLabelText("Stop after (hours)")).toHaveValue("8")
+    expect(within(dialog).getByLabelText("Replicas")).toBeDisabled()
+
+    await user.type(within(dialog).getByLabelText("Name (optional)"), "notebook")
+    await user.clear(within(dialog).getByLabelText("Stop after (hours)"))
+    await user.type(within(dialog).getByLabelText("Stop after (hours)"), "2")
+    await user.click(within(dialog).getByRole("button", { name: "Run" }))
+
+    await waitFor(() => expect(router.state.location.pathname).toBe("/jobs/job_1"))
+    expect(calls.find((c) => c.method === "POST")?.body).toEqual({
+      template: "jupyterlab",
+      name: "notebook",
+      kind: "service",
+      image: TEMPLATES[0].image,
+      args: TEMPLATES[0].args,
+      env: { JUPYTER_ENABLE_LAB: "yes" },
+      replicas: 1,
+      gpus_per_replica: 1,
+      min_vram_gb: 0,
+      timeout_seconds: 7200,
+    })
+  })
+
+  it("clears the form when you go back to Custom", async () => {
+    serve("operator", {})
+    const user = userEvent.setup()
+    renderAt("/jobs?new=1")
+    const dialog = await screen.findByRole("dialog")
+    await user.click(await within(dialog).findByRole("radio", { name: /JupyterLab/ }))
+    expect(within(dialog).getByLabelText("Container image")).not.toHaveValue("")
+    await user.click(within(dialog).getByRole("radio", { name: /Custom/ }))
+    expect(within(dialog).getByLabelText("Container image")).toHaveValue("")
+    expect(within(dialog).getByLabelText("Command")).toHaveValue("")
+    expect(within(dialog).queryByText("Open the notebook link on the job page.")).not.toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "Run" })).toBeDisabled()
+  })
+
+  it("tells you how to open a running Jupyter service, token included", async () => {
+    const svc: JobDetail = {
+      ...JOB,
+      kind: "service",
+      status: "running",
+      message: "",
+      image: TEMPLATES[0].image,
+      expose_port: true,
+      service: { endpoint: "http://203.0.113.7:9000", token: "mst_abc" },
+    }
+    serve("operator", { "/api/w/w1/jobs/job_1": () => json(200, svc) })
+    renderAt("/jobs/job_1")
+    expect(await screen.findByText("Open JupyterLab in your browser")).toBeInTheDocument()
+    expect(screen.getByText("http://203.0.113.7:9000/lab?token=mst_abc")).toBeInTheDocument()
   })
 
   it("shows why a job failed, its logs, and offers no cancel once it is done", async () => {

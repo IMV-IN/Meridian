@@ -13,16 +13,17 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
 import { ApiError } from "@/lib/api/client"
 import { formatINR, formatSeconds, pluralize } from "@/lib/format"
 
-import { atLeast, cloud, type ApiKeyView, type JobSpec, type JobSummary } from "../api"
+import { atLeast, cloud, type ApiKeyView, type JobSpec, type JobSummary, type JobTemplate } from "../api"
 import { JobStatusBadge } from "../components"
-import { parseEnv, splitArgs } from "../compute"
-import { useApiKeys, useJobs, useOffers, useRentals } from "../hooks"
+import { formatEnv, joinArgs, parseEnv, secondsToHours, splitArgs } from "../compute"
+import { useApiKeys, useJobs, useJobTemplates, useOffers, useRentals } from "../hooks"
 import { useCloud, useWorkspace } from "../session"
 
 const message = (e: unknown) => (e instanceof ApiError ? e.message : "Something went wrong. Try again.")
@@ -45,6 +46,8 @@ function NewJobBody({ onClose, offerId }: { onClose: () => void; offerId: string
   const canRent = atLeast(ws.role, "admin")
   const offers = useOffers()
   const rentals = useRentals()
+  const templates = useJobTemplates()
+  const [template, setTemplate] = useState("")
   const [name, setName] = useState("")
   const [kind, setKind] = useState<"job" | "service">("job")
   const [image, setImage] = useState("")
@@ -67,6 +70,20 @@ function NewJobBody({ onClose, offerId }: { onClose: () => void; offerId: string
   const offer = where.startsWith("offer:") ? rentable.find((o) => o.id === where.slice(6)) : undefined
   const tooBig = offer !== undefined && nGpus * nReplicas > offer.gpu_count
 
+  const chosen = (templates.data ?? []).find((t) => t.id === template)
+  // Selecting a template prefills every field below; each stays editable. "Custom" clears them.
+  const pick = (id: string) => {
+    const t = (templates.data ?? []).find((x) => x.id === id)
+    setTemplate(t ? t.id : "")
+    setKind(t?.kind ?? "job")
+    setImage(t?.image ?? "")
+    setCommand(t ? joinArgs(t.args) : "")
+    setEnvText(t ? formatEnv(t.env) : "")
+    setGpus(String(t?.gpus_per_replica ?? 1))
+    setReplicas(String(t?.replicas ?? 1))
+    setHours(t ? secondsToHours(t.timeout_seconds) : "")
+  }
+
   const submit = useMutation({
     mutationFn: () => {
       const body: JobSpec = {
@@ -80,6 +97,7 @@ function NewJobBody({ onClose, offerId }: { onClose: () => void; offerId: string
         timeout_seconds: timeout,
       }
       if (name.trim()) body.name = name.trim()
+      if (chosen) body.template = chosen.id
       if (where.startsWith("offer:")) body.offer_id = where.slice(6)
       if (where.startsWith("rental:")) body.rental_id = where.slice(7)
       return cloud.submitJob(ws.id, body)
@@ -108,6 +126,7 @@ function NewJobBody({ onClose, offerId }: { onClose: () => void; offerId: string
           if (ready) submit.mutate()
         }}
       >
+        <TemplatePicker templates={templates.data ?? []} value={template} onChange={pick} docs={chosen?.docs} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field>
             <FieldLabel htmlFor="job-name">Name (optional)</FieldLabel>
@@ -139,7 +158,7 @@ function NewJobBody({ onClose, offerId }: { onClose: () => void; offerId: string
         </Field>
         <Field>
           <FieldLabel htmlFor="job-cmd">Command</FieldLabel>
-          <Input id="job-cmd" className="font-mono text-[12.5px]" spellCheck={false} autoComplete="off" value={command} onChange={(e) => setCommand(e.target.value)} placeholder="python train.py --epochs 3" />
+          <Textarea id="job-cmd" className="min-h-9 font-mono text-[12.5px]" spellCheck={false} autoComplete="off" rows={chosen ? 4 : 1} value={command} onChange={(e) => setCommand(e.target.value)} placeholder="python train.py --epochs 3" />
           <FieldDescription>
             {kind === "service" ? (
               <>
@@ -236,6 +255,30 @@ function NewJobBody({ onClose, offerId }: { onClose: () => void; offerId: string
         </Button>
       </DialogFooter>
     </>
+  )
+}
+
+function TemplatePicker({ templates, value, onChange, docs }: { templates: JobTemplate[]; value: string; onChange: (id: string) => void; docs?: string }) {
+  if (templates.length === 0) return null
+  const options = [...templates.map((t) => ({ id: t.id, title: t.title, summary: t.summary })), { id: "custom", title: "Custom", summary: "Your own image and command." }]
+  return (
+    <div className="space-y-2">
+      <div id="job-template-label" className="text-sm font-medium">
+        Start from a template
+      </div>
+      <RadioGroup aria-labelledby="job-template-label" className="grid gap-2 sm:grid-cols-2" value={value || "custom"} onValueChange={(v) => onChange(v === "custom" ? "" : v)}>
+        {options.map((o) => (
+          <label key={o.id} htmlFor={`tpl-${o.id}`} className="flex cursor-pointer items-start gap-3 rounded-lg border p-3 text-sm has-data-checked:border-primary has-data-checked:bg-primary/5">
+            <RadioGroupItem id={`tpl-${o.id}`} value={o.id} className="mt-0.5" />
+            <span className="min-w-0">
+              <span className="block font-medium">{o.title}</span>
+              <span className="block text-xs text-muted-foreground">{o.summary}</span>
+            </span>
+          </label>
+        ))}
+      </RadioGroup>
+      {docs && <p className="rounded-lg bg-muted/50 p-3 text-sm text-muted-foreground">{docs}</p>}
+    </div>
   )
 }
 

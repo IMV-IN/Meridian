@@ -22,6 +22,16 @@ All notable changes to this project will be documented in this file.
     A new own-node job over quota is refused with `409 QUOTA_EXCEEDED`; queued jobs wait; running jobs are never stopped.
   - Migration `d5f1a7c93e08` (additive: nullable columns on `memberships` and `workspaces`).
 
+- **Job templates for Meridian Compute** ([`docs/COMPUTE.md`](docs/COMPUTE.md#templates)).
+  - Four digest-pinned starting points: JupyterLab (PyTorch + CUDA), a two-node PyTorch
+    `torchrun` check, a vLLM OpenAI-compatible server and a one-line Python hello world.
+  - `GET /api/w/{ws}/job-templates`; `POST /jobs` accepts `template`, whose fields are
+    defaults that anything in the request overrides. The merged job is validated as usual.
+  - Console: the "Run a job" dialog starts with a template picker that prefills the form, and a
+    running Jupyter or vLLM service shows how to open it. CLI: `meridian compute templates` and
+    `meridian compute run --template <id>` (`--image` is optional with a template).
+  - No migration.
+
 - **Meridian Compute: GPU marketplace, per-second billing and jobs** ([`docs/COMPUTE.md`](docs/COMPUTE.md)).
   - A workspace lists a node's GPUs at a price per GPU-hour; another rents them exclusively.
     The renter pays the provider's price plus a 2% fee (`MERIDIAN_CONTROL_MARKET_FEE_BPS`),
