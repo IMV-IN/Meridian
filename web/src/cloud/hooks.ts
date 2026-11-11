@@ -54,6 +54,15 @@ export const useOffers = (mine = false) => useLive(mine ? "my-offers" : "offers"
 export const useRentals = () => useLive("rentals", cloud.rentals)
 export const useJobs = () => useLive("jobs", cloud.jobs)
 export const useJob = (id: string) => useLive("job", (ws, s) => cloud.job(ws, id, s), true, [id])
+/** The built-in job templates: static, so fetched once per workspace. */
+export function useJobTemplates() {
+  const ws = useWorkspace()
+  return useQuery({
+    queryKey: ["cloud", "job-templates", ws.id],
+    queryFn: ({ signal }) => cloud.jobTemplates(ws.id, signal),
+    staleTime: Infinity,
+  })
+}
 export const useBilling = () => useLive("billing", cloud.billing)
 export const useListableNodes = (enabled: boolean) => useLive("listable-nodes", cloud.listableNodes, enabled)
 

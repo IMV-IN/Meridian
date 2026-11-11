@@ -234,6 +234,23 @@ export interface JobSpec {
   timeout_seconds: number
   offer_id?: string
   rental_id?: string
+  /** A job template id: its fields are the defaults, and any field above overrides them. */
+  template?: string
+}
+
+/** A one-click starting point for the "Run a job" form (GET /job-templates). */
+export interface JobTemplate {
+  id: string
+  title: string
+  summary: string
+  kind: "job" | "service"
+  image: string
+  args: string[]
+  env: Record<string, string>
+  gpus_per_replica: number
+  replicas: number
+  timeout_seconds: number
+  docs: string
 }
 
 export interface LedgerEntry {
@@ -349,6 +366,8 @@ export const cloud = {
     request<{ jobs: JobSummary[] }>(`${w(ws)}/jobs`, { ...o, signal }).then((r) => r.jobs),
   job: (ws: string, id: string, signal?: AbortSignal) =>
     request<JobDetail>(`${w(ws)}/jobs/${encodeURIComponent(id)}`, { ...o, signal }),
+  jobTemplates: (ws: string, signal?: AbortSignal) =>
+    request<{ templates: JobTemplate[] }>(`${w(ws)}/job-templates`, { ...o, signal }).then((r) => r.templates),
   submitJob: (ws: string, body: JobSpec) => request<JobDetail>(`${w(ws)}/jobs`, { ...o, method: "POST", body }),
   cancelJob: (ws: string, id: string) =>
     request<JobDetail>(`${w(ws)}/jobs/${encodeURIComponent(id)}/cancel`, { ...o, method: "POST" }),

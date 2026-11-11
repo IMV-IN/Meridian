@@ -14,6 +14,7 @@ import { formatSeconds } from "@/lib/format"
 
 import { atLeast, cloud, type JobDetail } from "../api"
 import { JobStatusBadge, PhaseBadge } from "../components"
+import { serviceHint } from "../compute"
 import { useJob } from "../hooks"
 import { useWorkspace } from "../session"
 
@@ -22,6 +23,7 @@ const DONE = ["succeeded", "failed", "cancelled"]
 function ServicePanel({ job }: { job: JobDetail }) {
   const s = job.service
   if (!s) return null
+  const hint = serviceHint(job.image, s.endpoint, s.token)
   const gateway = `# Add to a Meridian gateway's config.yaml to route to this service
 backends:
   - name: ${job.name}
@@ -36,6 +38,12 @@ backends:
             { label: "Bearer token", value: s.token ? <CopyText value={s.token} /> : "Visible to operators and admins", mono: true },
           ]}
         />
+        {hint && (
+          <div className="space-y-2">
+            <p className="text-sm font-medium">{hint.title}</p>
+            <CodeBlock language="shell" code={hint.code} />
+          </div>
+        )}
         <CodeBlock language="yaml" code={gateway} />
       </div>
     </Panel>

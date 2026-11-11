@@ -109,10 +109,51 @@ The same values are available in the command and in environment values as `{{ran
 
 ```bash
 meridian compute run --service --name llama --image <vllm image> -- \
-  --model meta-llama/Llama-3.1-8B-Instruct --port {{port}} --api-key {{service_token}}
+  meta-llama/Llama-3.1-8B-Instruct --port {{port}} --api-key {{service_token}}
 ```
 
 The job page shows the endpoint and the bearer token the service was told to require, with a `backends:` snippet for a Meridian gateway's `config.yaml`.
+
+## Templates
+
+You do not have to write an image digest and `torchrun` flags for a first job. In the console, **Jobs → Run a job** starts with a picker: choose a template and every field is filled in (and stays editable), or choose **Custom**. From a terminal:
+
+```bash
+meridian compute templates
+meridian compute run --template python-script --follow
+meridian compute run --template pytorch-ddp --follow
+meridian compute run --template jupyterlab --name notebook      # then open the job's page
+meridian compute run --template python-script --follow -- python train.py   # your own command
+```
+
+Over the API, `GET /api/w/{ws}/job-templates` lists them (viewer and up), and `POST /api/w/{ws}/jobs` accepts `"template": "<id>"`. The template's `kind`, `image`, `args`, `env`, `gpus_per_replica`, `replicas` and `timeout_seconds` are the defaults; any of those you also send replaces the template's value as a whole (sending `env` replaces the template's `env`, it does not merge). The merged job is validated like any other, and an unknown template id is a 400.
+
+| Template | Type | What it runs | After it starts |
+| --- | --- | --- | --- |
+| `jupyterlab` | service, 1 GPU, 8 h limit | JupyterLab with PyTorch and CUDA from the Jupyter Docker Stacks (`quay.io/jupyter/pytorch-notebook`), listening on `{{port}}` and requiring `{{service_token}}` | Open the job page and use the notebook link, `<endpoint>/lab?token=<token>`. Files are lost when the job ends |
+| `pytorch-ddp` | job, 2 replicas × 1 GPU, 15 min limit | `torchrun` on the official `pytorch/pytorch` image: rendezvous on `{{master}}` (c10d), then a tiny script in which every replica all-reduces and prints its rank and the group size | Each replica's output shows `all_reduce sum=3 (expected 3)`. Replace the last two arguments (`-c` and the script) with your own command to train |
+| `vllm-server` | service, 1 GPU, 8 h limit | The official `vllm/vllm-openai` image serving `Qwen/Qwen2.5-1.5B-Instruct` (fits one 24 GB GPU) with `--port {{port}} --host 0.0.0.0 --api-key {{service_token}}` | The first start downloads the model. Then `curl <endpoint>/v1/models -H "Authorization: Bearer <token>"`, or use the `backends:` snippet on the job page to add it to a gateway. Change the first argument (the model name) for another model |
+| `python-script` | job, 1 GPU, 15 min limit | `python -c "import torch; print(torch.cuda.get_device_name(0))"` on `pytorch/pytorch` | The replica's output is the GPU's name. Replace the arguments with your own command |
+
+The 8 hour limit on services stops a forgotten notebook from holding a GPU for ever; clear **Stop after** in the form (or send `timeout_seconds: 0`) for none. The `pytorch-ddp` template runs its script under `torchrun --no-python`, so it needs no code in the image; `torchrun` prints a harmless warning that `--node-rank` is ignored with the c10d backend, because the ranks are assigned at rendezvous. Hosts must set `policy.job_allow_any_image` or list the template digests in `allowed_job_image_digests`, and `engine_host` must be reachable between nodes for `pytorch-ddp`.
+
+### Digests are pinned; bumping them
+
+Every template image is pinned by digest, the same rule as any other job. The templates live in [`meridian_control/templates.py`](https://github.com/IMV-IN/Meridian/blob/main/meridian_control/templates.py), and the comment above each digest records the tag it was resolved from:
+
+| Constant | Resolved from | Digest covers |
+| --- | --- | --- |
+| `PYTORCH_IMAGE` | `docker.io/pytorch/pytorch:2.6.0-cuda12.4-cudnn9-runtime` | linux/amd64 only (the publisher ships no other platform for CUDA images) |
+| `JUPYTER_IMAGE` | `quay.io/jupyter/pytorch-notebook:cuda12-2026-11-10` | multi-arch index (amd64, arm64) |
+| `VLLM_IMAGE` | `docker.io/vllm/vllm-openai:v0.19.1` | multi-arch index (amd64, arm64) |
+
+To bump one, resolve the new tag to its digest, put it in the constant with its tag in the comment, and run `pytest tests/control/test_job_templates.py`:
+
+```bash
+docker buildx imagetools inspect docker.io/vllm/vllm-openai:v0.19.2 --format '{{.Manifest.Digest}}'
+```
+
+The test checks that every template image is digest-pinned and that every template passes job validation. It does not pull the images, so run each template once on a GPU node after a bump.
 
 ## Rent GPUs
 
