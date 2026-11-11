@@ -254,3 +254,20 @@ Gateway is mostly I/O bound; size backends/GPUs separately. Measure overhead wit
 
 See [`ENTERPRISE_COST.md`](./ENTERPRISE_COST.md) before enabling `cost:`. Day-2:
 [`OPS_RUNBOOK.md`](./OPS_RUNBOOK.md).
+
+## Releases and Docker Hub
+
+Pushing a `v*` tag runs `.github/workflows/release.yml`, which publishes `meridian` and `meridian-control`
+(`linux/amd64`, `linux/arm64`; tags `<version>` and `latest`) to GHCR. It also publishes both to Docker Hub when
+these repository secrets are set; without them it publishes to GHCR only:
+
+- `DOCKERHUB_USERNAME`: the Docker Hub namespace, `ys1nghc`.
+- `DOCKERHUB_TOKEN`: a Docker Hub access token with Read & Write scope.
+
+Resulting images: `ys1nghc/meridian` and `ys1nghc/meridian-control`. The defaults in this repo still point at
+GHCR; the Docker Hub images exist only after the first release with the secrets set. To use them:
+
+- Helm: `--set image.repository=ys1nghc/meridian` (`values.yaml` `image.repository`).
+- Compose (`deploy/cloud/docker-compose.yml`): only the tag is overridable (`MERIDIAN_VERSION`); the registry and
+  name are fixed to `ghcr.io/imv-in/meridian-control`, so edit the `image:` line of the `x-control` anchor to
+  `ys1nghc/meridian-control:${MERIDIAN_VERSION:-latest}`.

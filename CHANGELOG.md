@@ -18,6 +18,10 @@ All notable changes to this project will be documented in this file.
     CI, control-plane and docs workflows cancel superseded runs and request read-only `contents`.
   No migration.
 
+- **Release workflow publishes `meridian-control` to Docker Hub too.** With `DOCKERHUB_USERNAME` and
+  `DOCKERHUB_TOKEN` set, a release pushes `<namespace>/meridian-control:{version,latest}` (same platforms and labels)
+  next to the gateway image; without them nothing changes. GHCR pushes are unchanged. See `docs/DEPLOY.md`.
+
 - **New public site.** `/` is rewritten and `/labs` (institutes sharing GPUs) and `/teaching` (courses) are added,
   served by `meridian-control` next to `/install`. The site reads `GET /api/public/offers` (loading, empty and
   error states; regions, never `provider_name`), with a rental cost calculator, an earnings estimator, the job
