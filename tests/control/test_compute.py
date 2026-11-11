@@ -1250,6 +1250,118 @@ def test_migration_adds_listing_visibility_with_public_as_the_default(tmp_path):
         assert conn.execute(text("SELECT visibility, shared_with FROM market_offers")).one() == ("public", "[]")
 
 
+# ── public listings feed ──────────────────────────────────────────────────
+
+OFFER_KEYS = {
+    "title", "region", "gpu_model", "gpu_count", "vram_bytes_per_gpu", "price_paise_per_gpu_hour",
+    "hourly_total_paise", "available", "provider_name",
+}
+
+
+def feed(app):
+    """The public feed, fetched with no cookie and no credentials."""
+    return TestClient(app).get("/api/public/offers")
+
+
+def test_public_feed_needs_no_sign_in_and_is_the_only_cacheable_api_route(world):
+    r = feed(world.app)
+    assert r.status_code == 200 and r.headers["cache-control"] == "public, max-age=30"
+    body = r.json()
+    assert len(body["offers"]) == 1 and set(body["offers"][0]) == OFFER_KEYS
+    assert body["offers"][0] == {
+        "title": "2× H100, Mumbai", "region": "Mumbai", "gpu_model": "NVIDIA H100", "gpu_count": 2,
+        "vram_bytes_per_gpu": 80 * GB, "price_paise_per_gpu_hour": 100_00, "hourly_total_paise": 204_00,
+        "available": True, "provider_name": "Mumbai DC",
+    }
+    assert body["summary"] == {
+        "available_gpus": 2, "gpus_by_model": {"NVIDIA H100": 2}, "regions": ["Mumbai"],
+        "lowest_price_paise_per_gpu_hour": 100_00,
+    }
+    # Nothing that identifies a node, a device or a workspace leaks into the page.
+    for secret in (world.node.node_id, world.pws, world.cws, world.offer["id"], world.node.devices[0], "mine"):
+        assert secret not in r.text
+    # Every other /api response is still no-store.
+    anon = TestClient(world.app)
+    assert anon.get("/api/cloud/info").headers["cache-control"] == "no-store"
+    assert anon.get("/api/me").headers["cache-control"] == "no-store"
+
+
+def test_public_feed_never_shows_private_paused_or_retired_listings_and_marks_rented_ones_unavailable(
+    client, tmp_path, clock, world
+):
+    partner = slug_of(world.consumer, world.cws)
+    second = FakeNode(client.app, world.provider, world.pws, gpus=4, model="NVIDIA A100", vram_gb=40, name="a100")
+    made = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+        "node_id": second.node_id, "title": "4× A100, Pune", "region": "Pune", "price_paise_per_gpu_hour": 50_00,
+    })
+    assert made.status_code == 201, made.text
+    hidden = {}
+    for name, extra in (("private", {"visibility": "private", "shared_with": [partner]}), ("paused", {})):
+        node = FakeNode(client.app, world.provider, world.pws, name=name)
+        r = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+            "node_id": node.node_id, "title": f"{name} listing", "region": "Delhi", "price_paise_per_gpu_hour": 10_00,
+            **extra,
+        })
+        assert r.status_code == 201, r.text
+        hidden[name] = r.json()
+    world.provider.patch(f"/api/w/{world.pws}/market/offers/{hidden['paused']['id']}", headers=CSRF,
+                         json={"status": "paused"})
+    retired = FakeNode(client.app, world.provider, world.pws, name="retired")
+    r = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+        "node_id": retired.node_id, "title": "retired listing", "region": "Delhi", "price_paise_per_gpu_hour": 10_00,
+    })
+    world.provider.delete(f"/api/w/{world.pws}/market/offers/{r.json()['id']}", headers=CSRF)
+    clock.advance(31)  # past the feed's cache
+    world.node.sync()
+    second.sync()
+
+    body = feed(world.app).json()
+    assert [o["title"] for o in body["offers"]] == ["4× A100, Pune", "2× H100, Mumbai"]  # cheapest first
+    assert body["summary"] == {
+        "available_gpus": 6, "gpus_by_model": {"NVIDIA A100": 4, "NVIDIA H100": 2}, "regions": ["Mumbai", "Pune"],
+        "lowest_price_paise_per_gpu_hour": 50_00,
+    }
+    assert "private listing" not in feed(world.app).text and "Delhi" not in feed(world.app).text
+
+    # A rented listing stays on the page, marked unavailable, and leaves the summary.
+    world.rent()
+    clock.advance(31)
+    world.node.sync()
+    second.sync()
+    body = feed(world.app).json()
+    shown = [(o["title"], o["available"]) for o in body["offers"]]
+    assert shown == [("4× A100, Pune", True), ("2× H100, Mumbai", False)]
+    assert body["summary"]["available_gpus"] == 4 and body["summary"]["gpus_by_model"] == {"NVIDIA A100": 4}
+    assert body["summary"]["regions"] == ["Pune"]
+
+
+def test_public_feed_is_cached_for_thirty_seconds(world, clock):
+    first = feed(world.app).json()
+    world.provider.patch(f"/api/w/{world.pws}/market/offers/{world.offer['id']}", headers=CSRF,
+                         json={"price_paise_per_gpu_hour": 50_00})
+    clock.advance(29)
+    assert feed(world.app).json() == first  # still the stored copy
+    clock.advance(2)
+    world.node.sync()
+    fresh = feed(world.app).json()
+    assert fresh["offers"][0]["price_paise_per_gpu_hour"] == 50_00 and fresh != first
+
+
+def test_public_feed_with_nothing_listed_is_empty_not_an_error(client, tmp_path, clock):
+    body = feed(client.app).json()
+    assert body == {"offers": [], "summary": {
+        "available_gpus": 0, "gpus_by_model": {}, "regions": [], "lowest_price_paise_per_gpu_hour": None,
+    }}
+
+
+def test_public_feed_exists_only_in_cloud_mode(tmp_path):
+    from meridian_control.app import create_app
+    from meridian_control.config import ControlConfig
+
+    app = create_app(ControlConfig(db_url=f"sqlite:///{tmp_path}/standalone.db", ca_dir=tmp_path / "ca", cloud=False))
+    assert TestClient(app).get("/api/public/offers").status_code == 404
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────
 
 

@@ -12,6 +12,7 @@ import io
 from typing import Optional
 
 from fastapi import Body, Depends, Query, Request, Response
+from fastapi.responses import JSONResponse
 
 from .accounts import ROLE_RANK, Principal
 from .compute import ComputeService, err
@@ -21,6 +22,13 @@ from .web import Ctx, admin, api_router, operator, principal, viewer, w
 def _compute(request: Request) -> ComputeService:
     value: ComputeService = request.app.state.compute
     return value
+
+
+# ── public feed (no sign-in) ──────────────────────────────────────────────
+@api_router.get("/public/offers")
+def public_offers(request: Request):
+    # The one /api route that may be cached: the cloud's middleware sets no-store on the rest.
+    return JSONResponse(_compute(request).public_offers(), headers={"Cache-Control": "public, max-age=30"})
 
 
 # ── marketplace ───────────────────────────────────────────────────────────

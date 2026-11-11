@@ -148,6 +148,31 @@ In the console, **Marketplace → List a node**, choose **Private: only workspac
 - Changing `shared_with` or making a listing public does not end a rental that is already running; it only decides who can rent next.
 - The console shows a free price as "Free", and the CLI as `free`.
 
+## Public listings feed (for a website)
+
+`GET /api/public/offers` needs no sign-in and lists what is on the marketplace, for a website or a status page:
+
+```json
+{
+  "offers": [{
+    "title": "2× H100, Mumbai", "region": "Mumbai", "gpu_model": "NVIDIA H100", "gpu_count": 2,
+    "vram_bytes_per_gpu": 85899345920, "price_paise_per_gpu_hour": 10000, "hourly_total_paise": 20400,
+    "available": true, "provider_name": "Mumbai DC"
+  }],
+  "summary": {
+    "available_gpus": 2, "gpus_by_model": {"NVIDIA H100": 2}, "regions": ["Mumbai"],
+    "lowest_price_paise_per_gpu_hour": 10000
+  }
+}
+```
+
+- Only **public, listed** offers appear. Private, paused and removed listings never do. A rented or offline listing stays in `offers` with `available: false`.
+- `hourly_total_paise` is the whole listing per hour with the Meridian fee, as a renter would pay it. Money is integer paise.
+- `summary` counts **available** listings only: `available_gpus`, GPUs per model, the regions they are in, and the lowest price per GPU-hour (`null` when nothing is available). With nothing listed, `offers` is `[]` and the summary is zeros and empties.
+- Offers are cheapest available first. No node, device or workspace ids are included. `title`, `region` and `provider_name` are text the provider typed, so a website must escape them.
+- The answer is built once and kept in memory for **30 seconds** (per control process), so a busy page cannot load the database, and a price change can take up to 30 seconds to show. The response carries `Cache-Control: public, max-age=30`; it is the only `/api` route that is not `no-store`.
+- It exists only on a cloud-mode control plane (`MERIDIAN_CONTROL_CLOUD=1`). A standalone control plane answers 404. It sends no CORS headers, so call it from your server or from a page served by the cloud itself.
+
 ## GPU-hour usage and monthly quotas
 
 A department head can see who used how much GPU time and cap it per person. This is for jobs on the workspace's own nodes; rented GPUs are already limited by prepaid credit.
@@ -230,3 +255,6 @@ Upgrading an existing cloud: run `meridian-control migrate`. The migrations only
 1. `pytest -q tests/control/test_compute.py` in this repo and `pytest -q tests/test_jobs.py` in `meridian-node`.
 2. Start `meridian-control run` in cloud mode, enroll a node with `policy.jobs_enabled: true`, and run `meridian compute run --follow --image <digest-pinned image> -- echo hello`.
 3. List the node from one workspace, credit a second, rent from the second, and check that the two balances and the platform fee add up to the credit.
+4. Set a member's quota to 1 GPU-hour, run a job for longer than that, and check that the job keeps running, the next `meridian compute run` fails with `QUOTA_EXCEEDED`, and `meridian compute usage` shows the hours.
+5. List a node as private, shared with a second workspace at ₹0. Check that a third workspace gets a 404 on it, that the second rents it with no credit, and that the ledger has no new rows.
+6. `curl -i $MERIDIAN_CLOUD_URL/api/public/offers` with no cookie: public listings only, `Cache-Control: public, max-age=30`.

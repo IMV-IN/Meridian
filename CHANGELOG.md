@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Public listings feed.** `GET /api/public/offers` (no sign-in, cloud mode only) returns public, listed offers
+  and a summary (available GPUs, GPUs by model, regions, lowest price) with no node, device or workspace ids.
+  Cached in-process for 30 s and served with `Cache-Control: public, max-age=30`; every other `/api` route
+  stays `no-store`. No migration.
+
 - **Private sharing between institutes.** A listing can be `private` and shared with named workspaces
   (`visibility`, `shared_with`). Only they see or rent it; anyone else gets a 404. A private listing can cost
   ₹0: a free rental needs no credit and posts no ledger rows. Console: "Who can rent it" in the list dialog,

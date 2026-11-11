@@ -72,6 +72,7 @@ MAX_ACTIVE_JOBS = 200
 MAX_PRICE_PAISE = 100_000_00  # ₹1,00,000 per GPU-hour: a typo guard, not a market opinion
 MIN_PRICE_PAISE = 100  # ₹1
 MAX_GPU_HOUR_QUOTA = 1_000_000
+PUBLIC_FEED_SECONDS = 30  # how long the public listings feed is served from memory
 # What a node's owner may see of a tenant's job: that it exists and what it holds.
 _OBSERVED_KEEP = ("job_id", "replica", "phase", "started_at", "finished_at")
 _DESIRED_KEEP = ("job_id", "replica", "kind", "device_ids", "port", "desired_phase")
@@ -163,6 +164,7 @@ class ComputeService:
         self._now = now
         # shortcut: in-process lock, so run compute on one control replica; move to a DB advisory lock for multi-replica Postgres  # noqa: E501
         self._lock = threading.RLock()
+        self._public_feed: Optional[tuple[datetime, dict]] = None
 
     # ------------------------------------------------------------------ nodes
     def _online(self, node: Node, now: datetime) -> bool:
@@ -483,6 +485,41 @@ class ComputeService:
         # Cheapest available first: the comparison a renter actually makes.
         offers.sort(key=lambda o: (not o["available"], o["price_paise_per_gpu_hour"], o["title"]))
         return offers
+
+    def public_offers(self) -> dict:
+        """What the public website shows: public, listed offers and a summary, with no node, device or
+        workspace ids. Cached in-process for 30 seconds, so a busy page cannot load the database."""
+        now = self._now()
+        cached = self._public_feed
+        if cached is not None and 0 <= (now - cached[0]).total_seconds() < PUBLIC_FEED_SECONDS:
+            return cached[1]
+        offers: list[dict] = []
+        with self._sf() as s:
+            q = select(MarketOffer).where(MarketOffer.status == "listed", MarketOffer.visibility == "public")
+            for o in s.scalars(q):
+                hourly = o.price_paise_per_gpu_hour * o.gpu_count
+                owner = s.get(Workspace, o.workspace_id)
+                offers.append({
+                    "title": o.title, "region": o.region, "gpu_model": o.gpu_model, "gpu_count": o.gpu_count,
+                    "vram_bytes_per_gpu": o.vram_bytes_per_gpu, "price_paise_per_gpu_hour": o.price_paise_per_gpu_hour,
+                    "hourly_total_paise": hourly + fee_for(hourly, self._c.market_fee_bps),
+                    "available": self._offer_availability(s, o, now)[0], "provider_name": owner.name if owner else "",
+                })
+        offers.sort(key=lambda o: (not o["available"], o["price_paise_per_gpu_hour"], o["title"]))
+        free = [o for o in offers if o["available"]]
+        by_model: dict[str, int] = {}
+        for o in free:
+            by_model[o["gpu_model"]] = by_model.get(o["gpu_model"], 0) + o["gpu_count"]
+        feed = {
+            "offers": offers,
+            "summary": {
+                "available_gpus": sum(o["gpu_count"] for o in free), "gpus_by_model": dict(sorted(by_model.items())),
+                "regions": sorted({o["region"] for o in free}),
+                "lowest_price_paise_per_gpu_hour": min((o["price_paise_per_gpu_hour"] for o in free), default=None),
+            },
+        }
+        self._public_feed = (now, feed)
+        return feed
 
     def listable_nodes(self, workspace_id: str) -> list[dict]:
         """The workspace's nodes and whether each can be listed, for the form."""
