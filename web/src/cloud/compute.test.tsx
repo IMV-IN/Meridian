@@ -112,6 +112,7 @@ const USAGE: Usage = {
   month: "2026-11",
   period_start: "2026-11-01T00:00:00Z",
   period_end: "2026-12-01T00:00:00Z",
+  scope: "workspace",
   default_gpu_hour_quota: 20,
   people: [
     { email: "stu@iit.ac.in", name: "Stu Dent", group: "vision-lab", gpu_hours_own: 12.5, gpu_hours_rented: 3, jobs: 4, quota_gpu_hours: 20, remaining_gpu_hours: 7.5 },
@@ -268,6 +269,7 @@ describe("compute helpers", () => {
   it("explains why a rental ended", () => {
     expect(endReason("insufficient_funds")).toBe("Ran out of credit")
     expect(endReason("node_lost")).toBe("Node went offline")
+    expect(endReason("sharing_ended")).toBe("Listing no longer shared with you")
     expect(endReason("something_new")).toBe("Ended")
   })
 
@@ -498,7 +500,7 @@ describe("Billing", () => {
 
 describe("GPU-hour usage and quotas", () => {
   it("lists GPU-hours per person and group, follows the month picker, and links the CSV", async () => {
-    const calls = serve("viewer", {})
+    const calls = serve("admin", {})
     const user = userEvent.setup()
     renderAt("/billing")
 
@@ -521,6 +523,17 @@ describe("GPU-hour usage and quotas", () => {
     expect(options).toHaveLength(12)
     await user.click(options[1])
     await waitFor(() => expect(calls.filter((c) => c.path === "/api/w/w1/usage").length).toBeGreaterThan(1))
+  })
+
+  it("shows a non-admin only their own row and says why", async () => {
+    serve("operator", {
+      "/api/w/w1/usage": () => json(200, { ...USAGE, scope: "self", people: [USAGE.people[0]], groups: [] }),
+    })
+    renderAt("/billing")
+    expect(await screen.findByText("Stu Dent")).toBeInTheDocument()
+    expect(screen.getByText("You see your own usage. Admins see everyone's.")).toBeInTheDocument()
+    expect(screen.queryByText("head@iit.ac.in")).not.toBeInTheDocument()
+    expect(screen.queryByText("No group")).not.toBeInTheDocument()
   })
 
   it("lets admins set a member's group and quota and the workspace default", async () => {

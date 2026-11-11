@@ -1,6 +1,7 @@
 """Meridian Compute: per-member GPU-hour quotas and usage groups
 
-Additive only: four nullable columns, no data is touched.
+Additive only: nullable columns, no data is touched. Jobs from before
+`compute_jobs.attributed_to` existed keep NULL and are attributed by `created_by`.
 
 Revision ID: d5f1a7c93e08
 Revises: c4e8b2a61f37
@@ -21,9 +22,13 @@ def upgrade() -> None:
     op.add_column("memberships", sa.Column("group", sa.String(64), nullable=True))
     op.add_column("memberships", sa.Column("gpu_hour_quota", sa.Integer(), nullable=True))
     op.add_column("workspaces", sa.Column("default_gpu_hour_quota", sa.Integer(), nullable=True))
+    op.add_column("compute_jobs", sa.Column("attributed_to", sa.String(320), nullable=True))
+    op.create_index("ix_compute_jobs_attributed_to", "compute_jobs", ["attributed_to"])
 
 
 def downgrade() -> None:
+    op.drop_index("ix_compute_jobs_attributed_to", table_name="compute_jobs")
+    op.drop_column("compute_jobs", "attributed_to")
     op.drop_column("workspaces", "default_gpu_hour_quota")
     op.drop_column("memberships", "gpu_hour_quota")
     op.drop_column("memberships", "group")

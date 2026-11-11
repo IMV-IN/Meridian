@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import threading
 from datetime import datetime, timezone
+from pathlib import Path
 
 import pytest
 from conftest import MutableClock, NodeKey
@@ -860,9 +861,31 @@ def test_usage_is_gpu_hours_per_person_with_api_keys_attributed_to_their_creator
     assert "key:ci" not in by and by["dean@iit.ac.in"]["gpu_hours_own"] == 0.0  # members with no usage are listed
     assert u["totals"] == {"jobs": 3, "gpu_hours_own": 3.5, "gpu_hours_rented": 0.0}
 
-    # Two admins each made a key called "ci": the name no longer says whose it is, so it stays a label.
+    # Attribution is recorded on the job at submit: a second admin making a key with the same name later
+    # cannot move the head's hours off the head (and so off the head's quota).
     lab.dean.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ci", "role": "operator"})
-    assert lab.person("key:ci")["gpu_hours_own"] == 1.0 and lab.person("head@iit.ac.in")["gpu_hours_own"] == 0.5
+    assert lab.person("head@iit.ac.in")["gpu_hours_own"] == 1.5 and lab.person("dean@iit.ac.in")["gpu_hours_own"] == 0.0
+    assert "key:ci" not in {p["email"] for p in lab.usage()["people"]}
+
+
+def test_a_key_name_shared_by_two_admins_cannot_dodge_the_quota(lab):
+    # The dean made a key called "ci"; the head, out of quota, makes another "ci" and submits with it.
+    # Matching keys by name made "key:ci" nobody's, with no quota: the job ran free of the head's cap.
+    lab.dean.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ci", "role": "operator"})
+    lab.set_compute("head@iit.ac.in", gpu_hour_quota=1)
+    lab.run(lab.head, 3600)
+    key = lab.head.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ci", "role": "operator"}).json()
+    r = TestClient(lab.app).post(f"/api/w/{lab.ws}/jobs", headers={"Authorization": f"Bearer {key['token']}"},
+                                 json={"image": IMAGE})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+    # A key made by an admin key belongs to the member behind that key, not to the key's label.
+    admin_key = lab.head.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "boot", "role": "admin"})
+    made = TestClient(lab.app).post(f"/api/w/{lab.ws}/api-keys", json={"name": "child", "role": "operator"},
+                                    headers={"Authorization": f"Bearer {admin_key.json()['token']}"})
+    assert made.status_code == 201 and made.json()["created_by"] == "head@iit.ac.in"
+    r = TestClient(lab.app).post(f"/api/w/{lab.ws}/jobs", headers={"Authorization": f"Bearer {made.json()['token']}"},
+                                 json={"image": IMAGE})
+    assert r.status_code == 409 and r.json()["error"]["code"] == "QUOTA_EXCEEDED"
 
 
 def test_usage_splits_rented_from_own_and_groups_roll_up(world):
@@ -922,7 +945,7 @@ def test_a_job_that_never_started_uses_no_gpu_hours_and_a_running_one_counts_up_
 def test_usage_csv_is_for_finance_and_defuses_spreadsheet_formulas(lab):
     lab.run(lab.stu, 3600)
     lab.set_compute("stu@iit.ac.in", group="=cmd|' /c calc'!A1", gpu_hour_quota=10)
-    r = lab.view.get(f"/api/w/{lab.ws}/usage?format=csv")  # a viewer can export
+    r = lab.dean.get(f"/api/w/{lab.ws}/usage?format=csv")  # an admin exports everyone
     assert r.status_code == 200 and r.headers["content-type"].startswith("text/csv")
     assert r.headers["content-disposition"] == 'attachment; filename="meridian-usage-2026-08.csv"'
     lines = r.text.splitlines()
@@ -1041,6 +1064,50 @@ def test_setting_groups_and_quotas_is_admin_only_and_validated(lab):
     assert outsider.get(f"/api/w/{lab.ws}/usage").status_code == 404
 
 
+def test_a_non_admin_sees_only_their_own_usage_row(lab):
+    lab.run(lab.stu, 3600)
+    lab.run(lab.head, 1800)
+    lab.set_compute("stu@iit.ac.in", group="vision-lab")
+    for c, me in ((lab.stu, "stu@iit.ac.in"), (lab.view, "view@iit.ac.in")):
+        u = lab.usage(c)
+        assert u["scope"] == "self" and [p["email"] for p in u["people"]] == [me]
+        assert u["groups"] == []  # a group can be one person
+        assert u["totals"]["gpu_hours_own"] == 1.5  # the workspace total is not personal
+    rows = lab.view.get(f"/api/w/{lab.ws}/usage?format=csv").text.splitlines()
+    assert len(rows) == 2 and rows[1].startswith("view@iit.ac.in")
+    # A non-admin key reports as the member who made it; an admin sees everyone.
+    key = lab.dean.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ro", "role": "viewer"}).json()
+    u = TestClient(lab.app).get(f"/api/w/{lab.ws}/usage", headers={"Authorization": f"Bearer {key['token']}"}).json()
+    assert [p["email"] for p in u["people"]] == ["dean@iit.ac.in"]
+    full = lab.usage(lab.dean)
+    assert full["scope"] == "workspace" and len(full["people"]) == 4 and full["groups"]
+
+
+def test_multi_replica_multi_gpu_jobs_count_every_gpu_against_the_quota(client, tmp_path, clock):
+    lab = Lab(client, tmp_path, clock, gpus=4)
+    lab.set_compute("stu@iit.ac.in", gpu_hour_quota=8)
+    job = lab.submit(lab.stu, replicas=2, gpus_per_replica=2).json()
+    lab.node.sync()
+    clock.advance(1800)
+    assert lab.person("stu@iit.ac.in")["gpu_hours_own"] == 2.0  # 2 replicas × 2 GPUs × 0.5 h, while running
+    clock.advance(5400)
+    lab.node.finish(job["id"], rank=0)
+    assert lab.person("stu@iit.ac.in")["gpu_hours_own"] == 8.0
+    assert lab.submit(lab.stu).json()["error"]["code"] == "QUOTA_EXCEEDED"
+
+
+def test_a_template_job_is_validated_then_held_to_the_quota(lab):
+    lab.set_compute("stu@iit.ac.in", gpu_hour_quota=0)
+    jobs = f"/api/w/{lab.ws}/jobs"
+    bad = lab.stu.post(jobs, headers=CSRF, json={"template": "python-script", "replicas": 0})
+    assert bad.status_code == 400  # the merged job is validated first
+    r = lab.stu.post(jobs, headers=CSRF, json={"template": "pytorch-ddp"})  # 2 replicas from the template
+    assert r.status_code == 409 and r.json()["error"]["code"] == "QUOTA_EXCEEDED"
+    lab.set_compute("stu@iit.ac.in", gpu_hour_quota=None)
+    made = lab.stu.post(jobs, headers=CSRF, json={"template": "pytorch-ddp"}).json()
+    assert made["replicas"] == 2 and made["created_by"] == "stu@iit.ac.in"
+
+
 def test_migration_adds_the_usage_columns_and_matches_the_models(tmp_path):
     pytest.importorskip("alembic")
     from sqlalchemy import create_engine, inspect
@@ -1056,13 +1123,40 @@ def test_migration_adds_the_usage_columns_and_matches_the_models(tmp_path):
         assert {c.name for c in table.columns} <= {c["name"] for c in insp.get_columns(name)}, name
 
 
+def test_migrations_downgrade_and_upgrade_again(tmp_path):
+    pytest.importorskip("alembic")
+    from alembic import command
+    from alembic.config import Config
+    from sqlalchemy import create_engine, inspect
+
+    import meridian_control.db as db
+
+    url = f"sqlite:///{tmp_path}/m.db"
+    db.run_migrations(url)
+    here = Path(db.__file__).parent
+    cfg = Config(str(here / "alembic.ini"))
+    cfg.set_main_option("script_location", str(here / "migrations"))
+    cfg.set_main_option("sqlalchemy.url", url)
+
+    def columns(table):
+        return {c["name"] for c in inspect(create_engine(url)).get_columns(table)}
+
+    assert {"visibility", "shared_with"} <= columns("market_offers") and "attributed_to" in columns("compute_jobs")
+    command.downgrade(cfg, "d5f1a7c93e08")
+    assert not {"visibility", "shared_with"} & columns("market_offers") and "attributed_to" in columns("compute_jobs")
+    command.downgrade(cfg, "c4e8b2a61f37")
+    assert "attributed_to" not in columns("compute_jobs") and "gpu_hour_quota" not in columns("memberships")
+    command.upgrade(cfg, "head")
+    assert "attributed_to" in columns("compute_jobs") and "visibility" in columns("market_offers")
+
+
 def test_cli_prints_usage_per_person(lab, monkeypatch):
     from meridian.cli.compute import main
 
     lab.run(lab.stu, 5400)
     lab.set_compute("stu@iit.ac.in", group="vision-lab", gpu_hour_quota=4)
-    made = lab.head.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ro", "role": "viewer"})
-    token = made.json()["token"]  # a read-only key is enough to report usage
+    made = lab.head.post(f"/api/w/{lab.ws}/api-keys", headers=CSRF, json={"name": "ro", "role": "admin"})
+    token = made.json()["token"]  # everyone's usage is for admins
     monkeypatch.setenv("MERIDIAN_WORKSPACE", lab.ws)
     monkeypatch.setenv("MERIDIAN_API_KEY", token)
     lines: list[str] = []
@@ -1119,9 +1213,10 @@ def test_a_private_listing_is_visible_and_rentable_only_by_the_workspaces_it_is_
 
     assert world.rent()["offer"]["id"] == world.offer["id"]  # the partner can rent it
 
-    # Sharing it with someone else later does not end the partner's rental, but adds the new partner.
+    # Sharing it with someone else instead ends the old partner's rental and adds the new partner.
     share(world, shared_with=[slug_of(outsider, ows)])
-    assert world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]["status"] == "active"
+    ended = world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]
+    assert (ended["status"], ended["end_reason"]) == ("ended", "sharing_ended")
     assert world.consumer.get(f"/api/w/{world.cws}/market/offers").json()["offers"] == []
     assert [o["id"] for o in outsider.get(f"/api/w/{ows}/market/offers").json()["offers"]] == [world.offer["id"]]
 
@@ -1217,6 +1312,101 @@ def test_a_free_rental_survives_while_a_paid_one_runs_out_of_credit(client, tmp_
     assert rentals[free_rental.json()["id"]]["status"] == "active"
     entries = world.balance(world.consumer, world.cws)["entries"]
     assert entries and all(e["amount_paise"] != 0 for e in entries)  # no zero-amount rows
+
+
+def test_sharing_follows_the_workspace_not_its_slug(client, tmp_path, clock, world):
+    from meridian_control.models import Workspace
+
+    old = slug_of(world.consumer, world.cws)
+    assert share(world, visibility="private", shared_with=[old]).status_code == 200
+    squatter = login(client, tmp_path, "x@squat.in", clock)
+    sws = workspace(squatter, "Squatter")
+    world.node.sync()
+    world.credit(sws, 10_000_00, "UTR-0003")
+    # The partner's slug changes and another workspace takes the old one.
+    with world.app.state.compute._sf() as s:
+        s.get(Workspace, world.cws).slug = "renamed-lab"
+        s.flush()
+        s.get(Workspace, sws).slug = old
+        s.commit()
+    assert squatter.get(f"/api/w/{sws}/market/offers").json()["offers"] == []
+    took = squatter.post(f"/api/w/{sws}/market/rentals", headers=CSRF, json={"offer_id": world.offer["id"]})
+    assert took.status_code == 404
+    assert [o["id"] for o in world.consumer.get(f"/api/w/{world.cws}/market/offers").json()["offers"]] == [
+        world.offer["id"]
+    ]
+    mine = world.provider.get(f"/api/w/{world.pws}/market/offers?mine=true").json()["offers"][0]
+    assert mine["shared_with"] == ["renamed-lab"]  # stored by id, shown by the current slug
+    assert share(world, title="Still shared").json()["shared_with"] == ["renamed-lab"]  # other edits keep it
+
+
+def test_a_removed_partner_loses_its_free_rental_and_its_jobs_stop(client, tmp_path, clock):
+    world = World(client, tmp_path, clock, credit=0)
+    share(world, visibility="private", shared_with=[slug_of(world.consumer, world.cws)], price_paise_per_gpu_hour=0)
+    rental = world.rent()
+    job = world.submit(rental_id=rental["id"]).json()
+    world.node.sync()
+    assert world.consumer.get(f"/api/w/{world.cws}/jobs/{job['id']}").json()["status"] == "running"
+
+    assert share(world, shared_with=[]).status_code == 200  # the provider removes the partner
+    r = world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]
+    assert (r["status"], r["end_reason"]) == ("ended", "sharing_ended")
+    stopped = world.consumer.get(f"/api/w/{world.cws}/jobs/{job['id']}").json()
+    assert stopped["status"] == "failed" and "sharing ended" in stopped["message"]
+    assert all(j["desired_phase"] == "Stopped" for j in world.node.sync()["jobs"])
+    assert world.submit(rental_id=rental["id"]).status_code == 404
+    assert world.consumer.post(f"/api/w/{world.cws}/market/rentals", headers=CSRF,
+                               json={"offer_id": world.offer["id"]}).status_code == 404
+    with world.app.state.compute._sf() as s:
+        assert s.scalar(select(func.count()).select_from(LedgerEntry)) == 0
+
+
+def test_a_free_rental_ends_when_its_listing_goes_public_but_a_paid_one_continues(client, tmp_path, clock):
+    world = World(client, tmp_path, clock, credit=0)
+    partner = slug_of(world.consumer, world.cws)
+    share(world, visibility="private", shared_with=[partner], price_paise_per_gpu_hour=0)
+    world.rent()
+    assert share(world, visibility="public", price_paise_per_gpu_hour=100_00).status_code == 200
+    r = world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]
+    assert (r["status"], r["end_reason"]) == ("ended", "sharing_ended")  # never a free rental on a public listing
+
+    world.credit(world.cws, 10_000_00, "UTR-0009")
+    share(world, visibility="private", shared_with=[partner], price_paise_per_gpu_hour=50_00)
+    paid = world.rent()
+    assert share(world, visibility="public", price_paise_per_gpu_hour=100_00).status_code == 200
+    rentals = {x["id"]: x for x in world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"]}
+    assert rentals[paid["id"]]["status"] == "active"  # still allowed, still paying its starting price
+
+
+def test_a_rental_on_a_listing_no_longer_shared_takes_no_new_jobs(client, tmp_path, clock):
+    from meridian_control.models import MarketOffer
+
+    world = World(client, tmp_path, clock, credit=0)
+    share(world, visibility="private", shared_with=[slug_of(world.consumer, world.cws)], price_paise_per_gpu_hour=0)
+    rental = world.rent()
+    with world.app.state.compute._sf() as s:  # access withdrawn without going through the listing edit
+        s.get(MarketOffer, world.offer["id"]).shared_with = []
+        s.commit()
+    assert world.submit(rental_id=rental["id"]).status_code == 404
+
+
+def test_listing_edits_wait_for_the_service_lock(world):
+    comp = world.app.state.compute
+    calls = (
+        lambda: comp.update_offer(world.pws, "x", world.offer["id"], {"title": "Renamed listing"}),
+        lambda: comp.retire_offer(world.pws, "x", world.offer["id"]),
+    )
+    for call in calls:
+        done = threading.Event()
+
+        def run(call=call, done=done):
+            call()
+            done.set()
+
+        with comp._lock:
+            threading.Thread(target=run, daemon=True).start()
+            assert not done.wait(0.3)  # an edit cannot interleave with a rent or a billing pass
+        assert done.wait(5)
 
 
 def test_cli_lists_a_free_private_listing_as_free(world, monkeypatch):
@@ -1349,9 +1539,23 @@ def test_public_feed_is_cached_for_thirty_seconds(world, clock):
 
 def test_public_feed_with_nothing_listed_is_empty_not_an_error(client, tmp_path, clock):
     body = feed(client.app).json()
-    assert body == {"offers": [], "summary": {
+    assert body == {"offers": [], "total_offers": 0, "summary": {
         "available_gpus": 0, "gpus_by_model": {}, "regions": [], "lowest_price_paise_per_gpu_hour": None,
     }}
+
+
+def test_public_feed_is_bounded_but_its_summary_covers_every_listing(client, tmp_path, clock, world, monkeypatch):
+    monkeypatch.setattr("meridian_control.compute.PUBLIC_FEED_MAX_OFFERS", 1)
+    second = FakeNode(client.app, world.provider, world.pws, gpus=4, model="NVIDIA A100", vram_gb=40, name="a100")
+    world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+        "node_id": second.node_id, "title": "4× A100, Pune", "region": "Pune", "price_paise_per_gpu_hour": 50_00,
+    })
+    clock.advance(31)
+    world.node.sync()
+    second.sync()
+    body = feed(world.app).json()
+    assert [o["title"] for o in body["offers"]] == ["4× A100, Pune"] and body["total_offers"] == 2
+    assert body["summary"]["available_gpus"] == 6
 
 
 def test_public_feed_exists_only_in_cloud_mode(tmp_path):

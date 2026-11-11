@@ -83,7 +83,7 @@ def jobs(request: Request, status: Optional[str] = Query(None), limit: int = Que
 @w.post("/jobs", status_code=201)
 def submit_job(request: Request, body: dict = Body(...), ctx: Ctx = Depends(operator)):
     may_rent = ROLE_RANK[ctx[2]] >= ROLE_RANK["admin"]
-    return _compute(request).submit_job(ctx[1], ctx[0].email, body, may_rent=may_rent)
+    return _compute(request).submit_job(ctx[1], ctx[0].email, body, may_rent=may_rent, on_behalf_of=ctx[0].on_behalf_of)
 
 
 @w.get("/job-templates")
@@ -129,7 +129,9 @@ def usage(request: Request, month: Optional[str] = Query(None), format: str = Qu
           ctx: Ctx = Depends(viewer)):
     if format not in ("json", "csv"):
         raise err("INVALID_FIELD", "format must be json or csv")
-    data = _compute(request).usage(ctx[1], month)
+    # Admins see everyone; other members (and their API keys) see their own row and the workspace totals.
+    only = None if ROLE_RANK[ctx[2]] >= ROLE_RANK["admin"] else (ctx[0].on_behalf_of or ctx[0].email)
+    data = _compute(request).usage(ctx[1], month, only=only)
     if format == "json":
         return data
     out = io.StringIO()
@@ -160,7 +162,7 @@ def api_keys(request: Request, ctx: Ctx = Depends(admin)):
 
 @w.post("/api-keys", status_code=201)
 def create_api_key(request: Request, body: dict = Body(...), ctx: Ctx = Depends(admin)):
-    token, view = _compute(request).create_api_key(ctx[1], ctx[0].email, body)
+    token, view = _compute(request).create_api_key(ctx[1], ctx[0].email, body, on_behalf_of=ctx[0].on_behalf_of)
     return {**view, "token": token}  # shown once
 
 

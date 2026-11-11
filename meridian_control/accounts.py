@@ -97,6 +97,9 @@ class Principal:
     user_id: str
     email: str
     session_hash: str
+    # For a workspace API key: the member who created the key. Compute usage and
+    # quotas count the key's jobs against them. Empty for a signed-in user.
+    on_behalf_of: str = ""
 
 
 @dataclass(frozen=True)

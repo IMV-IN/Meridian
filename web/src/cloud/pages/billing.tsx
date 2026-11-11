@@ -95,7 +95,7 @@ function recentMonths(now = new Date()): string[] {
   })
 }
 
-/** Who used how many GPU-hours: readable by everyone in the workspace, set up in Settings → Members. */
+/** Who used how many GPU-hours. Admins see everyone; other members see their own row and the workspace total. */
 function UsagePanel() {
   const ws = useWorkspace()
   const months = recentMonths()
@@ -143,7 +143,11 @@ function UsagePanel() {
           />
           {!!u?.people.length && (
             <>
-              <DataTable columns={groupColumns} data={u.groups} getRowId={(g) => g.group || "(none)"} pageSize={25} />
+              {u.scope === "workspace" ? (
+                <DataTable columns={groupColumns} data={u.groups} getRowId={(g) => g.group || "(none)"} pageSize={25} />
+              ) : (
+                <p className="px-4 text-sm text-muted-foreground">You see your own usage. Admins see everyone's.</p>
+              )}
               <p className="px-4 text-sm text-muted-foreground">
                 Workspace total in {u.month}: {hours(u.totals.gpu_hours_own)} own and {hours(u.totals.gpu_hours_rented)} rented GPU-hours across {u.totals.jobs}{" "}
                 {u.totals.jobs === 1 ? "job" : "jobs"}.

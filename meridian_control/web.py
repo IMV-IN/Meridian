@@ -232,7 +232,7 @@ class WS:
                 raise err("UNAUTHENTICATED", "invalid API key for this workspace", 401)
             if ROLE_RANK[found[1]] < ROLE_RANK[self.minimum]:
                 raise err("FORBIDDEN", f"requires the {self.minimum} role or higher", 403)
-            return Principal(user_id="", email=found[2], session_hash=""), ws, found[1]
+            return Principal(user_id="", email=found[2], session_hash="", on_behalf_of=found[3]), ws, found[1]
         p = principal(request)
         role = _acc(request).require_role(p, ws, self.minimum)
         return p, ws, role

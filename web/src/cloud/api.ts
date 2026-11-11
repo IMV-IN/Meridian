@@ -306,6 +306,8 @@ export interface Usage {
   month: string
   period_start: string
   period_end: string
+  /** "self": a non-admin's view, their own row and the workspace totals only. */
+  scope: "workspace" | "self"
   default_gpu_hour_quota: number | null
   people: UsageRow[]
   groups: (UsageTotals & { group: string; members: number })[]

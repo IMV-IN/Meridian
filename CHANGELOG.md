@@ -4,23 +4,29 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- **Public listings feed.** `GET /api/public/offers` (no sign-in, cloud mode only) returns public, listed offers
-  and a summary (available GPUs, GPUs by model, regions, lowest price) with no node, device or workspace ids.
+- **Public listings feed.** `GET /api/public/offers` (no sign-in, cloud mode only) returns up to 100 public, listed
+  offers, `total_offers`, and a summary of all of them (available GPUs, GPUs by model, regions, lowest price) with no
+  node, device, listing or workspace ids.
   Cached in-process for 30 s and served with `Cache-Control: public, max-age=30`; every other `/api` route
   stays `no-store`. No migration.
 
 - **Private sharing between institutes.** A listing can be `private` and shared with named workspaces
   (`visibility`, `shared_with`). Only they see or rent it; anyone else gets a 404. A private listing can cost
   ₹0: a free rental needs no credit and posts no ledger rows. Console: "Who can rent it" in the list dialog,
-  "Shared with you" on cards, "Free" for ₹0. Migration `e8a3c5d17b94` (additive; existing listings stay public).
+  "Shared with you" on cards, "Free" for ₹0. Partners are stored by workspace id, not slug. Removing a partner, or
+  making a free listing public, ends that rental at once (`sharing_ended`) and stops its jobs; paid rentals by
+  partners who can still rent continue. Migration `e8a3c5d17b94` (additive; existing listings stay public).
 
 - **Meridian Compute for institutes: GPU-hour usage and per-member monthly quotas** ([`docs/COMPUTE.md`](docs/COMPUTE.md)).
   - `GET /api/w/{ws}/usage?month=YYYY-MM` (and `?format=csv`, `meridian compute usage`) reports GPU-hours per
-    person and group, split into own-node and rented usage; API-key jobs count for the key's creator.
-    Console: Billing → GPU-hour usage.
+    person and group, split into own-node and rented usage. Admins see everyone; other members see their own row
+    and the workspace totals. Console: Billing → GPU-hour usage.
+  - Each job records at submit whose usage it is (`attributed_to`): the member, or the member who created the
+    API key that submitted it, so key names cannot move hours off a member's quota.
   - Admins set a group and a monthly GPU-hour quota per member, plus a workspace default (Settings → Members).
     A new own-node job over quota is refused with `409 QUOTA_EXCEEDED`; queued jobs wait; running jobs are never stopped.
-  - Migration `d5f1a7c93e08` (additive: nullable columns on `memberships` and `workspaces`).
+  - Running jobs are never stopped at the quota or the month boundary; their hours count in the month used.
+  - Migration `d5f1a7c93e08` (additive: nullable columns on `memberships`, `workspaces` and `compute_jobs`).
 
 - **Job templates for Meridian Compute** ([`docs/COMPUTE.md`](docs/COMPUTE.md#templates)).
   - Four digest-pinned starting points: JupyterLab (PyTorch + CUDA), a two-node PyTorch

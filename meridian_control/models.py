@@ -239,7 +239,7 @@ class MarketOffer(Base):
     price_paise_per_gpu_hour: Mapped[int] = mapped_column(Integer)
     status: Mapped[str] = mapped_column(String(16), default="listed", index=True)  # listed | paused | retired
     # public: any workspace may rent. private: only the owner and the workspaces in
-    # `shared_with` (slugs) can see or rent it, and it may be free.
+    # `shared_with` (workspace ids, never slugs) can see or rent it, and it may be free.
     visibility: Mapped[str] = mapped_column(String(8), default="public")
     shared_with: Mapped[list] = mapped_column(JSON, default=list)
     created_by: Mapped[str] = mapped_column(String(320), default="")
@@ -311,6 +311,10 @@ class Job(Base):
     status: Mapped[str] = mapped_column(String(16), default="queued", index=True)
     error: Mapped[str] = mapped_column(String(1024), default="")
     created_by: Mapped[str] = mapped_column(String(320), default="")
+    # The member whose usage and quota this job counts against, fixed at submit: the
+    # signed-in member, or the member who created the API key that submitted it.
+    # NULL on jobs from before it was recorded (usage then falls back to `created_by`).
+    attributed_to: Mapped[Optional[str]] = mapped_column(String(320), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_utcnow)
     started_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)

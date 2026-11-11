@@ -73,6 +73,7 @@ export function endReason(reason: string): string {
       insufficient_funds: "Ran out of credit",
       job_finished: "Job finished",
       node_lost: "Node went offline",
+      sharing_ended: "Listing no longer shared with you",
     }[reason] ?? "Ended"
   )
 }
