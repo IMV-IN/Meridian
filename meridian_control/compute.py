@@ -427,7 +427,7 @@ class ComputeService:
         fee = fee_for(hourly, self._c.market_fee_bps)
         mine = o.workspace_id == viewer_ws
         view = {
-            "id": o.id, "title": o.title, "description": o.description, "region": o.region,
+            "id": o.id, "visibility": o.visibility, "title": o.title, "description": o.description, "region": o.region,
             "gpu_model": o.gpu_model, "gpu_count": o.gpu_count, "vram_bytes_per_gpu": o.vram_bytes_per_gpu,
             "price_paise_per_gpu_hour": o.price_paise_per_gpu_hour,
             "fee_bps": self._c.market_fee_bps,
@@ -440,14 +440,46 @@ class ComputeService:
         if mine:
             view["node_id"] = o.node_id
             view["device_ids"] = list(o.device_ids or [])
+            view["shared_with"] = list(o.shared_with or [])
         return view
+
+    @staticmethod
+    def _may_see(o: MarketOffer, workspace_id: str, slug: str) -> bool:
+        """A private listing is for its owner and the workspaces it is shared with."""
+        return o.visibility != "private" or o.workspace_id == workspace_id or slug in (o.shared_with or [])
+
+    @staticmethod
+    def _slug(s, workspace_id: str) -> str:
+        ws = s.get(Workspace, workspace_id)
+        return str(ws.slug) if ws is not None else ""
+
+    def _sharing(self, s, workspace_id: str, body: dict, visibility: str, shared: list) -> tuple[str, list[str]]:
+        """Validated (visibility, shared_with) after applying `body` over the current values."""
+        visibility = body.get("visibility", visibility)
+        if visibility not in ("public", "private"):
+            raise err("INVALID_FIELD", "visibility must be 'public' or 'private'")
+        if visibility == "public":
+            return visibility, []
+        shared = body.get("shared_with", shared)
+        if not isinstance(shared, list) or len(shared) > 50 or not all(isinstance(x, str) for x in shared):
+            raise err("INVALID_FIELD", "shared_with must be a list of at most 50 workspace slugs")
+        own = self._slug(s, workspace_id)
+        slugs = sorted({x.strip().lower() for x in shared if x.strip()} - {own})
+        known = set(s.scalars(select(Workspace.slug).where(Workspace.slug.in_(slugs))))
+        for slug in slugs:
+            if slug not in known:
+                raise err("UNKNOWN_WORKSPACE", f"there is no workspace with the slug {slug!r}")
+        return visibility, slugs
 
     def list_offers(self, workspace_id: str, mine: bool = False) -> list[dict]:
         now = self._now()
         with self._sf() as s:
+            slug = self._slug(s, workspace_id)
             q = select(MarketOffer).where(MarketOffer.status != "retired")
             q = q.where(MarketOffer.workspace_id == workspace_id) if mine else q.where(MarketOffer.status == "listed")
-            offers = [self._offer_view(s, o, workspace_id, now) for o in s.scalars(q)]
+            offers = [
+                self._offer_view(s, o, workspace_id, now) for o in s.scalars(q) if self._may_see(o, workspace_id, slug)
+            ]
         # Cheapest available first: the comparison a renter actually makes.
         offers.sort(key=lambda o: (not o["available"], o["price_paise_per_gpu_hour"], o["title"]))
         return offers
@@ -487,9 +519,12 @@ class ComputeService:
         title = _text(body, "title", 3, 120)
         region = _text(body, "region", 2, 80)
         description = _text(body, "description", 0, 2000, default="")
-        price = _int(body, "price_paise_per_gpu_hour", 0, MIN_PRICE_PAISE, MAX_PRICE_PAISE)
         node_id = str(body.get("node_id", ""))
         with self._sf() as s:
+            visibility, shared = self._sharing(s, workspace_id, body, "public", [])
+            # Sharing with a partner can be free; a public listing keeps the ₹1 minimum.
+            price = _int(body, "price_paise_per_gpu_hour", -1, 0 if visibility == "private" else MIN_PRICE_PAISE,
+                         MAX_PRICE_PAISE)
             node = s.get(Node, node_id)
             if node is None or node.workspace_id != workspace_id or node.revoked:
                 raise err("NODE_NOT_FOUND", "unknown node", 404)
@@ -514,10 +549,11 @@ class ComputeService:
                 id=new_id("off"), workspace_id=workspace_id, node_id=node_id, title=title, description=description,
                 region=region, gpu_model=model or "GPU", gpu_count=len(devices), vram_bytes_per_gpu=vram,
                 device_ids=devices, price_paise_per_gpu_hour=price, status="listed", created_by=actor,
-                created_at=now, updated_at=now,
+                visibility=visibility, shared_with=shared, created_at=now, updated_at=now,
             )
             s.add(offer)
-            self._audit(s, workspace_id, actor, "offer_listed", f"{offer.id} {price} paise/GPU-hour", node_id)
+            self._audit(s, workspace_id, actor, "offer_listed",
+                        f"{offer.id} {price} paise/GPU-hour {visibility} {','.join(shared)}", node_id)
             s.commit()
             return self._offer_view(s, offer, workspace_id, now)
 
@@ -540,14 +576,20 @@ class ComputeService:
                 o.region = _text(body, "region", 2, 80)
             if "description" in body:
                 o.description = _text(body, "description", 0, 2000)
+            o.visibility, o.shared_with = self._sharing(s, workspace_id, body, o.visibility, list(o.shared_with or []))
             if "price_paise_per_gpu_hour" in body:
-                o.price_paise_per_gpu_hour = _int(body, "price_paise_per_gpu_hour", 0, MIN_PRICE_PAISE, MAX_PRICE_PAISE)
+                o.price_paise_per_gpu_hour = _int(
+                    body, "price_paise_per_gpu_hour", 0, 0 if o.visibility == "private" else MIN_PRICE_PAISE,
+                    MAX_PRICE_PAISE,
+                )
+            if o.visibility == "public" and o.price_paise_per_gpu_hour < MIN_PRICE_PAISE:
+                raise err("INVALID_FIELD", "a public listing must cost at least ₹1 per GPU-hour: set a price")
             if "status" in body:
                 if body["status"] not in ("listed", "paused"):
                     raise err("INVALID_FIELD", "status must be 'listed' or 'paused'")
                 o.status = body["status"]
             o.updated_at = now
-            self._audit(s, workspace_id, actor, "offer_updated", f"{o.id} status={o.status}", o.node_id)
+            self._audit(s, workspace_id, actor, "offer_updated", f"{o.id} status={o.status} {o.visibility}", o.node_id)
             s.commit()
             return self._offer_view(s, o, workspace_id, now)
 
@@ -601,8 +643,9 @@ class ComputeService:
               release_after_job_id: Optional[str] = None) -> Rental:
         # Row lock on Postgres so two renters cannot both win; SQLite has one writer.
         offer = s.scalar(select(MarketOffer).where(MarketOffer.id == offer_id).with_for_update())
-        if offer is None or offer.status != "listed":
-            raise err("NOT_FOUND", "listing not found", 404)
+        slug = self._slug(s, workspace_id)
+        if offer is None or offer.status != "listed" or not self._may_see(offer, workspace_id, slug):
+            raise err("NOT_FOUND", "listing not found", 404)  # a private listing does not reveal that it exists
         if offer.workspace_id == workspace_id:
             raise err("OWN_LISTING", "this is your own node; run jobs on it directly, at no charge", 409)
         available, why = self._offer_availability(s, offer, now)
@@ -611,7 +654,7 @@ class ComputeService:
         hourly = offer.price_paise_per_gpu_hour * offer.gpu_count
         need = hourly + fee_for(hourly, self._c.market_fee_bps)
         have = self._spendable(s, workspace_id, now)
-        if have < need:
+        if need > 0 and have < need:  # a free listing needs no credit
             raise ControlServiceError(
                 "INSUFFICIENT_FUNDS",
                 f"renting needs one hour of credit up front (₹{need / 100:.2f}); available ₹{max(have, 0) / 100:.2f}",
@@ -758,7 +801,8 @@ class ComputeService:
                 if not may_rent:
                     raise err("FORBIDDEN", "renting requires the admin role or higher", 403)
                 offer = s.get(MarketOffer, str(offer_id))
-                if offer is not None and need > offer.gpu_count:
+                visible = offer is not None and self._may_see(offer, workspace_id, self._slug(s, workspace_id))
+                if offer is not None and visible and need > offer.gpu_count:
                     raise err("TOO_LARGE", f"the job needs {need} GPUs; this listing has {offer.gpu_count}", 409)
                 job.rental_id = self._rent(s, workspace_id, actor, str(offer_id), now, release_after_job_id=job.id).id
             elif rental_id:
@@ -1279,11 +1323,12 @@ class ComputeService:
                     dirty |= self._end_rental(s, r, "node_lost", now, ended_at=end)
                     continue
                 self._meter(s, r, now)
-                if r.consumer_workspace_id not in broke and self._spendable(s, r.consumer_workspace_id, now) <= 0:
+                if (r.price_paise_per_gpu_hour > 0 and r.consumer_workspace_id not in broke
+                        and self._spendable(s, r.consumer_workspace_id, now) <= 0):
                     broke.add(r.consumer_workspace_id)
             for ws in broke:
                 for r in list(s.scalars(select(Rental).where(
-                    Rental.consumer_workspace_id == ws, Rental.status == "active"
+                    Rental.consumer_workspace_id == ws, Rental.status == "active", Rental.price_paise_per_gpu_hour > 0
                 ))):
                     dirty |= self._end_rental(s, r, "insufficient_funds", now)
             dirty |= self._advance(s, now)

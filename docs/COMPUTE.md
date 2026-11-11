@@ -135,6 +135,19 @@ In the console, open **Marketplace → List a node**. The node must be online wi
 - You can end a rental (for maintenance). The renter's jobs fail and you are paid for the time used.
 - **You cannot see what a renter runs.** The node page shows that a GPU is taken and nothing else: not the image, arguments, environment or logs.
 
+## Share with partner institutes
+
+A consortium or a pair of partner universities can share GPUs without a public market.
+
+In the console, **Marketplace → List a node**, choose **Private: only workspaces you name** and type the partners' workspace slugs, separated by commas (a slug is shown on each workspace's Settings page). Over the API, `POST /api/w/{ws}/market/offers` and `PATCH /api/w/{ws}/market/offers/{id}` take `visibility` (`"public"` or `"private"`, default public) and `shared_with` (a list of slugs).
+
+- A private listing is listed to, and rentable by, only the workspaces in `shared_with` and its owner. Everyone else gets `404 listing not found` when they try to rent it, the same answer as for an id that does not exist, and a job that asks to run on it (`offer_id`) gets the same 404.
+- A slug that matches no workspace is refused with `400 UNKNOWN_WORKSPACE` naming it. Slugs are lower-cased, de-duplicated, and your own is dropped. A partner sees `visibility: "private"` on the listing (the console shows "Shared with you") but not who else it is shared with; only the owner sees `shared_with`.
+- A private listing may be priced at **₹0** to share it free. A public listing keeps the ₹1 minimum, including when a free private listing is made public, which needs a price. A price is always required: a missing one is an error, never "free".
+- A free rental needs no credit, posts **no ledger rows** (no zero-amount rows), and is never ended for lack of credit. It still holds the GPUs exclusively until released, and the provider can still end it. If a workspace runs out of credit, its paid rentals end and its free ones keep running.
+- Changing `shared_with` or making a listing public does not end a rental that is already running; it only decides who can rent next.
+- The console shows a free price as "Free", and the CLI as `free`.
+
 ## GPU-hour usage and monthly quotas
 
 A department head can see who used how much GPU time and cap it per person. This is for jobs on the workspace's own nodes; rented GPUs are already limited by prepaid credit.
@@ -171,7 +184,7 @@ In the console, **Billing → GPU-hour usage** has a month picker, the per-perso
 | See jobs, listings, billing | ✓ | ✓ | ✓ |
 | Run and cancel jobs, read a service's token | | ✓ | ✓ |
 | See GPU-hour usage | ✓ | ✓ | ✓ |
-| Set groups and quotas, rent, list, create API keys | | | ✓ |
+| Set groups and quotas, rent, list (public or private), create API keys | | | ✓ |
 
 API keys (`mck_…`) act in one workspace with the role you choose. They cannot manage members.
 
@@ -196,7 +209,7 @@ A payment reference can be credited only once, and a payout reference can be use
 | `MERIDIAN_CONTROL_COMPUTE_TICK` | `30` | Seconds between background passes (metering, credit, timeouts, queue) |
 | `MERIDIAN_CONTROL_NODE_LOST_SECONDS` | `300` | Silence after which a node's running replicas are declared lost |
 
-Upgrading an existing cloud: run `meridian-control migrate`. The migrations only add tables and columns.
+Upgrading an existing cloud: run `meridian-control migrate`. The migrations only add tables and columns; existing listings stay public.
 
 ## What it does not do yet
 
@@ -205,6 +218,7 @@ Upgrading an existing cloud: run `meridian-control migrate`. The migrations only
 - **Secrets.** Job environment variables are stored as plain text. Do not put tokens in them.
 - **Storage.** No managed volumes or datasets. A job brings and saves its own data.
 - **Partial rentals.** A listing is rented whole, to one renter at a time.
+- **Partner groups.** A private listing names workspaces one by one; there are no consortium objects, invitations to accept, or per-partner prices.
 - **Isolation.** A job is a hardened Docker container, not a virtual machine. A provider accepting arbitrary images should run on hosts it is prepared to treat that way.
 - **Restarts.** A failed job or service is not restarted.
 - **Multiple control replicas.** Metering and scheduling are serialized by an in-process lock, so run compute on one control replica. A multi-replica Postgres deployment needs a database advisory lock first.

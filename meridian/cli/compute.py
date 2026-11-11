@@ -159,7 +159,8 @@ def _dispatch(args: argparse.Namespace, api: Api, out: Callable[[str], None], sl
         for o in offers:
             rows.append([
                 o["id"], f"{o['gpu_count']}× {o['gpu_model']}", f"{o['vram_bytes_per_gpu'] // 1024**3} GB",
-                o["region"], rupees(o["price_paise_per_gpu_hour"]), rupees(o["hourly_total_paise"]),
+                o["region"], rupees(o["price_paise_per_gpu_hour"]) if o["price_paise_per_gpu_hour"] else "free",
+                rupees(o["hourly_total_paise"]) if o["hourly_total_paise"] else "free",
                 "available" if o["available"] else o["unavailable_reason"], o["provider"]["name"],
             ])
         _table(rows, out)

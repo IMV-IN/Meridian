@@ -149,7 +149,11 @@ export interface Offer {
   unavailable_reason: string
   provider: { name: string; slug: string }
   mine: boolean
+  /** Private listings are for the owner and the workspaces named in shared_with. */
+  visibility: "public" | "private"
   node_id?: string
+  /** Workspace slugs a private listing is shared with (the owner sees them). */
+  shared_with?: string[]
   created_at: string | null
 }
 
@@ -365,7 +369,18 @@ export const cloud = {
     request<{ offers: Offer[] }>(`${w(ws)}/market/offers${mine ? "?mine=true" : ""}`, { ...o, signal }).then((r) => r.offers),
   listableNodes: (ws: string, signal?: AbortSignal) =>
     request<{ nodes: ListableNode[] }>(`${w(ws)}/market/listable-nodes`, { ...o, signal }).then((r) => r.nodes),
-  createOffer: (ws: string, body: { node_id: string; title: string; region: string; description: string; price_paise_per_gpu_hour: number }) =>
+  createOffer: (
+    ws: string,
+    body: {
+      node_id: string
+      title: string
+      region: string
+      description: string
+      price_paise_per_gpu_hour: number
+      visibility?: "public" | "private"
+      shared_with?: string[]
+    },
+  ) =>
     request<Offer>(`${w(ws)}/market/offers`, { ...o, method: "POST", body }),
   updateOffer: (ws: string, id: string, body: Partial<{ status: "listed" | "paused"; price_paise_per_gpu_hour: number }>) =>
     request<Offer>(`${w(ws)}/market/offers/${encodeURIComponent(id)}`, { ...o, method: "PATCH", body }),

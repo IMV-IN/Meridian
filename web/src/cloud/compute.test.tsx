@@ -11,7 +11,7 @@ import { ThemeProvider } from "@/providers/theme-provider"
 
 import { rupeesToPaise, type Billing, type CloudInfo, type JobDetail, type Member, type Offer, type Rental, type Usage, type WorkspaceRole } from "./api"
 import { cloudRoutes } from "./app"
-import { endReason, parseEnv, splitArgs } from "./compute"
+import { endReason, parseEnv, parseSlugs, priceLabel, splitArgs } from "./compute"
 import { CloudSessionProvider } from "./session"
 
 const INFO: CloudInfo = {
@@ -45,6 +45,7 @@ const OFFER: Offer = {
   unavailable_reason: "",
   provider: { name: "Mumbai DC", slug: "mumbai-dc" },
   mine: false,
+  visibility: "public",
   created_at: null,
 }
 
@@ -160,6 +161,11 @@ function serve(role: WorkspaceRole, routes: Record<string, Handler>, platformAdm
   return calls
 }
 
+/** jsdom lacks the pointer APIs Radix's Select uses. */
+function stubPointerApis() {
+  Object.assign(Element.prototype, { hasPointerCapture: () => false, setPointerCapture: () => undefined, releasePointerCapture: () => undefined, scrollIntoView: () => undefined })
+}
+
 function renderAt(path: string) {
   const router = createMemoryRouter(cloudRoutes, { initialEntries: [path] })
   render(
@@ -217,6 +223,13 @@ describe("compute helpers", () => {
     expect(endReason("insufficient_funds")).toBe("Ran out of credit")
     expect(endReason("node_lost")).toBe("Node went offline")
     expect(endReason("something_new")).toBe("Ended")
+  })
+
+  it("says Free for a free listing and parses typed workspace slugs", () => {
+    expect(priceLabel(0)).toBe("Free")
+    expect(priceLabel(18050)).toBe("₹180.50")
+    expect(parseSlugs(" Partner-Uni, other-lab ,partner-uni\nthird")).toEqual(["partner-uni", "other-lab", "third"])
+    expect(parseSlugs("  ,, ")).toEqual([])
   })
 })
 
@@ -378,8 +391,7 @@ describe("GPU-hour usage and quotas", () => {
     expect(csv.getAttribute("href")).toMatch(/^\/api\/w\/w1\/usage\?format=csv&month=\d{4}-\d{2}$/)
     expect(csv).toHaveAttribute("download")
 
-    // jsdom lacks the pointer APIs Radix's Select uses.
-    Object.assign(Element.prototype, { hasPointerCapture: () => false, setPointerCapture: () => undefined, releasePointerCapture: () => undefined, scrollIntoView: () => undefined })
+    stubPointerApis()
     await user.click(screen.getByRole("combobox", { name: "Month" }))
     const options = await screen.findAllByRole("option")
     expect(options).toHaveLength(12)
@@ -424,5 +436,80 @@ describe("GPU-hour usage and quotas", () => {
     expect(screen.getByText("Default")).toBeInTheDocument() // the member has no quota of their own
     expect(screen.queryByRole("button", { name: /Compute limits/ })).not.toBeInTheDocument()
     expect(await screen.findByLabelText("Default quota (GPU-hours per month)")).toBeDisabled()
+  })
+})
+
+describe("Private sharing", () => {
+  const SHARED: Offer = {
+    ...OFFER,
+    id: "off_2",
+    title: "Consortium GPUs",
+    visibility: "private",
+    price_paise_per_gpu_hour: 0,
+    hourly_paise: 0,
+    hourly_fee_paise: 0,
+    hourly_total_paise: 0,
+    provider: { name: "IIT Madras", slug: "iit-madras" },
+  }
+
+  it("marks a private listing as shared with you, shows it as free, and rents it without credit", async () => {
+    const calls = serve("admin", {
+      "/api/w/w1/market/offers": () => json(200, { offers: [SHARED, OFFER] }),
+      "/api/w/w1/billing": () => json(200, billing(0)),
+      "POST /api/w/w1/market/rentals": () => json(201, { ...RENTAL, price_paise_per_gpu_hour: 0, hourly_total_paise: 0 }),
+    })
+    const user = userEvent.setup()
+    renderAt("/marketplace")
+
+    expect(await screen.findByText("Consortium GPUs")).toBeInTheDocument()
+    expect(screen.getAllByText("Shared with you")).toHaveLength(1) // the public listing is not marked
+    expect(screen.getAllByText("Free").length).toBeGreaterThan(0)
+    expect(screen.queryByText("₹0.00")).not.toBeInTheDocument()
+
+    await user.click(screen.getAllByRole("button", { name: "Rent" })[0])
+    const dialog = await screen.findByRole("dialog")
+    expect(within(dialog).getByText(/shares this listing with you at no charge/)).toBeInTheDocument()
+    expect(within(dialog).queryByRole("alert")).not.toBeInTheDocument() // no credit warning at zero balance
+    await user.click(within(dialog).getByRole("button", { name: "Rent for free" }))
+    await waitFor(() => expect(calls.find((c) => c.method === "POST")?.body).toEqual({ offer_id: "off_2" }))
+  })
+
+  it("lists a node privately for named workspaces at ₹0", async () => {
+    stubPointerApis()
+    const calls = serve("admin", {
+      "/api/w/w1/market/listable-nodes": () =>
+        json(200, { nodes: [{ node_id: "node_1", display_name: "gpu-a", gpu_model: "NVIDIA H100", gpu_count: 2, vram_bytes_per_gpu: 80 * GB, listable: true, reason: "" }] }),
+      "POST /api/w/w1/market/offers": (b) => json(201, { ...OFFER, ...(b as object) }),
+    })
+    const user = userEvent.setup()
+    renderAt("/marketplace?tab=listings&list=1")
+
+    const dialog = await screen.findByRole("dialog")
+    await user.click(await within(dialog).findByRole("combobox", { name: "Node" }))
+    await user.click(await screen.findByRole("option", { name: /gpu-a/ }))
+    await user.type(within(dialog).getByLabelText("Title"), "Free for the consortium")
+    await user.type(within(dialog).getByLabelText("Location"), "Chennai")
+    await user.type(within(dialog).getByLabelText(/Price per GPU-hour/), "0")
+    const list = within(dialog).getByRole("button", { name: "List on marketplace" })
+    expect(list).toBeDisabled() // a public listing needs at least ₹1
+    expect(within(dialog).getByText(/Enter an amount of ₹1 or more/)).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("combobox", { name: "Who can rent it" }))
+    await user.click(await screen.findByRole("option", { name: /Private/ }))
+    expect(list).toBeDisabled() // private, but nobody to share it with yet
+    await user.type(within(dialog).getByLabelText("Share with workspaces"), "iit-delhi, nit-trichy")
+    expect(within(dialog).getByText("Shared free: partners pay nothing and you earn nothing.")).toBeInTheDocument()
+    await user.click(list)
+    await waitFor(() =>
+      expect(calls.find((c) => c.method === "POST" && c.path === "/api/w/w1/market/offers")?.body).toEqual({
+        node_id: "node_1",
+        title: "Free for the consortium",
+        region: "Chennai",
+        description: "",
+        price_paise_per_gpu_hour: 0,
+        visibility: "private",
+        shared_with: ["iit-delhi", "nit-trichy"],
+      }),
+    )
   })
 })

@@ -1076,6 +1076,180 @@ def test_cli_prints_usage_per_person(lab, monkeypatch):
     assert main(["usage", "--month", "bad"], client=TestClient(lab.app), out=lines.append) == 1
 
 
+# ── private sharing between institutes ────────────────────────────────────
+
+
+def slug_of(c, ws) -> str:
+    return c.get(f"/api/w/{ws}").json()["slug"]
+
+
+def share(world, **body):
+    """Edit the world's listing as its provider."""
+    return world.provider.patch(f"/api/w/{world.pws}/market/offers/{world.offer['id']}", headers=CSRF, json=body)
+
+
+def test_a_private_listing_is_visible_and_rentable_only_by_the_workspaces_it_is_shared_with(
+    client, tmp_path, clock, world
+):
+    outsider = login(client, tmp_path, "x@other.in", clock)
+    ows = workspace(outsider, "Other Institute")
+    world.node.sync()  # the sign-in moved the clock; keep the host's lease alive
+    world.credit(ows, 10_000_00, "UTR-0002")
+    r = share(world, visibility="private", shared_with=[slug_of(world.consumer, world.cws)])
+    assert r.status_code == 200, r.text
+    assert r.json()["visibility"] == "private" and r.json()["shared_with"] == [slug_of(world.consumer, world.cws)]
+
+    seen = world.consumer.get(f"/api/w/{world.cws}/market/offers").json()["offers"]
+    assert [o["id"] for o in seen] == [world.offer["id"]] and seen[0]["visibility"] == "private"
+    assert "shared_with" not in seen[0] and "node_id" not in seen[0]  # who else is a partner is the owner's business
+    assert world.provider.get(f"/api/w/{world.pws}/market/offers").json()["offers"][0]["mine"] is True
+    assert outsider.get(f"/api/w/{ows}/market/offers").json()["offers"] == []
+
+    # A workspace that was not invited gets the same 404 as for an id that does not exist, however it asks.
+    missing = outsider.post(f"/api/w/{ows}/market/rentals", headers=CSRF, json={"offer_id": "off_nope"})
+    hidden = outsider.post(f"/api/w/{ows}/market/rentals", headers=CSRF, json={"offer_id": world.offer["id"]})
+    assert hidden.status_code == missing.status_code == 404
+    assert hidden.json()["error"]["message"] == missing.json()["error"]["message"]
+    too_big = outsider.post(f"/api/w/{ows}/jobs", headers=CSRF, json={
+        "image": IMAGE, "gpus_per_replica": 3, "offer_id": world.offer["id"],
+    })
+    assert too_big.status_code == 404  # not "TOO_LARGE", which would confirm the listing exists
+    shared_too_big = world.submit(gpus_per_replica=3, offer_id=world.offer["id"])
+    assert shared_too_big.status_code == 409 and shared_too_big.json()["error"]["code"] == "TOO_LARGE"
+
+    assert world.rent()["offer"]["id"] == world.offer["id"]  # the partner can rent it
+
+    # Sharing it with someone else later does not end the partner's rental, but adds the new partner.
+    share(world, shared_with=[slug_of(outsider, ows)])
+    assert world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]["status"] == "active"
+    assert world.consumer.get(f"/api/w/{world.cws}/market/offers").json()["offers"] == []
+    assert [o["id"] for o in outsider.get(f"/api/w/{ows}/market/offers").json()["offers"]] == [world.offer["id"]]
+
+
+def test_sharing_is_validated_and_making_a_listing_public_again_forgets_the_partners(world):
+    partner = slug_of(world.consumer, world.cws)
+    r = share(world, visibility="private", shared_with=[partner, "no-such-lab"])
+    assert r.status_code == 400 and r.json()["error"]["code"] == "UNKNOWN_WORKSPACE"
+    assert "'no-such-lab'" in r.json()["error"]["message"]
+    for bad in ({"visibility": "secret"}, {"visibility": "private", "shared_with": "lab"},
+                {"visibility": "private", "shared_with": [5]}, {"visibility": "private", "shared_with": ["a"] * 51}):
+        assert share(world, **bad).status_code == 400, bad
+    assert world.offer["visibility"] == "public" and world.offer["shared_with"] == []
+
+    own = slug_of(world.provider, world.pws)
+    ok = share(world, visibility="private", shared_with=[f" {partner.upper()} ", partner, own])
+    assert ok.json()["shared_with"] == [partner]  # normalised, de-duplicated, and not including the owner
+    back = share(world, visibility="public")
+    assert back.json()["visibility"] == "public" and back.json()["shared_with"] == []
+    assert len(world.consumer.get(f"/api/w/{world.cws}/market/offers").json()["offers"]) == 1
+
+
+def test_only_a_private_listing_may_be_free(client, tmp_path, clock, world):
+    partner = slug_of(world.consumer, world.cws)
+    # Public listings keep the ₹1 minimum, on create and on update.
+    assert share(world, price_paise_per_gpu_hour=0).status_code == 400
+    assert share(world, visibility="private", shared_with=[partner], price_paise_per_gpu_hour=0).json()[
+        "hourly_total_paise"
+    ] == 0
+    r = share(world, visibility="public")  # now free and public: refused until it has a price
+    assert r.status_code == 400 and "at least ₹1" in r.json()["error"]["message"]
+    assert share(world, visibility="public", price_paise_per_gpu_hour=100).status_code == 200
+
+    other = FakeNode(client.app, world.provider, world.pws)
+    body = {"node_id": other.node_id, "title": "Free for partners", "region": "Pune"}
+    free = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+        **body, "visibility": "private", "shared_with": [partner], "price_paise_per_gpu_hour": 0,
+    })
+    assert free.status_code == 201 and free.json()["price_paise_per_gpu_hour"] == 0
+    assert free.json()["hourly_total_paise"] == 0 and free.json()["shared_with"] == [partner]
+    third = FakeNode(client.app, world.provider, world.pws)
+    for extra in ({"price_paise_per_gpu_hour": 0}, {}, {"visibility": "private"}, {"visibility": "public",
+                                                                                    "price_paise_per_gpu_hour": 0}):
+        r = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+            **body, "node_id": third.node_id, **extra,
+        })
+        assert r.status_code == 400, extra  # a missing price is never silently free
+
+
+def test_a_free_rental_needs_no_credit_and_posts_no_ledger_rows(client, tmp_path, clock):
+    world = World(client, tmp_path, clock, credit=0)  # the renter has no credit at all
+    partner = slug_of(world.consumer, world.cws)
+    share(world, visibility="private", shared_with=[partner], price_paise_per_gpu_hour=0)
+    rental = world.rent()
+    assert rental["price_paise_per_gpu_hour"] == 0 and rental["amount_paise"] == 0 and rental["hourly_total_paise"] == 0
+
+    job = world.submit(rental_id=rental["id"], gpus_per_replica=2).json()
+    world.node.sync()
+    world.tick(3 * 3600)  # three hours: a paid rental with no credit would have been ended long ago
+    assert world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"][0]["status"] == "active"
+    assert world.consumer.get(f"/api/w/{world.cws}/jobs/{job['id']}").json()["status"] == "running"
+    world.tick(10 * 3600)
+
+    done = world.consumer.post(f"/api/w/{world.cws}/market/rentals/{rental['id']}/release", headers=CSRF).json()
+    assert done["status"] == "ended" and done["amount_paise"] == 0 and done["seconds"] == 13 * 3600
+    for ws, c in ((world.cws, world.consumer), (world.pws, world.provider)):
+        b = world.balance(c, ws)
+        assert b["balance_paise"] == 0 and b["entries"] == [] and b["burn_paise_per_hour"] == 0
+    with world.app.state.compute._sf() as s:
+        assert s.scalar(select(func.count()).select_from(LedgerEntry)) == 0  # not even a zero-amount row
+
+
+def test_a_free_rental_survives_while_a_paid_one_runs_out_of_credit(client, tmp_path, clock):
+    world = World(client, tmp_path, clock, credit=300_00)  # a little over an hour of the paid listing
+    paid_offer = world.offer
+    free_node = FakeNode(client.app, world.provider, world.pws, name="free-host")
+    partner = slug_of(world.consumer, world.cws)
+    free = world.provider.post(f"/api/w/{world.pws}/market/offers", headers=CSRF, json={
+        "node_id": free_node.node_id, "title": "Free for partners", "region": "Pune", "visibility": "private",
+        "shared_with": [partner], "price_paise_per_gpu_hour": 0,
+    }).json()
+    free_rental = world.consumer.post(f"/api/w/{world.cws}/market/rentals", headers=CSRF, json={"offer_id": free["id"]})
+    paid_rental = world.consumer.post(
+        f"/api/w/{world.cws}/market/rentals", headers=CSRF, json={"offer_id": paid_offer["id"]}
+    )
+    assert free_rental.status_code == paid_rental.status_code == 201
+    for _ in range(3):
+        world.clock.advance(3600)
+        free_node.sync()  # both hosts keep reporting
+        world.tick()
+    rentals = {r["id"]: r for r in world.consumer.get(f"/api/w/{world.cws}/market/rentals").json()["rentals"]}
+    assert rentals[paid_rental.json()["id"]]["end_reason"] == "insufficient_funds"
+    assert rentals[free_rental.json()["id"]]["status"] == "active"
+    entries = world.balance(world.consumer, world.cws)["entries"]
+    assert entries and all(e["amount_paise"] != 0 for e in entries)  # no zero-amount rows
+
+
+def test_cli_lists_a_free_private_listing_as_free(world, monkeypatch):
+    from meridian.cli.compute import main
+
+    share(world, visibility="private", shared_with=[slug_of(world.consumer, world.cws)], price_paise_per_gpu_hour=0)
+    key = world.consumer.post(f"/api/w/{world.cws}/api-keys", headers=CSRF, json={"name": "cli", "role": "viewer"})
+    monkeypatch.setenv("MERIDIAN_WORKSPACE", world.cws)
+    monkeypatch.setenv("MERIDIAN_API_KEY", key.json()["token"])
+    lines: list[str] = []
+    assert main(["offers"], client=TestClient(world.app), out=lines.append) == 0
+    assert lines[1].split()[-6:] == ["Mumbai", "free", "free", "available", "Mumbai", "DC"]
+
+
+def test_migration_adds_listing_visibility_with_public_as_the_default(tmp_path):
+    pytest.importorskip("alembic")
+    from sqlalchemy import create_engine, inspect, text
+
+    from meridian_control.db import run_migrations
+
+    url = f"sqlite:///{tmp_path}/m.db"
+    run_migrations(url)
+    cols = {c["name"]: c for c in inspect(create_engine(url)).get_columns("market_offers")}
+    assert {"visibility", "shared_with"} <= set(cols)
+    with create_engine(url).begin() as conn:  # a row written without the new columns is public and shared with no one
+        conn.execute(text(
+            "INSERT INTO market_offers (id, workspace_id, node_id, title, description, region, gpu_model, gpu_count,"
+            " vram_bytes_per_gpu, device_ids, price_paise_per_gpu_hour, status, created_by, created_at, updated_at)"
+            " VALUES ('o','w','n','t','','r','m',1,0,'[]',100,'listed','','2026-01-01','2026-01-01')"
+        ))
+        assert conn.execute(text("SELECT visibility, shared_with FROM market_offers")).one() == ("public", "[]")
+
+
 # ── CLI ───────────────────────────────────────────────────────────────────
 
 

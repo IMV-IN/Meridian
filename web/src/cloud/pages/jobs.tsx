@@ -188,7 +188,7 @@ function NewJobBody({ onClose, offerId }: { onClose: () => void; offerId: string
               {canRent &&
                 rentable.map((o) => (
                   <SelectItem key={o.id} value={`offer:${o.id}`}>
-                    Rent for this job: {o.gpu_count}× {o.gpu_model}, {o.region} · {formatINR(o.hourly_total_paise)}/hour
+                    Rent for this job: {o.gpu_count}× {o.gpu_model}, {o.region} · {o.hourly_total_paise === 0 ? "free" : `${formatINR(o.hourly_total_paise)}/hour`}
                   </SelectItem>
                 ))}
             </SelectContent>
@@ -200,7 +200,9 @@ function NewJobBody({ onClose, offerId }: { onClose: () => void; offerId: string
               </FieldError>
             ) : (
               <FieldDescription>
-                Rents the whole listing at {formatINR(offer.hourly_total_paise)}/hour, billed per second, and releases it when the job ends.
+                {offer.hourly_total_paise === 0
+                  ? "Rents the whole listing, which is shared with you free of charge, and releases it when the job ends."
+                  : `Rents the whole listing at ${formatINR(offer.hourly_total_paise)}/hour, billed per second, and releases it when the job ends.`}
               </FieldDescription>
             )
           ) : (

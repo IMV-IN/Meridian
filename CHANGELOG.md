@@ -4,6 +4,11 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- **Private sharing between institutes.** A listing can be `private` and shared with named workspaces
+  (`visibility`, `shared_with`). Only they see or rent it; anyone else gets a 404. A private listing can cost
+  ₹0: a free rental needs no credit and posts no ledger rows. Console: "Who can rent it" in the list dialog,
+  "Shared with you" on cards, "Free" for ₹0. Migration `e8a3c5d17b94` (additive; existing listings stay public).
+
 - **Meridian Compute for institutes: GPU-hour usage and per-member monthly quotas** ([`docs/COMPUTE.md`](docs/COMPUTE.md)).
   - `GET /api/w/{ws}/usage?month=YYYY-MM` (and `?format=csv`, `meridian compute usage`) reports GPU-hours per
     person and group, split into own-node and rented usage; API-key jobs count for the key's creator.
