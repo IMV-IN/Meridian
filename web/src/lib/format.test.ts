@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest"
 import {
   backendLabel,
   formatBytes,
+  feeFor,
   formatINR,
   formatVram,
   formatEwma,
@@ -12,6 +13,7 @@ import {
   formatPercent,
   formatSeconds,
   percentile,
+  rentalDue,
   statusClass,
 } from "./format"
 import { capabilitiesFor } from "./rbac"
@@ -88,5 +90,20 @@ describe("formatINR", () => {
   it("formats VRAM in GB", () => {
     expect(formatVram(80 * 1024 ** 3)).toBe("80 GB")
     expect(formatVram(0)).toBe("—")
+  })
+})
+
+describe("marketplace money", () => {
+  it("rounds the fee half up, like the control plane", () => {
+    expect(feeFor(12000)).toBe(240)
+    expect(feeFor(25)).toBe(1) // 0.5 paise rounds up
+    expect(feeFor(24)).toBe(0)
+    expect(feeFor(0)).toBe(0)
+  })
+  it("rounds what a provider has earned down", () => {
+    expect(rentalDue(12000, 2, 1800)).toBe(12000)
+    expect(rentalDue(100, 1, 35)).toBe(0)
+    expect(rentalDue(100, 1, 36)).toBe(1)
+    expect(rentalDue(100, 1, -5)).toBe(0)
   })
 })

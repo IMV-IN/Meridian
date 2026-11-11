@@ -71,6 +71,16 @@ export function formatINR(paise: number | null | undefined, opts: { signed?: boo
   return `${sign}₹${whole}.${String(abs % 100).padStart(2, "0")}`
 }
 
+/** Meridian's fee on an amount of paise, rounded half up: matches meridian_control.compute.fee_for. */
+export function feeFor(paise: number, bps = 200): number {
+  return Math.floor((paise * bps + 5000) / 10000)
+}
+
+/** What a provider has earned after `seconds`, in paise, rounded down: matches meridian_control.compute.rental_due. */
+export function rentalDue(pricePaisePerGpuHour: number, gpus: number, seconds: number): number {
+  return Math.floor((pricePaisePerGpuHour * gpus * Math.max(0, seconds)) / 3600)
+}
+
 /** VRAM in whole GB, the way GPUs are sold: 85899345920 → "80 GB". */
 export function formatVram(bytes: number | null | undefined): string {
   if (!bytes) return "—"

@@ -20,7 +20,8 @@ import {
   STRATEGIES,
   type InstallOptions,
 } from "./flags"
-import { SiteFooter, SiteHeader } from "./landing"
+import { SiteFooter, SiteHeader } from "./chrome"
+import { usePageMeta } from "./site-lib"
 
 const STORE = "meridian.install-options"
 
@@ -159,6 +160,7 @@ function TextField({
 }
 
 export function InstallPage() {
+  usePageMeta("Install a Meridian gateway", "Choose how the gateway should run and copy one install command. Secrets are asked during the install, never put in the command.")
   const [o, setO] = useState<InstallOptions>(load)
   const set = <K extends keyof InstallOptions>(key: K, value: InstallOptions[K]) => setO((prev) => ({ ...prev, [key]: value }))
   useEffect(() => {
@@ -178,7 +180,7 @@ export function InstallPage() {
   return (
     <div className="min-h-svh pb-20 lg:pb-0">
       <SiteHeader />
-      <main className="mx-auto max-w-6xl px-4 pt-8 sm:px-8 sm:pt-12">
+      <main id="main" className="mx-auto max-w-6xl px-4 pt-8 sm:px-8 sm:pt-12">
         <h1 className="site-display text-[clamp(2.5rem,6vw,4.5rem)]">Install a gateway</h1>
         <p className="mt-4 max-w-[62ch] text-lg leading-relaxed text-deep">
           Choose how the gateway should run. The command updates as you go; paste it into a terminal on the machine that will run the
