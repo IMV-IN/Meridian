@@ -43,10 +43,12 @@ src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "W", "B", "UP", "S"]
-ignore = ["S101"]
+ignore = ["S101", "UP031", "UP032"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S", "B"]
+# The runner must stay source-compatible with Python 3.8.
+"src/meridian_compute/_runner.py" = ["UP"]
 
 [tool.mypy]
 strict = true
